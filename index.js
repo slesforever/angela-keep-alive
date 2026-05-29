@@ -188,7 +188,7 @@ client.on('messageCreate', async (message) => {
 });
 
 // 🔒 從 Render 環境變數讀取 Token (安全防外洩)
-const TOKEN = "MTMzNDEyNTI2Nzc3MjMzNjcwMA.GPgM2M.X9ZlXvWp_oX8U7vT-L9pQW4aR5c8V1b2M3N4O5";
+const TOKEN = "MTUwMTE0OTg4OTUyNTA1NTYyMA.GbgFIv.J5i85tETPkm4hrn7jc6b9udiQqrRyeJz3xgEs0";
 
 client.login(TOKEN).catch(err => {
     console.error("❌ 機器人登入失敗，請檢查 Token 是否正確或過期：", err);
