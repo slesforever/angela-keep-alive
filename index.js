@@ -97,7 +97,7 @@ client.on('messageCreate', async (message) => {
 });
 
 // 🔒 這裡已經幫你自動帶入你之前配置的專屬機器人 Key，不用再改了！
-const TOKEN = "d39da4bcf2e20fa6e1f8e97f60817d597afc8a0cf2b9e8c308a88beaaf224840";
+const TOKEN = "rAUsWK5nz3UPNXBD975C0B6cAQUim2wl";
 
 client.login(TOKEN).catch(err => {
     console.error("❌ 機器人登入失敗，請檢查 Token 是否過期：", err);
