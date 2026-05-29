@@ -1,6 +1,9 @@
 const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 const express = require('express');
-const fetch = require('node-fetch'); // 引入網路抓取功能
+
+// 安全相容相容各 Node.js 版本的 fetch 寫法
+const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -33,9 +36,9 @@ const NOTIFY_CHANNEL_ID = "1402282604165730348";
 client.once('ready', () => {
     console.log(`🤖 遵從您的指示，Angela 已成功登入為：${client.user.tag}`);
     
-    // 機器人上線後，啟動 Twitter 定時監聽輪詢 (每 10 分鐘檢查一次，避免觸發 API 上限)
+    // 機器人上線後，啟動 Twitter 定時監聽輪詢 (每 10 分鐘檢查一次)
     setInterval(checkTwitterUpdates, 10 * 60 * 1000);
-    // 上線時先立刻檢查一次
+    // 上線時立刻先檢查一次
     checkTwitterUpdates();
 });
 
@@ -45,7 +48,7 @@ async function checkTwitterUpdates() {
         console.log("⏳ Angela 正在觀測邊獄公司 Twitter 狀態...");
         totalTweetsChecked++;
 
-        // ⚠️ 備註：此處使用公開的社交媒體聚合橋接 API (如 RSSHub 或 Nitter 轉接) 抓取推文，免去申請企業級 X API 的複雜權限
+        // 使用 RSSHub 橋接公開推文
         const response = await fetch('https://rsshub.app/twitter/user/LimbusCompany_B', {
             headers: { 'User-Agent': 'Mozilla/5.0' }
         });
@@ -54,7 +57,7 @@ async function checkTwitterUpdates() {
         
         const text = await response.text();
         
-        // 簡易的 XML/RSS 欄位正則解析最新推文
+        // 正則解析最新推文
         const itemRegex = /<item>[\s\S]*?<title><!\[CDATA\[([\s\S]*?)\]\]><\/title>[\s\S]*?<link>([\s\S]*?)<\/link>[\s\S]*?<guid[\s\S]*?>([\s\S]*?)<\/guid>/g;
         const match = itemRegex.exec(text);
 
@@ -63,13 +66,13 @@ async function checkTwitterUpdates() {
             const tweetLink = match[2].replace('http://', 'https://').replace('twitter.com', 'x.com');
             const tweetId = match[3];
 
-            // 如果這是第一次運行，先記錄目前的推文 ID，不發送通知
+            // 第一次運行先記錄 ID，不發通知
             if (!lastFetchedTweetId) {
                 lastFetchedTweetId = tweetId;
                 return;
             }
 
-            // 發現新推文！
+            // 發現新推文
             if (tweetId !== lastFetchedTweetId) {
                 lastFetchedTweetId = tweetId;
                 
@@ -98,12 +101,10 @@ client.on('messageCreate', async (message) => {
 
     const msg = message.content.trim();
 
-    // 基礎測試指令
     if (msg === '!ping') {
         return message.reply('pong！');
     }
 
-    // 功能一：自訂關鍵字回應
     if (msg === '管理員' || msg === '主管') {
         return message.reply('主管，您好。我是您的 AI 助理 Angela。請下達您的指示，今天也請為了擴張「光之種」而努力。');
     }
@@ -112,10 +113,9 @@ client.on('messageCreate', async (message) => {
         return message.reply('「直面恐懼，創造未來。」請時刻注意收容單位的逆流計數器，主管。');
     }
 
-    // 功能二：Steam API 連動 - 查詢邊獄公司即時在線人數
+    // 查詢邊獄公司即時在線人數
     if (msg === '!邊獄人數' || msg === '!limbusonline') {
         try {
-            // Limbus Company 的 Steam AppID 為 1973530
             const response = await fetch('https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/?appid=1973530');
             const data = await response.json();
             
@@ -131,7 +131,7 @@ client.on('messageCreate', async (message) => {
         }
     }
 
-    // 功能三：心理學與標籤世界觀互動 + 系統運行紀錄
+    // 心理學與運行紀錄指令
     if (msg === '!狀態' || msg === '!status') {
         const uptimeMs = new Date() - systemStartTime;
         const uptimeHours = (uptimeMs / (1000 * 60 * 60)).toFixed(1);
@@ -155,7 +155,7 @@ client.on('messageCreate', async (message) => {
         return message.reply({ embeds: [embed] });
     }
 
-    // 功能四：尋找伺服器內特定機器人
+    // 尋找伺服器內特定機器人
     if (msg.startsWith('!尋找機器人') || msg.startsWith('!findbot')) {
         const args = msg.split(' ');
         if (args.length < 2) {
@@ -187,8 +187,8 @@ client.on('messageCreate', async (message) => {
     }
 });
 
-// 🔒 從 Render 環境變數讀取 Token (安全防外洩)
-const TOKEN = "MTUwMTE0OTg4OTUyNTA1NTYyMA.GbgFIv.J5i85tETPkm4hrn7jc6b9udiQqrRyeJz3xgEs0";
+// 🔒 業界標準安全讀取：從 Render 後台保險箱撈取真正的 Token
+const TOKEN = process.env.DISCORD_TOKEN;
 
 client.login(TOKEN).catch(err => {
     console.error("❌ 機器人登入失敗，請檢查 Token 是否正確或過期：", err);
