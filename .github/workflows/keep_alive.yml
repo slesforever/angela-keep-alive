@@ -1,0 +1,13 @@
+name: Angela Awake Protocol
+
+on:
+  schedule:
+    - cron: '*/5 * * * *' # 每 5 分鐘自動踢門一次
+  workflow_dispatch:      # 🟢 加這行！這就是「手動觸發」的秘密開關
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Signal to Angela
+        run: curl -s https://glitch-hello-node.glitch.me/
