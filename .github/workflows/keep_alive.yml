@@ -10,4 +10,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Send Signal to Angela
-        run: curl -s https://glitch-hello-node.glitch.me/
+        run: curl -s https://angela-keep-alive.onrender.com/
