@@ -1,5 +1,5 @@
 // identitiesData.js
-export const pullIdentity = {
+export const identities = {
     '000': [
         // ========================
         // 🌟 蜘蛛巢 / 五指核心 (高階)
@@ -14,6 +14,12 @@ export const pullIdentity = {
         "［指環 點描派 學生］李箱",
         "［食指 代理人 - 綻放E.G.O：代行］堂吉訶德",
         "［中指 大哥哥］希斯克里夫",
+        "［蜘蛛巢：指環 學徒］浮士德",
+        "［蜘蛛巢：中指 學徒］以實瑪利",
+        "［蜘蛛巢：小指 學徒］辛克萊",
+        "［食指 傳令：【紙條】］浮士德",
+        "［中指 小妹妹］堂吉訶德",
+        "［中指 小弟弟］辛克萊",
 
         // =========================
         // 🌟 黑獸 (高階達人)
@@ -124,12 +130,6 @@ export const pullIdentity = {
         // =========================
         // 🔹 蜘蛛巢與五指 (基層/學徒)
         // =========================
-        "［蜘蛛巢：指環 學徒］浮士德",
-        "［蜘蛛巢：中指 學徒］以實瑪利",
-        "［蜘蛛巢：小指 學徒］辛克萊",
-        "［食指 傳令：【紙條】］浮士德",
-        "［中指 小妹妹］堂吉訶德",
-        "［中指 小弟弟］辛克萊",
         "［中指 小弟］默爾索",
 
         // =========================
@@ -225,18 +225,14 @@ export const pullIdentity = {
     ]
 };
 
-const rateUpTargets = {
-    '000': ["［蜘蛛巢：指環 父輩］鴻璐"],
-    '00': ["［黑獸 巳支部］格里高爾"]
+const targetIdentities = {
+    'ID': { rarity: '000', name: '［中指 小妹妹］堂吉訶德' },
+    '朋友的ID': { rarity: '000', name: '［蜘蛛巢：食指 父輩］李箱' }
 };
 
 function pullIdentity(rarity) {
     const p = identities[rarity] || [];
-    const targets = rateUpTargets[rarity] || [];
-    if (targets.length > 0 && Math.random() < 0.5) {
-        return targets[Math.floor(Math.random() * targets.length)];
-    }
     return p[Math.floor(Math.random() * p.length)];
 }
 
-module.exports = { identities, pullIdentity };
+module.exports = { identities, targetIdentities, pullIdentity };
