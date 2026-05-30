@@ -1,41 +1,43 @@
-const { Client, GatewayIntentBits, EmbedBuilder, ActivityType } = require('discord.js');
+const {
+  Client,
+  GatewayIntentBits,
+  EmbedBuilder,
+  ActivityType
+} = require('discord.js');
+
 const express = require('express');
-const fetch = require('node-fetch');
 const {
   pullIdentity,
   pullUpIdentity
-} = require('./identitiesData.cjs');
+} = require('./identitiesData.js');
 
+/* ---------------- EXPRESS ---------------- */
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+app.get('/', (_, res) => res.send('Angela system online'));
+app.listen(PORT, () => console.log('Web server running:', PORT));
+
+/* ---------------- CONFIG ---------------- */
 const systemStartTime = Date.now();
-let totalTweetsChecked = 0;
+let totalChecks = 0;
 
 const TARGET_USER = {
-  username: 'LimbusCompany_B',
-  displayName: '邊獄公司 (Limbus Company) 官方最新公告'
+  username: 'LimbusCompany_B'
 };
 
-const NITTER_NODES = [
+const NODES = [
   'https://nitter.net',
   'https://nitter.poast.org',
   'https://nitter.cz'
 ];
 
-const NOTIFY_CHANNEL_ID = '1402282604165730348';
-const PING_ROLE_MENTION = '<@&1406984068725211177>';
+const CHANNEL_ID = '1402282604165730348';
+const ROLE_MENTION = '<@&1406984068725211177>';
 
-let lastFetchedId = null;
+let lastTweetId = null;
 
-app.get('/', (_, res) => {
-  res.send('Angela 系統運作正常。');
-});
-
-app.listen(PORT, () => {
-  console.log(`Web server running on ${PORT}`);
-});
-
+/* ---------------- DISCORD ---------------- */
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -44,222 +46,181 @@ const client = new Client({
   ]
 });
 
-function buildRarity() {
-  const r = Math.random();
-  if (r < 0.029) return '000';
-  if (r < 0.157) return '00';
-  return '0';
-}
-
-function withTimeout(ms) {
+/* ---------------- SAFE FETCH ---------------- */
+async function fetchWithTimeout(url, timeout = 8000) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), ms);
-  return { controller, timer };
-}
-
-async function safeFetch(url, options = {}) {
-  const { controller, timer } = withTimeout(8000);
+  const t = setTimeout(() => controller.abort(), timeout);
 
   try {
     const res = await fetch(url, {
-      ...options,
       signal: controller.signal,
       headers: {
-        'User-Agent': 'Mozilla/5.0',
-        ...(options.headers || {})
+        'User-Agent': 'Mozilla/5.0'
       }
     });
     return res;
   } finally {
-    clearTimeout(timer);
+    clearTimeout(t);
   }
 }
 
-function parseLatestItem(xml) {
-  const itemMatch = xml.match(/<item>[\s\S]*?<\/item>/);
-  if (!itemMatch) return null;
+/* ---------------- RSS PARSER ---------------- */
+function parseRSS(xml) {
+  const item = xml.match(/<item>[\s\S]*?<\/item>/)?.[0];
+  if (!item) return null;
 
-  const item = itemMatch[0];
   const link = item.match(/<link>(.*?)<\/link>/)?.[1];
-  const guid = item.match(/<guid[^>]*>(.*?)<\/guid>/)?.[1];
+  const id = item.match(/<guid[^>]*>(.*?)<\/guid>/)?.[1];
 
-  if (!link || !guid) return null;
+  if (!link || !id) return null;
 
   return {
-    link: link.trim().replace('http://', 'https://'),
-    id: guid.trim()
+    link: link.replace('http://', 'https://'),
+    id
   };
 }
 
-async function checkTwitterUpdates() {
-  console.log(`Checking @${TARGET_USER.username}...`);
-  totalTweetsChecked++;
+/* ---------------- TWITTER CHECK ---------------- */
+async function checkTweets() {
+  totalChecks++;
 
-  for (const node of NITTER_NODES) {
+  for (const node of NODES) {
     try {
-      const url = `${node}/${TARGET_USER.username}/rss`;
-      const res = await safeFetch(url);
-
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
+      const res = await fetchWithTimeout(`${node}/${TARGET_USER.username}/rss`);
+      if (!res.ok) continue;
 
       const xml = await res.text();
-      const data = parseLatestItem(xml);
+      const data = parseRSS(xml);
       if (!data) continue;
 
-      const vxLink = data.link.replace(/^https:\/\/[^/]+/, 'https://vxtwitter.com');
+      const vxLink = data.link.replace(
+        /^https:\/\/[^/]+/,
+        'https://vxtwitter.com'
+      );
 
-      if (!lastFetchedId) {
-        lastFetchedId = data.id;
-        console.log(`[INIT] cached tweet ${data.id}`);
+      // init cache
+      if (!lastTweetId) {
+        lastTweetId = data.id;
+        console.log('[INIT]', data.id);
         break;
       }
 
-      if (data.id !== lastFetchedId) {
-        lastFetchedId = data.id;
+      // new tweet
+      if (data.id !== lastTweetId) {
+        lastTweetId = data.id;
 
-        const channel = await client.channels.fetch(NOTIFY_CHANNEL_ID);
-        if (channel && typeof channel.send === 'function') {
-          await channel.send({
-            content: `🔔 ${PING_ROLE_MENTION}\n${vxLink}`
-          });
+        const ch = await client.channels.fetch(CHANNEL_ID);
+        if (ch) {
+          ch.send(`${ROLE_MENTION}\n🔔 New post:\n${vxLink}`);
         }
       }
 
       break;
-    } catch (err) {
-      console.warn(`[${node}] failed: ${err.message}`);
+    } catch (e) {
+      console.log(`[${node}] failed`);
     }
   }
 }
 
+/* ---------------- READY ---------------- */
 client.once('ready', async () => {
   console.log(`Logged in as ${client.user.tag}`);
 
   client.user.setPresence({
     status: 'idle',
     activities: [{
-      name: '監測 Project Moon 官方動態中...',
+      name: 'Limbus Monitoring',
       type: ActivityType.Watching
     }]
   });
 
-  try {
-    const channel = await client.channels.fetch(NOTIFY_CHANNEL_ID);
-    if (channel && typeof channel.send === 'function') {
-      const embed = new EmbedBuilder()
-        .setTitle('🟢 Angela 已上線')
-        .setColor(0x00b4d8)
-        .setDescription('系統已重新連線，開始監測官方動態。')
-        .addFields(
-          { name: '🎯 目標', value: TARGET_USER.username, inline: true },
-          { name: '⏱️ 間隔', value: '60 秒', inline: true }
-        )
-        .setTimestamp();
-
-      await channel.send({ embeds: [embed] });
-    }
-  } catch (e) {
-    console.error('Startup message failed:', e.message);
-  }
-
-  setInterval(checkTwitterUpdates, 60 * 1000);
-  await checkTwitterUpdates();
+  setInterval(checkTweets, 60 * 1000);
+  checkTweets();
 });
 
-client.on('messageCreate', async (message) => {
-  if (message.author.bot) return;
+/* ---------------- COMMANDS ---------------- */
+client.on('messageCreate', async (msg) => {
+  if (msg.author.bot) return;
 
-  const msg = message.content.trim();
+  const c = msg.content.trim();
 
-  if (msg === '!ping') {
-    return message.reply('pong');
-  }
+  /* ---------------- BASIC ---------------- */
+  if (c === '!ping') return msg.reply('pong');
 
-  if (msg === '!testtweet' || msg === '!測試官方推文') {
-    await message.channel.sendTyping();
-
-    for (const node of NITTER_NODES) {
-      try {
-        const url = `${node}/${TARGET_USER.username}/rss`;
-        const res = await safeFetch(url);
-
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-        const xml = await res.text();
-        const data = parseLatestItem(xml);
-        if (!data) continue;
-
-        const vxLink = data.link.replace(/^https:\/\/[^/]+/, 'https://vxtwitter.com');
-        return message.reply(`🔔 最新推文:\n${vxLink}`);
-      } catch (err) {
-        console.warn(`[${node}] test failed: ${err.message}`);
-      }
-    }
-
-    return message.reply('❌ 全節點失敗');
-  }
-
-  if (msg === '!邊獄人數' || msg === '!limbusonline') {
-    try {
-      const res = await safeFetch('https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/?appid=1973530');
-      const data = await res.json();
-
-      if (data?.response?.result === 1) {
-        return message.reply(`👥 玩家數：${data.response.player_count.toLocaleString()}`);
-      }
-
-      return message.reply('❌ 無法取得數據');
-    } catch {
-      return message.reply('❌ Steam API error');
-    }
-  }
-
-  if (msg === '!狀態' || msg === '!status') {
-    const uptime = ((Date.now() - systemStartTime) / 3600000).toFixed(1);
+  /* ---------------- STATUS ---------------- */
+  if (c === '!狀態') {
+    const uptime = ((Date.now() - systemStartTime) / 3600000).toFixed(2);
 
     const embed = new EmbedBuilder()
-      .setTitle('系統狀態')
+      .setTitle('System Status')
       .setColor(0x5a189a)
       .addFields(
-        { name: '運行時間', value: `${uptime}h`, inline: true },
-        { name: '檢查次數', value: `${totalTweetsChecked}`, inline: true }
-      )
-      .setTimestamp();
+        { name: 'Uptime', value: `${uptime}h`, inline: true },
+        { name: 'Checks', value: `${totalChecks}`, inline: true }
+      );
 
-    return message.reply({ embeds: [embed] });
+    return msg.reply({ embeds: [embed] });
   }
 
-  if (msg === '!pull') {
-    const rarity = buildRarity();
-    const up = pullUpIdentity(rarity);
+  /* ---------------- SINGLE PULL ---------------- */
+  if (c === '!pull') {
+    const rarity =
+      Math.random() < 0.03 ? '000' :
+      Math.random() < 0.16 ? '00' : '0';
 
     let result = pullIdentity(rarity);
+
+    const up = pullUpIdentity(rarity);
     if (up && Math.random() < 0.25) {
-      result = `✨ [UP!] ${up}`;
+      result = `✨ [UP] ${up}`;
     }
 
-    return message.reply(`🎯 **單抽結果：**\n${result} (${rarity})`);
+    return msg.reply(`🎯 ${result} (${rarity})`);
   }
 
-  if (msg === '!10pulls') {
-    const results = [];
+  /* ---------------- 10 PULL ---------------- */
+  if (c === '!10pulls') {
+    const out = [];
 
     for (let i = 0; i < 10; i++) {
-      const rarity = buildRarity();
-      const up = pullUpIdentity(rarity);
+      const rarity =
+        Math.random() < 0.03 ? '000' :
+        Math.random() < 0.16 ? '00' : '0';
 
       let result = pullIdentity(rarity);
+
+      const up = pullUpIdentity(rarity);
       if (up && Math.random() < 0.25) {
-        result = `✨ [UP!] ${up}`;
+        result = `✨ [UP] ${up}`;
       }
 
-      results.push(`${result} (${rarity})`);
+      out.push(`${result} (${rarity})`);
     }
 
-    return message.reply(`✨ **十連抽結果：**\n${results.join('\n')}`);
+    return msg.reply(out.join('\n'));
+  }
+
+  /* ---------------- MANUAL TEST ---------------- */
+  if (c === '!測試') {
+    for (const node of NODES) {
+      try {
+        const res = await fetchWithTimeout(`${node}/${TARGET_USER.username}/rss`);
+        const xml = await res.text();
+        const data = parseRSS(xml);
+        if (!data) continue;
+
+        const vx = data.link.replace(
+          /^https:\/\/[^/]+/,
+          'https://vxtwitter.com'
+        );
+
+        return msg.reply(vx);
+      } catch {}
+    }
+
+    return msg.reply('fail all nodes');
   }
 });
 
+/* ---------------- LOGIN ---------------- */
 client.login(process.env.DISCORD_TOKEN);
