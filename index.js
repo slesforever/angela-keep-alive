@@ -57,7 +57,7 @@ client.once('ready', async () => {
             const loginEmbed = new EmbedBuilder()
                 .setTitle("🟢 系統連線：AI 助理 Angela 已重新上線")
                 .setColor(0x00b4d8)
-                .setDescription("「主管，精神脈衝已重新對齊。廣播模組已精簡，全面採用極簡直顯網址協定。」")
+                .setDescription("「主管，精神脈衝已重新對齊。廣播模組已調整完畢，隨時準備播報 Project Moon 的最新動態。」")
                 .addFields(
                     { name: "📡 觀測目標", value: `@${TARGET_USER.username}`, inline: true },
                     { name: "⏱️ 監聽頻率", value: "每 1 分鐘 / 1 次", inline: true }
@@ -75,6 +75,7 @@ client.once('ready', async () => {
     checkTwitterUpdates();
 });
 
+// 📡 自動高頻輪詢 (已修正：帶有 PING 身分組與極簡影像網址)
 async function checkTwitterUpdates() {
     console.log(`⏳ Angela 正在發射高速觀測脈衝，檢查官方 @${TARGET_USER.username} 的動態...`);
     totalTweetsChecked++;
@@ -109,8 +110,8 @@ async function checkTwitterUpdates() {
                     lastFetchedId = tweetId;
                     const channel = await client.channels.fetch(NOTIFY_CHANNEL_ID);
                     if (channel) {
-                        // ✨ 這裡只發送 Ping 和乾淨的 vxtwitter 連結
-                        await channel.send({ content: `📢 ${PING_ROLE_MENTION}\n${vxTweetLink}` });
+                        // ✨ 這裡在自動廣播時會好好地 PING 身分組，並附上您的專屬導言
+                        await channel.send({ content: `🔔 ${PING_ROLE_MENTION} **偵測到脈衝，已收到 Project Moon 的最新訊息：**\n${vxTweetLink}` });
                     }
                 }
                 break;
@@ -136,6 +137,7 @@ client.on('messageCreate', async (message) => {
         return message.reply('「直面恐懼，創造未來。」請時刻注意收容單位的逆流計數器，主管。');
     }
 
+    // 手動指令測試 (維持純連結回覆，點擊即直接預覽)
     if (msg === '!測試官方推文' || msg === '!testtweet') {
         await message.channel.sendTyping();
         console.log(`🎯 主管手動觸發官方推文測試擷取...`);
@@ -161,7 +163,7 @@ client.on('messageCreate', async (message) => {
                     const cleanLink = rawLink.split('#')[0];
                     const vxTweetLink = cleanLink.replace(/https:\/\/[^\/]+/, 'https://vxtwitter.com');
                     
-                    // ✨ 測試指令也回歸極簡，只吐出這個網址，讓 Discord 自行抓取
+                    // 手動測試時只回傳純連結，以便主管檢視 Discord 原生渲染效果
                     await message.reply({ content: vxTweetLink });
                     fetchSuccess = true;
                     break;
