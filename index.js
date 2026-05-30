@@ -23,15 +23,6 @@ const NITTER_NODES = [
 
 let lastFetchedId = null;
 
-// 網頁伺服器（確保 Render 存活監聽）
-app.get('/', (req, res) => {
-    res.send('Angela 系統運作正常。歡迎來到腦葉公司核心控制室。');
-});
-
-app.listen(PORT, () => {
-    console.log(`網頁伺服器已在連接埠 ${PORT} 啟動`);
-});
-
 const NOTIFY_CHANNEL_ID = '1402282604165730348';
 const PING_ROLE_MENTION = '<@&1406984068725211177>';
 
