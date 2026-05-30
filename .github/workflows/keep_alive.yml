@@ -1,21 +1,18 @@
 name: Angela Keep Alive
 
 on:
-schedule:
-- cron: '*/10 * * * *'
-workflow_dispatch:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
 
 jobs:
-ping:
-runs-on: ubuntu-latest
-
-```
-steps:
-  - name: Wake Angela
-    run: |
-      echo "Pinging Angela..."
-      curl -L --fail --silent --show-error \
-      https://angela-keep-alive.onrender.com/ \
-      > /dev/null
-      echo "Success!"
-```
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wake Angela
+        run: |
+          echo "Pinging Angela..."
+          curl -L --fail --silent --show-error \
+            https://angela-keep-alive.onrender.com/ \
+            > /dev/null
+          echo "Success!"
