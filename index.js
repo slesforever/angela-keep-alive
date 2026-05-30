@@ -1,19 +1,26 @@
 const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
-const mongoose = require('mongoose'); // 注入：雲端資料庫核心
+const mongoose = require('mongoose'); // 引入雲端資料庫核心
 const express = require('express');
 
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 const identitiesData = require('./identitiesData.js');
 
-// ==================== 🛠️ MONGODB 資料庫連線與設定 ====================
+// ==================== 🛠️ MONGODB 資料庫連線與狀態隔離鎖 ====================
 const MONGO_URI = process.env.MONGO_URI;
+let isDbConnected = false; // 核心狀態鎖：用來追蹤資料庫到底開門了沒
 
 if (!MONGO_URI) {
     console.error('[警告] 找不到 MONGO_URI 環境變數！請記得至 Render 後台設定。');
 } else {
     mongoose.connect(MONGO_URI)
-        .then(() => console.log('[⚡ 資料庫] 成功連接至 MongoDB 雲端資料庫！'))
-        .catch(err => console.error('[❌ 資料庫] 連線失敗，請檢查金鑰或密碼:', err));
+        .then(() => {
+            isDbConnected = true; // 成功連線，亮綠燈
+            console.log('[⚡ 資料庫] 成功連接至 MongoDB 雲端資料庫！');
+        })
+        .catch(err => {
+            isDbConnected = false; // 連線失敗，保持紅燈隔離，防止塞車
+            console.error('[❌ 資料庫] 連線失敗，請檢查金鑰或密碼:', err);
+        });
 }
 
 // 定義玩家的資料庫儲存結構 (Schema)
@@ -155,7 +162,7 @@ async function fetchLatestTweetFromNode(nodeUrl) {
 }
 
 app.get('/', (req, res) => {
-    res.sendStatus(200); // 保持最省流量的極簡 200 回應
+    res.sendStatus(200); // 極簡回應，優化連線頻寬
 });
 
 app.listen(PORT, () => {
@@ -351,12 +358,12 @@ client.on('messageCreate', async (message) => {
             {
                 name: '薄暮 (Twilight)',
                 grade: 'ALEPH',
-                desc: '調和所有矛盾與偏見的終極大劍。暗示個體拒絕接受單一標籤，試圖在黑白混沌的世界中強行抓住平衡。'
+                desc: '調和所有矛盾與偏見的終極大劍。暗示個體拒減接受單一標籤，試圖在黑白混沌的世界中強行抓住平衡。'
             },
             {
                 name: '失樂園 (Paradise Lost)',
                 grade: 'ALEPH',
-                desc: '純白羽翼覆蓋的禁忌法杖。象徵對「完美標籤」的病態追求，個體容易 because 試圖符合他人的神聖期望而陷入更深沉的 Burnout。'
+                desc: '純白羽翼覆蓋的禁忌法杖。象徵對「完美標籤」的病態追求，個體容易因為試圖符合他人的神聖期望而陷入更深沉的 Burnout。'
             },
             {
                 name: '擬態 (Mimicry)',
@@ -396,11 +403,11 @@ client.on('messageCreate', async (message) => {
         return message.reply({ embeds: [alarmEmbed] });
     }
 
-    // ---------------- ⚡ 優化：!pull 與 !10pulls (結合背景寫入資料庫) ----------------
+    // ---------------- 🎯 抽卡邏輯系統 (!pull / !10pulls) ----------------
     if (msg === '!pull' || msg === '!10pulls') {
         const count = msg === '!10pulls' ? 10 : 1;
         const results = [];
-        const identitiesToSave = []; // 用來存進資料庫的乾淨名字陣列
+        const identitiesToSave = [];
 
         for (let i = 0; i < count; i++) {
             const rarity = buildRarity();
@@ -411,15 +418,15 @@ client.on('messageCreate', async (message) => {
 
             if (rateUpName && Math.random() < 0.25) {
                 displayResult = `✨ **[PICK-UP!]** ${rateUpName}`;
-                baseIdentityName = rateUpName; // 如果中了 PickUp，儲存的名字換成對應的人格
+                baseIdentityName = rateUpName;
             }
 
             identitiesToSave.push(baseIdentityName);
             results.push(`${displayResult} (${rarityToStars(rarity)})`);
         }
 
-        // 🚀 背景無感儲存：如果不影響回應速度，悄悄寫入 MongoDB
-        if (MONGO_URI) {
+        // 🚀 狀態鎖保護：只有在資料庫確定成功通電 (isDbConnected === true) 時才進背景寫入，斷線或塞線直接繞道，絕不卡頓
+        if (MONGO_URI && isDbConnected) {
             User.updateOne(
                 { discordId: message.author.id },
                 { $addToSet: { ownedIdentities: { $each: identitiesToSave } } },
@@ -429,10 +436,11 @@ client.on('messageCreate', async (message) => {
             });
         }
 
+        // 根據目前連線綠燈或紅燈，給予主管最準確的後台通知
         return message.reply(
             count === 10
-                ? `✨ **十連抽結果：**\n${results.join('\n')}\n*(檔案館數據同步中...)*`
-                : `🎯 **單抽結果：**\n${results[0]}\n*(檔案館數據同步中...)*`
+                ? `✨ **十連抽結果：**\n${results.join('\n')}\n${isDbConnected ? '*(檔案館數據同步中...)*' : '*(⚠️ 資料庫未連線，本次不計入圖鑑)*'}`
+                : `🎯 **單抽結果：**\n${results[0]}\n${isDbConnected ? '*(檔案館數據同步中...)*' : '*(⚠️ 資料庫未連線，本次不計入圖鑑)*'}`
         );
     }
 
@@ -453,10 +461,10 @@ client.on('messageCreate', async (message) => {
         return message.reply(`📈 **目前機率提升人格**\n\n${lines.join('\n\n')}`);
     }
 
-    // ---------------- 📚 新增功能：!圖鑑 或 !collection (讀取雲端資料庫) ----------------
+    // ---------------- 📚 檔案館查詢系統 (!圖鑑 / !collection) ----------------
     if (msg === '!圖鑑' || msg === '!collection') {
-        if (!MONGO_URI) {
-            return message.reply('❌ 報告主管：雲端資料庫未正常連線，無法讀取個人檔案館。');
+        if (!MONGO_URI || !isDbConnected) {
+            return message.reply('❌ 報告主管：雲端資料庫目前未正常連線，無法讀取個人檔案館。');
         }
 
         try {
