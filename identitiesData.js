@@ -16,6 +16,9 @@ const identities = {
     "［食指 傳令：【紙條】］浮士德 / Index Messenger: Slip Faust",
     "［中指 小妹妹］堂吉訶德 / Middle Little Sister Don Quixote",
     "［中指 小弟弟］辛克萊 / Middle Little Brother Sinclair",
+    "［黑獸 未支部］堂吉訶德 / Heishou Pack Unassigned Don Quixote",
+    "［黑獸 巳支部］格里高爾 / Heishou Pack Snake Branch Gregor",
+    "［黑獸 巳支部］羅佳 / Heishou Pack Snake Branch Rodion",
     "［黑獸 午支部 達人］李箱 / Heishou Pack Wu Branch Expert Yi Sang",
     "［黑獸 卯支部 達人］浮士德 / Heishou Pack Mao Branch Expert Faust",
     "［黑獸 酉支部 達人］希斯克里夫 / Heishou Pack Rooster Branch Expert Heathcliff",
@@ -75,7 +78,6 @@ const identities = {
     "［六協會 南部4科 部長］羅佳 / Section 6 Assoc. South Section 4 Rodion",
     "［五協會 南部5科 部長］堂吉訶德 / Section 5 Assoc. South Section 5 Don Quixote",
     "［Cinq協會 南部5科］堂吉訶德 / Cinq Assoc. South Section 5 Don Quixote",
-    "［Cinq協會 南部4科］羅佳 / Cinq Assoc. South Section 4 Rodion",
     "［Cinq協會 西部3科］默爾索 / Cinq Assoc. West Section 3 Meursault",
     "［Zwei協會 南部4科］浮士德 / Zwei Assoc. South Section 4 Faust",
     "［Dieci協會 南部4科］以實瑪利 / Dieci Assoc. South Section 4 Ishmael",
@@ -96,9 +98,6 @@ const identities = {
 
   '00': [
     "［中指 小弟］默爾索 / Middle Brother Meursault",
-    "［黑獸 未支部］堂吉訶德 / Heishou Pack Unassigned Don Quixote",
-    "［黑獸 巳支部］格里高爾 / Heishou Pack Snake Branch Gregor",
-    "［黑獸 巳支部］羅佳 / Heishou Pack Snake Branch Rodion",
     "［黑雲會 眾］良秀 / Kurokumo Clan Member Ryōshū",
     "［黑雲會 眾］鴻璐 / Kurokumo Clan Member Hong Lu",
     "［黑雲會 眾］希斯克里夫 / Kurokumo Clan Member Heathcliff",
