@@ -26,7 +26,7 @@ let lastFetchedId = null;
 
 // Discord 頻道 ID 與 需要 Ping 的身分組 ID
 const NOTIFY_CHANNEL_ID = "1402282604165730348";
-const PING_ROLE_MENTION = "<@&1406984068725211177>"; // ✨ 新增：自動通知身分組
+const PING_ROLE_MENTION = "<@&1406984068725211177>"; // 自動通知身分組
 
 // 1. Web 伺服器 (Render 維持生命用)
 app.get('/', (req, res) => {
@@ -83,7 +83,7 @@ client.once('ready', async () => {
         console.error("❌ 啟動發送訊息失敗，請檢查頻道 ID 或機器人權限:", err.message);
     }
     
-    // ⏰ 【高頻率升級】將自動定時輪詢縮短至 1 分鐘 (60000 毫秒)
+    // ⏰ 將自動定時輪詢縮短至 1 分鐘 (60000 毫秒)
     setInterval(checkTwitterUpdates, 60 * 1000);
     // 上線時立刻先檢查一次
     checkTwitterUpdates();
@@ -111,10 +111,10 @@ async function checkTwitterUpdates() {
             if (match) {
                 let tweetContent = match[1].replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1');
                 
-                // 🛠️ 【影片直顯優化】：將推特連結還原並轉換為 vxtwitter.com，讓影片能直接在 Discord 播放！
-                const rawLink = match[2].trim();
-                const tweetLink = rawLink.replace('http://', 'https://').replace(/nitter\.[a-z\.]+/g, 'x.com');
-                const vxTweetLink = tweetLink.replace('x.com', 'vxtwitter.com').replace('twitter.com', 'vxtwitter.com');
+                // 🛠️ 【修復完成】：直接精準替換開頭網域，徹底斷絕產生 vxvxtwitter 的可能
+                const rawLink = match[2].trim().replace('http://', 'https://');
+                const vxTweetLink = rawLink.replace(/https:\/\/[^\/]+/, 'https://vxtwitter.com');
+                const tweetLink = rawLink.replace(/https:\/\/[^\/]+/, 'https://x.com');
                 
                 const tweetId = match[3].trim();
 
@@ -138,7 +138,7 @@ async function checkTwitterUpdates() {
                             .setTimestamp()
                             .setFooter({ text: `Angela 高頻監控 - @${TARGET_USER.username}` });
 
-                        // 🎯 發送 Ping 身分組，並附上 vx 傳送門，強制 Discord 直接展開並播放影片！
+                        // 發送 Ping 身分組，並附上完全正確的 vx 傳送門以直接展開媒體播放器
                         await channel.send({ 
                             content: `📢 ${PING_ROLE_MENTION} **主管，觀測到官方發布了最新動態（內含直顯影像協定）！**\n傳送門：${vxTweetLink}`, 
                             embeds: [tweetEmbed] 
@@ -173,7 +173,7 @@ client.on('messageCreate', async (message) => {
         return message.reply('「直面恐懼，創造未來。」請時刻注意收容單位的逆流計數器，主管。');
     }
 
-    // 指令：🧪 手動強制測試指令 (會同步展示 vx 影片與通知效果)
+    // 指令：🧪 手動強制測試指令 (同步應用全新網址解析邏輯)
     if (msg === '!測試官方推文' || msg === '!testtweet') {
         await message.channel.sendTyping();
         console.log(`🎯 主管手動觸發官方推文測試擷取...`);
@@ -196,8 +196,11 @@ client.on('messageCreate', async (message) => {
 
                 if (match) {
                     let tweetContent = match[1].replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1');
-                    const tweetLink = match[2].trim().replace('http://', 'https://').replace(/nitter\.[a-z\.]+/g, 'x.com');
-                    const vxTweetLink = tweetLink.replace('x.com', 'vxtwitter.com').replace('twitter.com', 'vxtwitter.com');
+                    
+                    // 🛠️ 手動測試同步修正：一階正則網域替換，徹底消滅 vxvxtwitter
+                    const rawLink = match[2].trim().replace('http://', 'https://');
+                    const vxTweetLink = rawLink.replace(/https:\/\/[^\/]+/, 'https://vxtwitter.com');
+                    const tweetLink = rawLink.replace(/https:\/\/[^\/]+/, 'https://x.com');
                     
                     const testEmbed = new EmbedBuilder()
                         .setTitle(`📊 [手動觀測測試] ${TARGET_USER.displayName}`)
@@ -208,7 +211,6 @@ client.on('messageCreate', async (message) => {
                         .setTimestamp()
                         .setFooter({ text: "腦葉公司核心控制室 - 診斷監測" });
 
-                    // 測試指令不盲目 Ping 所有人，內文以純文字表示作為預覽
                     await message.reply({ 
                         content: `✅ **報告主管，擷取測試成功！這是官方目前的最新貼文：**\n(正式廣播時會自動通知: ${PING_ROLE_MENTION})\n測試傳送門：${vxTweetLink}`, 
                         embeds: [testEmbed] 
