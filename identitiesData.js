@@ -145,7 +145,7 @@ const identities = {
     "［尤羅季維 第20區］良秀 / District 20 Yurodivy Ryōshū",
     "［洛斯馬利亞契 老大］辛克萊 / Los Mariachis Jefe Sinclair",
     "［死兔黨 老大］默爾索 / Dead Rabbits Boss Meursault",
-    "［R.B. 副主廚］格里高爾 / R.B. Sous-chef Gregor"
+    "［R.B. 副主廚］格里高爾 / R.B. Sous-chef Gregor",
     "［皮夸德號 一副］李箱 / Pequod First Mate Yi Sang",
     "［Dieci協會 南部4科］李箱 / Dieci Assoc. South Section 4 Yi Sang",
     "［G公司 科長］奧提斯 / G Corp. Head Manager Outis",
