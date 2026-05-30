@@ -171,7 +171,6 @@ const identities = {
 
 const upTargets = {
   '000': [
-    "［中指 大哥哥］希斯克里夫 / Middle Big Brother Heathcliff",
     "［蜘蛛巢：中指 父輩］奧提斯 / The House of Spiders: Middle Father Outis",
     " [蜘蛛巢：中指 學徒］以實瑪利 / House of Spiders: Middle Apprentice Ishmael"
   ],
