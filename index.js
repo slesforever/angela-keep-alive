@@ -129,6 +129,8 @@ client.on('messageCreate', async (message) => {
 
     // 抽卡邏輯
     if (msg === '!pull' || msg === '!10pulls') {
+        const { pullIdentity } = require('./identitiesData');
+        console.log(pullIdentity('000')); // 測試呼叫
         const count = (msg === '!10pulls') ? 10 : 1;
         let results = [];
         for (let i = 0; i < count; i++) {
