@@ -1,4 +1,4 @@
-const { pullIdentity } = require('identitiesData');
+const { pullIdentity } = require('angela-keep-alive/identitiesData.js');
 const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 const express = require('express');
 
