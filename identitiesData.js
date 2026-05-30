@@ -121,7 +121,6 @@ const identities = {
     "［Shi協會 南部5科 部長］堂吉訶德 / Shi Assoc. South Section 5 Director Don Quixote",
     "［Shi協會 南部5科］以實瑪利 / Shi Assoc. South Section 5 Ishmael",
     "［Shi協會 南部5科］希斯克里夫 / Shi Assoc. South Section 5 Heathcliff",
-    "［Shi協會 東部3科］浮士德 / Shi Assoc. East Section 3 Faust",
     "［Zwei協會 南部6科］辛克萊 / Zwei Assoc. South Section 6 Sinclair",
     "［Zwei協會 南部6科］格里高爾 / Zwei Assoc. South Section 6 Gregor",
     "［Zwei協會 南部4科］浮士德 / Zwei Assoc. South Section 4 Faust",
