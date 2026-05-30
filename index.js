@@ -26,7 +26,7 @@ let lastFetchedId = null;
 const NOTIFY_CHANNEL_ID = '1402282604165730348';
 const PING_ROLE_MENTION = '<@&1406984068725211177>';
 
-const RATEUP_LOG_CHANNEL_ID = '1510153086281187330';
+const RATEUP_ANNOUNCE_CHANNEL_ID = '1510153086281187330';
 
 let lastRateUpSnapshot = JSON.stringify(
     identitiesData.upTargets ||
@@ -191,12 +191,62 @@ client.once('ready', async () => {
         console.error('❌ 啟動發送訊息失敗:', err.message);
     }
 
+    await announceCurrentRateUps();
     setInterval(checkTwitterUpdates, 60 * 1000);
     checkTwitterUpdates();
 
-    setInterval(checkRateUpChanges, 30000);
 });
+async function announceCurrentRateUps() {
+    try {
+        const channel = await client.channels.fetch(RATEUP_ANNOUNCE_CHANNEL_ID);
 
+        if (!channel) return;
+
+        const r000 = normalizeRateUpList('000');
+        const r00 = normalizeRateUpList('00');
+        const r0 = normalizeRateUpList('0');
+
+        const sections = [];
+
+        if (r000.length) {
+            sections.push(
+                `### 000\n${r000.map(v => `• ${v}`).join('\n')}`
+            );
+        }
+
+        if (r00.length) {
+            sections.push(
+                `### 00\n${r00.map(v => `• ${v}`).join('\n')}`
+            );
+        }
+
+        if (r0.length) {
+            sections.push(
+                `### 0\n${r0.map(v => `• ${v}`).join('\n')}`
+            );
+        }
+
+        await channel.send({
+            embeds: [
+                new EmbedBuilder()
+                    .setColor(0xffd166)
+                    .setTitle('📢 Rate Up 人格資料已載入')
+                    .setDescription(
+                        sections.length
+                            ? sections.join('\n\n')
+                            : '目前沒有設定任何 Rate Up 人格。'
+                    )
+                    .setFooter({
+                        text: '資料來源：identitiesData.js'
+                    })
+                    .setTimestamp()
+            ]
+        });
+    }
+    catch (err) {
+        console.error('Rate Up 公告失敗:', err);
+    }
+}
 async function checkTwitterUpdates() {
     console.log(`⏳ Angela 正在發射高速觀測脈衝，檢查官方 @${TARGET_USER.username} 的動態...`);
     totalTweetsChecked++;
@@ -435,63 +485,7 @@ client.on('messageCreate', async (message) => {
         }
     }
 });
-async function checkRateUpChanges() {
-    try {
-        delete require.cache[require.resolve('./identitiesData.js')];
 
-        const freshData = require('./identitiesData.js');
-
-        const currentRateUps =
-            freshData.upTargets ||
-            freshData.rateUpIds ||
-            freshData.targetIdentities ||
-            {};
-
-        const currentSnapshot = JSON.stringify(currentRateUps);
-
-        if (currentSnapshot === lastRateUpSnapshot) return;
-
-        const oldRateUps = JSON.parse(lastRateUpSnapshot);
-        lastRateUpSnapshot = currentSnapshot;
-
-        const channel = await client.channels.fetch(RATEUP_LOG_CHANNEL_ID);
-
-        if (!channel) return;
-
-        let msg = '📢 **Rate Up IDs 已更新！**\n\n';
-
-        for (const rarity of ['000', '00', '0']) {
-            const oldList = oldRateUps[rarity] || [];
-            const newList = currentRateUps[rarity] || [];
-
-            if (JSON.stringify(oldList) === JSON.stringify(newList))
-                continue;
-
-            msg += `## ${rarity}\n`;
-
-            msg += '**舊：**\n';
-            msg += oldList.length
-                ? oldList.map(x => `• ${x}`).join('\n')
-                : '（無）';
-
-            msg += '\n\n';
-
-            msg += '**新：**\n';
-            msg += newList.length
-                ? newList.map(x => `• ${x}`).join('\n')
-                : '（無）';
-
-            msg += '\n\n';
-        }
-
-        await channel.send(msg);
-
-        console.log('📢 Rate Up 更新公告已送出');
-
-    } catch (err) {
-        console.error('RateUp檢查失敗:', err);
-    }
-}
 
 const TOKEN = process.env.DISCORD_TOKEN;
 client.login(TOKEN).catch(err => {
