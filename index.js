@@ -143,7 +143,8 @@ async function fetchLatestTweetFromNode(nodeUrl) {
 }
 
 app.get('/', (req, res) => {
-    res.send('Angela 系統運作正常。歡迎來到腦葉公司核心控制室。');
+    // 改成 sendStatus(200)，只回傳成功燈號，內容容量變為 0 byte！
+    res.sendStatus(200); 
 });
 
 app.listen(PORT, () => {
