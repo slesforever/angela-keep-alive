@@ -1,7 +1,7 @@
 const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 const express = require('express');
 
-// 安全相容相容各 Node.js 版本的 fetch 寫法
+// 安全相容各 Node.js 版本的 fetch 寫法
 const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 
 const app = express();
@@ -12,7 +12,7 @@ const systemStartTime = new Date();
 let totalTweetsChecked = 0;
 let lastFetchedTweetId = null; 
 
-// 1. Web 伺服器 (Render 踢門用)
+// 1. Web 伺服器 (Render 觸發重啟與維持生命用)
 app.get('/', (req, res) => {
     res.send('Angela 系統運作正常。歡迎來到腦葉公司核心控制室。');
 });
@@ -26,15 +26,26 @@ const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildMembers // 用於尋找機器人功能
     ]
 });
 
-// 指定的通知頻道 ID
+// 指定的 Twitter 通知頻道 ID
 const NOTIFY_CHANNEL_ID = "1402282604165730348";
 
 client.once('ready', () => {
     console.log(`🤖 遵從您的指示，Angela 已成功登入為：${client.user.tag}`);
+    
+    // 🧠 調整狀態：改成「閒置（橘燈）」，並設定自訂狀態文字 (點開個人資料可見)
+    client.user.setPresence({
+        status: 'idle', // 'idle' 代表閒置橘燈
+        activities: [{
+            name: 'customstatus', // 必須是 customstatus 才能正確顯示自訂狀態
+            type: 4,              // 4 代表 Custom 狀態
+            state: '正在觀測核心控制室的心理逆流與光之種進度...' // 💭 這裡就是她在想什麼的文字
+        }]
+    });
     
     // 機器人上線後，啟動 Twitter 定時監聽輪詢 (每 10 分鐘檢查一次)
     setInterval(checkTwitterUpdates, 10 * 60 * 1000);
@@ -101,10 +112,12 @@ client.on('messageCreate', async (message) => {
 
     const msg = message.content.trim();
 
+    // 指令：Ping 測試
     if (msg === '!ping') {
         return message.reply('pong！');
     }
 
+    // 指令：關鍵字對話回應
     if (msg === '管理員' || msg === '主管') {
         return message.reply('主管，您好。我是您的 AI 助理 Angela。請下達您的指示，今天也請為了擴張「光之種」而努力。');
     }
@@ -113,7 +126,7 @@ client.on('messageCreate', async (message) => {
         return message.reply('「直面恐懼，創造未來。」請時刻注意收容單位的逆流計數器，主管。');
     }
 
-    // 查詢邊獄公司即時在線人數
+    // 指令：Steam API 連動 - 查詢邊獄公司即時在線人數
     if (msg === '!邊獄人數' || msg === '!limbusonline') {
         try {
             const response = await fetch('https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/?appid=1973530');
@@ -131,7 +144,7 @@ client.on('messageCreate', async (message) => {
         }
     }
 
-    // 心理學與運行紀錄指令
+    // 指令：心理學與運行紀錄（整合優化版）
     if (msg === '!狀態' || msg === '!status') {
         const uptimeMs = new Date() - systemStartTime;
         const uptimeHours = (uptimeMs / (1000 * 60 * 60)).toFixed(1);
@@ -147,7 +160,7 @@ client.on('messageCreate', async (message) => {
                 { name: "📡 Twitter 監聽頻率", value: "每 10 分鐘 / 1 次", inline: true },
                 { name: "🔄 累計觀測次數", value: `${totalTweetsChecked} 次`, inline: true },
                 { name: "🔗 最新推文序號 (Cache)", value: lastFetchedTweetId || "建檔中", inline: true },
-                { name: "📝 綜合觀測紀錄", value: "個體因過度符合外界賦予的標籤，自我認知與真實存在發生偏離，導致核心能量陷入停滯。此狀態不影響機器人核心程式運行，Twitter 監聽脈衝與 Steam API 通道皆處於正常臨界值。", inline: false }
+                { name: "📝 綜合觀測紀錄", value: "個體因過度符合外界賦予的標籤，自我認知與真實存在發生偏離，導致核心能量陷入停滯。此狀態不影響機器人核心程式運行，橘色閒置脈衝、Twitter 監聽與 Steam API 通道皆處於正常臨界值。", inline: false }
             )
             .setFooter({ text: "Angela 心理與系統觀測核心" })
             .setTimestamp();
@@ -155,7 +168,52 @@ client.on('messageCreate', async (message) => {
         return message.reply({ embeds: [embed] });
     }
 
-    // 尋找伺服器內特定機器人
+    // 新增擴充功能一：🎲 腦葉公司 E.G.O 抽取與標籤分析系統
+    if (msg === '!ego') {
+        const egoList = [
+            { name: "薄暮 (Twilight)", grade: "ALEPH", desc: "調和所有矛盾與偏見的終極大劍。暗示個體拒絕接受單一標籤，試圖在黑白混沌的世界中強行抓住平衡，常伴隨極度的精神內耗。" },
+            { name: "失樂園 (Paradise Lost)", grade: "ALEPH", desc: "純白羽翼覆蓋的禁忌法杖。象徵對「完美標籤」的病態追求，個體容易因為試圖符合他人的神聖期望而陷入更深沉的 Burnout。" },
+            { name: "擬態 (Mimicry)", grade: "ALEPH", desc: "由血肉扭曲而成的巨大刀刃。這代表個體擅長在不同環境中偽裝、完美貼上符合群體需求的標籤，然而面具之下，真實的自我正在逐漸被吞噬。" },
+            { name: "黃金潮 (Gold Rush)", grade: "WAW", desc: "充滿貪婪與欲望的金色重拳。個體過度依賴外界的「正面評價」作為自我的標籤，一旦這些掌聲停止，核心能量將會瞬間歸零。" },
+            { name: "悔悟 (Penitence)", grade: "ZAYIN", desc: "樸實無華的荊棘之冠。代表個體內心正在進行深度的自我審視，試圖撕掉外界強加的標籤，回歸最真實的心理臨界點。" }
+        ];
+
+        const randomEgo = egoList[Math.floor(Math.random() * egoList.length)];
+        
+        const egoEmbed = new EmbedBuilder()
+            .setTitle(`⚔️ 核心共鳴：E.G.O 同步觀測報告`)
+            .setColor(0xd90429)
+            .setDescription(`**${message.author.username}** 主管，根據您目前的心理觀測脈衝，提取出以下同步率最高的 E.G.O 武裝：`)
+            .addFields(
+                { name: "✨ 裝備名稱", value: `**${randomEgo.name}**`, inline: true },
+                { name: "🔱 危險等級", value: `\`${randomEgo.grade}\``, inline: true },
+                { name: "🧠 標籤與認知心理學解析", value: randomEgo.desc, inline: false }
+            )
+            .setFooter({ text: "Angela 心理提取模組" })
+            .setTimestamp();
+
+        return message.reply({ embeds: [egoEmbed] });
+    }
+
+    // 新增擴充功能二：⚠️ 核心控制室能量逆流警報卡片
+    if (msg === '!逆流') {
+        const alarmEmbed = new EmbedBuilder()
+            .setTitle("⚠️ [WARNING] 腦葉公司核心控制室緊急通告")
+            .setColor(0xff0000)
+            .setDescription(`警告：當前頻道內觀測到嚴重的「心理逆流」現象，情緒計數器已降至臨界點！`)
+            .addFields(
+                { name: "🚨 逆流狀態", value: "第 3 階能障逆流 (Qliphoth Meltdown)", inline: false },
+                { name: "👥 受影響對象", value: "全體在場人員（請勿發布不合規、引發群體 Burnout 之言論）", inline: false },
+                { name: "🛠️ 處置方針", value: "請立刻停止認知扭曲行為，回歸本職工作。Angela 將持續監控此頻道的能量波動。", inline: false }
+            )
+            .setImage("https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1000&auto=format&fit=crop") // 一個充滿科幻壓迫感的抽象紅光背景
+            .setFooter({ text: "腦葉公司最高行政控制中心" })
+            .setTimestamp();
+
+        return message.reply({ embeds: [alarmEmbed] });
+    }
+
+    // 指令：尋找伺服器內特定機器人
     if (msg.startsWith('!尋找機器人') || msg.startsWith('!findbot')) {
         const args = msg.split(' ');
         if (args.length < 2) {
@@ -187,7 +245,7 @@ client.on('messageCreate', async (message) => {
     }
 });
 
-// 🔒 業界標準安全讀取：從 Render 後台保險箱撈取真正的 Token
+// 🔒 業界標準安全讀取：從 Render 后台保險箱撈取真正的 Token
 const TOKEN = process.env.DISCORD_TOKEN;
 
 client.login(TOKEN).catch(err => {
