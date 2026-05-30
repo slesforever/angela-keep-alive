@@ -1,34 +1,27 @@
 const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 const express = require('express');
 
-// 安全相容各 Node.js 版本的 fetch 寫法
 const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// 系統運行紀錄變數
 const systemStartTime = new Date();
 let totalTweetsChecked = 0;
 
-// 📡 觀測目標：邊獄公司官方帳號
 const TARGET_USER = { username: 'LimbusCompany_B', displayName: '邊獄公司 (Limbus Company) 官方最新公告', color: 0xf24444 };
 
-// 🌐 Nitter 可用節點清單 (用於 1 分鐘高頻輪詢的防禦切換)
 const NITTER_NODES = [
     'https://nitter.net',
     'https://nitter.poast.org',
     'https://nitter.cz'
 ];
 
-// 儲存最後一次抓到的推文 ID 快取
 let lastFetchedId = null;
 
-// Discord 頻道 ID 與 需要 Ping 的身分組 ID
 const NOTIFY_CHANNEL_ID = "1402282604165730348";
-const PING_ROLE_MENTION = "<@&1406984068725211177>"; // 自動通知身分組
+const PING_ROLE_MENTION = "<@&1406984068725211177>";
 
-// 1. Web 伺服器 (Render 維持生命用)
 app.get('/', (req, res) => {
     res.send('Angela 系統運作正常。歡迎來到腦葉公司核心控制室。');
 });
@@ -37,7 +30,6 @@ app.listen(PORT, () => {
     console.log(`網頁伺服器已在連接埠 ${PORT} 啟動`);
 });
 
-// 2. 初始化 Discord 機器人
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -50,7 +42,6 @@ const client = new Client({
 client.once('ready', async () => {
     console.log(`🤖 遵從您的指示，Angela 已成功登入為：${client.user.tag}`);
     
-    // 🧠 調整狀態：改成「閒置（橘燈）」，並設定自訂狀態文字
     client.user.setPresence({
         status: 'idle',
         activities: [{
@@ -60,7 +51,6 @@ client.once('ready', async () => {
         }]
     });
 
-    // 🚀 啟動時自動發送上線通知訊息
     try {
         const channel = await client.channels.fetch(NOTIFY_CHANNEL_ID);
         if (channel) {
@@ -77,19 +67,15 @@ client.once('ready', async () => {
                 .setTimestamp();
 
             await channel.send({ embeds: [loginEmbed] });
-            console.log("📢 已自動發送上線問候訊息至指定頻道。");
         }
     } catch (err) {
-        console.error("❌ 啟動發送訊息失敗，請檢查頻道 ID 或機器人權限:", err.message);
+        console.error("❌ 啟動發送訊息失敗:", err.message);
     }
     
-    // ⏰ 將自動定時輪詢縮短至 1 分鐘 (60000 毫秒)
     setInterval(checkTwitterUpdates, 60 * 1000);
-    // 上線時立刻先檢查一次
     checkTwitterUpdates();
 });
 
-// 自動高頻輪詢處理器
 async function checkTwitterUpdates() {
     console.log(`⏳ Angela 正在發射高速觀測脈衝，檢查官方 @${TARGET_USER.username} 的動態...`);
     totalTweetsChecked++;
@@ -111,21 +97,20 @@ async function checkTwitterUpdates() {
             if (match) {
                 let tweetContent = match[1].replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1');
                 
-                // 🛠️ 【修復完成】：直接精準替換開頭網域，徹底斷絕產生 vxvxtwitter 的可能
+                // 🛠️ 【核心修復】：先拔掉 #m 尾巴再轉成 vxtwitter
                 const rawLink = match[2].trim().replace('http://', 'https://');
-                const vxTweetLink = rawLink.replace(/https:\/\/[^\/]+/, 'https://vxtwitter.com');
-                const tweetLink = rawLink.replace(/https:\/\/[^\/]+/, 'https://x.com');
+                const cleanLink = rawLink.split('#')[0]; 
+                const vxTweetLink = cleanLink.replace(/https:\/\/[^\/]+/, 'https://vxtwitter.com');
+                const tweetLink = cleanLink.replace(/https:\/\/[^\/]+/, 'https://x.com');
                 
                 const tweetId = match[3].trim();
 
-                // 初次運行，建立快取（避免重啟時拿舊推文瘋狂洗頻）
                 if (!lastFetchedId) {
                     lastFetchedId = tweetId;
                     console.log(`📦 [${nodeUrl}] 成功建立 @${TARGET_USER.username} 的初始推文快取：${tweetId}`);
                     break;
                 }
 
-                // 🔔 發現真正的新推文！
                 if (tweetId !== lastFetchedId) {
                     lastFetchedId = tweetId;
                     const channel = await client.channels.fetch(NOTIFY_CHANNEL_ID);
@@ -134,18 +119,17 @@ async function checkTwitterUpdates() {
                             .setTitle(`🔔 ${TARGET_USER.displayName}`)
                             .setColor(TARGET_USER.color)
                             .setDescription(tweetContent.length > 500 ? tweetContent.substring(0, 500) + "..." : tweetContent)
-                            .setURL(tweetLink) // 內嵌卡片標題連結維持標準 x.com
+                            .setURL(tweetLink)
                             .setTimestamp()
                             .setFooter({ text: `Angela 高頻監控 - @${TARGET_USER.username}` });
 
-                        // 發送 Ping 身分組，並附上完全正確的 vx 傳送門以直接展開媒體播放器
                         await channel.send({ 
                             content: `📢 ${PING_ROLE_MENTION} **主管，觀測到官方發布了最新動態（內含直顯影像協定）！**\n傳送門：${vxTweetLink}`, 
                             embeds: [tweetEmbed] 
                         });
                     }
                 }
-                break; // 成功獲取，跳出多節點備援
+                break;
             }
         } catch (error) {
             console.warn(`⚠️ 節點 [${nodeUrl}] 擷取異常 (${error.message})，嘗試下一個備援空間...`);
@@ -153,18 +137,15 @@ async function checkTwitterUpdates() {
     }
 }
 
-// 3. 訊息監聽與核心功能
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
 
     const msg = message.content.trim();
 
-    // 指令：Ping 測試
     if (msg === '!ping') {
         return message.reply('pong！');
     }
 
-    // 指令：關鍵字對話回應
     if (msg === '管理員' || msg === '主管') {
         return message.reply('主管，您好。我是您的 AI 助理 Angela。請下達您的指示，今天也請為了擴張「光之種」而努力。');
     }
@@ -173,7 +154,6 @@ client.on('messageCreate', async (message) => {
         return message.reply('「直面恐懼，創造未來。」請時刻注意收容單位的逆流計數器，主管。');
     }
 
-    // 指令：🧪 手動強制測試指令 (同步應用全新網址解析邏輯)
     if (msg === '!測試官方推文' || msg === '!testtweet') {
         await message.channel.sendTyping();
         console.log(`🎯 主管手動觸發官方推文測試擷取...`);
@@ -197,10 +177,11 @@ client.on('messageCreate', async (message) => {
                 if (match) {
                     let tweetContent = match[1].replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1');
                     
-                    // 🛠️ 手動測試同步修正：一階正則網域替換，徹底消滅 vxvxtwitter
+                    // 🛠️ 【核心修復】：手動指令測試也同步切除 #m
                     const rawLink = match[2].trim().replace('http://', 'https://');
-                    const vxTweetLink = rawLink.replace(/https:\/\/[^\/]+/, 'https://vxtwitter.com');
-                    const tweetLink = rawLink.replace(/https:\/\/[^\/]+/, 'https://x.com');
+                    const cleanLink = rawLink.split('#')[0];
+                    const vxTweetLink = cleanLink.replace(/https:\/\/[^\/]+/, 'https://vxtwitter.com');
+                    const tweetLink = cleanLink.replace(/https:\/\/[^\/]+/, 'https://x.com');
                     
                     const testEmbed = new EmbedBuilder()
                         .setTitle(`📊 [手動觀測測試] ${TARGET_USER.displayName}`)
@@ -229,7 +210,6 @@ client.on('messageCreate', async (message) => {
         return;
     }
 
-    // 指令：Steam API 連動 - 查詢邊獄公司即時在線人數
     if (msg === '!邊獄人數' || msg === '!limbusonline') {
         try {
             const response = await fetch('https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/?appid=1973530');
@@ -247,7 +227,6 @@ client.on('messageCreate', async (message) => {
         }
     }
 
-    // 指令：心理學與運行紀錄報告
     if (msg === '!狀態' || msg === '!status') {
         const uptimeMs = new Date() - systemStartTime;
         const uptimeHours = (uptimeMs / (1000 * 60 * 60)).toFixed(1);
@@ -271,7 +250,6 @@ client.on('messageCreate', async (message) => {
         return message.reply({ embeds: [embed] });
     }
 
-    // 指令：🎲 腦葉公司 E.G.O 抽取與標籤分析系統
     if (msg === '!ego') {
         const egoList = [
             { name: "薄暮 (Twilight)", grade: "ALEPH", desc: "調和所有矛盾與偏見的終極大劍。暗示個體拒絕接受單一標籤，試圖在黑白混沌的世界中強行抓住平衡，常伴隨極度的精神內耗。" },
@@ -298,7 +276,6 @@ client.on('messageCreate', async (message) => {
         return message.reply({ embeds: [egoEmbed] });
     }
 
-    // 指令：⚠️ 核心控制室能量逆流警報卡片
     if (msg === '!逆流') {
         const alarmEmbed = new EmbedBuilder()
             .setTitle("⚠️ [WARNING] 腦葉公司核心控制室緊急通告")
@@ -316,11 +293,10 @@ client.on('messageCreate', async (message) => {
         return message.reply({ embeds: [alarmEmbed] });
     }
 
-    // 指令：尋找伺服器內特定機器人
     if (msg.startsWith('!尋找機器人') || msg.startsWith('!findbot')) {
         const args = msg.split(' ');
         if (args.length < 2) {
-            return message.reply('❌ 請輸入要尋找的機器人名稱或關鍵字！例如：`!尋找機器人 邊獄`');
+            return message.reply('❌ 請輸入要尋找的機器人名稱或關鍵字！');
         }
 
         const searchTerm = args.slice(1).join(' ').toLowerCase();
@@ -343,14 +319,12 @@ client.on('messageCreate', async (message) => {
             return message.reply(responseList);
         } catch (error) {
             console.error('尋找機器人時發生錯誤:', error);
-            return message.reply('❌ 尋找機器人時發生內部錯誤，請確保 Angela 擁有檢視成員清單的權限。');
+            return message.reply('❌ 尋找機器人時發生內部錯誤。');
         }
     }
 });
 
-// 🔒 安全讀取環境變數 Token
 const TOKEN = process.env.DISCORD_TOKEN;
-
 client.login(TOKEN).catch(err => {
-    console.error("❌ 機器人登入失敗，請檢查 Token 是否正確或過期：", err);
+    console.error("❌ 機器人登入失敗：", err);
 });
