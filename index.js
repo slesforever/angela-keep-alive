@@ -1,15 +1,6 @@
 const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 const express = require('express');
 
-// 強制診斷：看看這裡面到底有什麼
-const importedData = require('./identitiesData.js');
-console.log('🚨 診斷報告：導入的資料內容是:', importedData);
-
-// 如果報錯消失了，或者我們能看到內容，就用這一行解構
-const { pullIdentity } = importedData;
-const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
-const express = require('express');
-
 const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 
 const app = express();
