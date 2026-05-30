@@ -225,23 +225,19 @@ export const identities = {
     ]
 };
 
-// 2. UP 對象設定
 const rateUpTargets = {
     '000': ["［蜘蛛巢：指環 父輩］鴻璐"],
     '00': ["［黑獸 巳支部］格里高爾"]
 };
 
-// 3. 整合後的抽卡函數
-export function pullIdentity(rarity) {
-    const p = pool[rarity] || [];
+function pullIdentity(rarity) {
+    const p = identities[rarity] || []; // 修正：從 identities 讀取
     const targets = rateUpTargets[rarity] || [];
     
-    // 50% 機率觸發 UP
     if (targets.length > 0 && Math.random() < 0.5) {
         return targets[Math.floor(Math.random() * targets.length)];
     }
     return p[Math.floor(Math.random() * p.length)];
 }
 
-// 4. 把原始資料也匯出 (如果推播或其他地方需要用到)
-export { pool as identities };
+module.exports = { identities, pullIdentity }; // 匯出兩者
