@@ -139,7 +139,6 @@ client.on('messageCreate', async (message) => {
             results.push(`${pullIdentity(rarity)} (${rarity === '000' ? '★★★' : rarity === '00' ? '★★' : '★'})`);
         }
         return message.reply(count === 10 ? `✨ **十連抽結果：**\n${results.join('\n')}` : `🎯 **單抽結果：**\n${results[0]}`);
-    }
 
     if (msg === '!ping') return message.reply('pong！');
 
