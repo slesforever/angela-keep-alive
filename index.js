@@ -1,26 +1,30 @@
 const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
+const mongoose = require('mongoose'); // 注入：雲端資料庫核心
 const express = require('express');
-const mongoose = require('mongoose'); // 💡 注入：雲端資料庫模
 
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 const identitiesData = require('./identitiesData.js');
 
-// ==================== 🛠️ MONGODB 雲端連線與資料結構 ====================
-const MONGO_URI = process.env.MONGO_URI || 'MONGO_URI';
+// ==================== 🛠️ MONGODB 資料庫連線與設定 ====================
+const MONGO_URI = process.env.MONGO_URI;
 
-mongoose.connect(MONGO_URI)
-    .then(() => console.log('[雲端] 成功連接至 MongoDB 資料庫'))
-    .catch(err => console.error('[錯誤] MongoDB 連線失敗:', err));
+if (!MONGO_URI) {
+    console.error('[警告] 找不到 MONGO_URI 環境變數！請記得至 Render 後台設定。');
+} else {
+    mongoose.connect(MONGO_URI)
+        .then(() => console.log('[⚡ 資料庫] 成功連接至 MongoDB 雲端資料庫！'))
+        .catch(err => console.error('[❌ 資料庫] 連線失敗，請檢查金鑰或密碼:', err));
+}
 
-// 定義使用者背包資料 Schema
+// 定義玩家的資料庫儲存結構 (Schema)
 const userSchema = new mongoose.Schema({
     discordId: { type: String, required: true, unique: true },
-    ownedIdentities: { type: [String], default: [] } // 儲存玩家擁有的完整人格字串
+    ownedIdentities: [String] // 儲存玩家抽到的角色名稱陣列
 });
 
 const User = mongoose.model('User', userSchema);
-// ===================================================================
 
+// ==================== 網頁伺服器設定 (Render 喚醒用) ====================
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -52,12 +56,7 @@ let lastRateUpSnapshot = JSON.stringify(
     {}
 );
 
-/* ---------------- RATE UP DATA ----------------
-   這裡會自動讀 identitiesData.js 裡的這幾種格式：
-   - upTargets: { '000': ['...'], '00': ['...'], '0': ['...'] }
-   - rateUpIds:  { '000': ['...'], '00': ['...'], '0': ['...'] }
-   - targetIdentities: 若你還在用舊格式，也會盡量相容
-*/
+/* ---------------- RATE UP DATA ---------------- */
 const rateUpSource =
     identitiesData.upTargets ||
     identitiesData.rateUpIds ||
@@ -85,17 +84,13 @@ function rarityToStars(rarity) {
 function normalizeRateUpList(rarity) {
     const value = rateUpSource[rarity];
     if (!value) return [];
-
     if (Array.isArray(value)) return value.filter(Boolean);
-
     if (typeof value === 'string') return [value];
-
     if (typeof value === 'object') {
         if (Array.isArray(value.names)) return value.names.filter(Boolean);
         if (Array.isArray(value.ids)) return value.ids.filter(Boolean);
         if (typeof value.name === 'string' && value.name.trim()) return [value.name.trim()];
     }
-
     return [];
 }
 
@@ -160,8 +155,7 @@ async function fetchLatestTweetFromNode(nodeUrl) {
 }
 
 app.get('/', (req, res) => {
-    // 改成 sendStatus(200)，只回傳成功燈號，內容容量變為 0 byte！
-    res.sendStatus(200); 
+    res.sendStatus(200); // 保持最省流量的極簡 200 回應
 });
 
 app.listen(PORT, () => {
@@ -217,51 +211,28 @@ client.once('ready', async () => {
 async function announceCurrentRateUps() {
     try {
         const channel = await client.channels.fetch(RATEUP_ANNOUNCE_CHANNEL_ID);
-
         if (!channel) return;
 
         const r000 = normalizeRateUpList('000');
         const r00 = normalizeRateUpList('00');
         const r0 = normalizeRateUpList('0');
-
         const sections = [];
 
-        if (r000.length) {
-            sections.push(
-                `### 000\n${r000.map(v => `• ${v}`).join('\n')}`
-            );
-        }
-
-        if (r00.length) {
-            sections.push(
-                `### 00\n${r00.map(v => `• ${v}`).join('\n')}`
-            );
-        }
-
-        if (r0.length) {
-            sections.push(
-                `### 0\n${r0.map(v => `• ${v}`).join('\n')}`
-            );
-        }
+        if (r000.length) sections.push(`### 000\n${r000.map(v => `• ${v}`).join('\n')}`);
+        if (r00.length) sections.push(`### 00\n${r00.map(v => `• ${v}`).join('\n')}`);
+        if (r0.length) sections.push(`### 0\n${r0.map(v => `• ${v}`).join('\n')}`);
 
         await channel.send({
             embeds: [
                 new EmbedBuilder()
                     .setColor(0xffd166)
                     .setTitle('📢 Rate Up 人格資料已載入')
-                    .setDescription(
-                        sections.length
-                            ? sections.join('\n\n')
-                            : '目前沒有設定任何 Rate Up 人格。'
-                    )
-                    .setFooter({
-                        text: '資料來源：identitiesData.js'
-                    })
+                    .setDescription(sections.length ? sections.join('\n\n') : '目前沒有設定任何 Rate Up 人格。')
+                    .setFooter({ text: '資料來源：identitiesData.js' })
                     .setTimestamp()
             ]
         });
-    }
-    catch (err) {
+    } catch (err) {
         console.error('Rate Up 公告失敗:', err);
     }
 }
@@ -289,7 +260,6 @@ async function checkTwitterUpdates() {
                     });
                 }
             }
-
             break;
         } catch (error) {
             console.warn(`⚠️ 節點 [${nodeUrl}] 擷取異常 (${error.message})，嘗試下一個備援空間...`);
@@ -349,7 +319,6 @@ client.on('messageCreate', async (message) => {
             if (data?.response?.result === 1) {
                 return message.reply(`📊 **[Steam 即時數據]** 目前共有 **${data.response.player_count.toLocaleString()}** 位罪人正在《Limbus Company》中進行探索。`);
             }
-
             return message.reply('❌ 無法從 Steam API 取得正確的數據。');
         } catch (error) {
             return message.reply('❌ 連線至 Steam 伺服器時發生內部錯誤。');
@@ -387,7 +356,7 @@ client.on('messageCreate', async (message) => {
             {
                 name: '失樂園 (Paradise Lost)',
                 grade: 'ALEPH',
-                desc: '純白羽翼覆蓋的禁忌法杖。象徵對「完美標籤」的病態追求，個體容易因為試圖符合他人的神聖期望而陷入更深沉的 Burnout。'
+                desc: '純白羽翼覆蓋的禁忌法杖。象徵對「完美標籤」的病態追求，個體容易 because 試圖符合他人的神聖期望而陷入更深沉的 Burnout。'
             },
             {
                 name: '擬態 (Mimicry)',
@@ -409,7 +378,7 @@ client.on('messageCreate', async (message) => {
             .setFooter({ text: 'Angela 心理提取模組' })
             .setTimestamp();
 
-        return message.reply({ embeds: [embed || egoEmbed] }); // 修正為優先返回正確的 egoEmbed
+        return message.reply({ embeds: [egoEmbed] });
     }
 
     if (msg === '!逆流') {
@@ -427,82 +396,44 @@ client.on('messageCreate', async (message) => {
         return message.reply({ embeds: [alarmEmbed] });
     }
 
-    // ==================== 🎯 核心修正：!pull 與 !10pulls (整合雲端儲存) ====================
+    // ---------------- ⚡ 優化：!pull 與 !10pulls (結合背景寫入資料庫) ----------------
     if (msg === '!pull' || msg === '!10pulls') {
         const count = msg === '!10pulls' ? 10 : 1;
         const results = [];
-        const identitiesToSave = []; // 儲存準備寫入雲端的名字陣列
+        const identitiesToSave = []; // 用來存進資料庫的乾淨名字陣列
 
         for (let i = 0; i < count; i++) {
             const rarity = buildRarity();
             const rateUpName = pickRateUp(rarity);
 
-            let result = pullIdentity(rarity);
-            let finalIdentityName = result; // 用於塞入資料庫的乾淨名稱
+            let baseIdentityName = pullIdentity(rarity);
+            let displayResult = baseIdentityName;
 
             if (rateUpName && Math.random() < 0.25) {
-                result = `✨ **[PICK-UP!]** ${rateUpName}`;
-                finalIdentityName = rateUpName; // 如果是 pick-up，雲端存 pick-up 的名字
+                displayResult = `✨ **[PICK-UP!]** ${rateUpName}`;
+                baseIdentityName = rateUpName; // 如果中了 PickUp，儲存的名字換成對應的人格
             }
 
-            identitiesToSave.push(finalIdentityName);
-            results.push(`${result} (${rarityToStars(rarity)})`);
+            identitiesToSave.push(baseIdentityName);
+            results.push(`${displayResult} (${rarityToStars(rarity)})`);
         }
 
-        // 💡 異步寫入雲端資料庫（使用 $addToSet 避免背包重複塞入同名角色，使用 $each 一次寫入多筆）
-        try {
-            await User.updateOne(
+        // 🚀 背景無感儲存：如果不影響回應速度，悄悄寫入 MongoDB
+        if (MONGO_URI) {
+            User.updateOne(
                 { discordId: message.author.id },
                 { $addToSet: { ownedIdentities: { $each: identitiesToSave } } },
                 { upsert: true }
-            );
-        } catch (dbError) {
-            console.error('[雲端資料庫錯誤] 寫入玩家抽卡資料失敗:', dbError);
+            ).catch(dbError => {
+                console.error('[雲端資料庫錯誤] 背景寫入玩家抽卡資料失敗:', dbError);
+            });
         }
 
         return message.reply(
             count === 10
-                ? `✨ **十連抽結果：**\n${results.join('\n')}\n*(數據已成功同步至 LCB 雲端背包)*`
-                : `🎯 **單抽結果：**\n${results[0]}\n*(數據已成功同步至 LCB 雲端背包)*`
+                ? `✨ **十連抽結果：**\n${results.join('\n')}\n*(檔案館數據同步中...)*`
+                : `🎯 **單抽結果：**\n${results[0]}\n*(檔案館數據同步中...)*`
         );
-    }
-
-    // ==================== 📊 全新擴充：!list 背包查詢指令 ====================
-    if (msg === '!list' || msg === '!背包') {
-        try {
-            // 1. 自動讀取 identitiesData.js 裡的所有人格作為靜態比對總清單
-            const staticPool = identitiesData.identities || identitiesData.upTargets || identitiesData.rateUpIds || {};
-            const allIdentitiesList = Object.values(staticPool).flat().filter(v => typeof v === 'string');
-
-            // 2. 從 MongoDB 撈取該使用者的擁有資料
-            const userStatus = await User.findOne({ discordId: message.author.id });
-            const userOwnedNames = userStatus ? userStatus.ownedIdentities : [];
-
-            if (!allIdentitiesList.length) {
-                // 如果外部腳本沒提供總表，退而求其次只顯示已抽到的清單
-                return message.reply(`📊 **[雲端觀測背包]**\n您目前已解鎖的人格項目：\n${userOwnedNames.length ? userOwnedNames.map(v => `• ${v}`).join('\n') : '目前尚無觀測紀錄。'}`);
-            }
-
-            // 3. 產生全人格對比報表
-            const report = allIdentitiesList.map(identity => {
-                const hasIt = userOwnedNames.includes(identity);
-                return `${hasIt ? '✅ 有' : '❌ 無'} ｜ ${identity}`;
-            }).join('\n');
-
-            // 4. 超過 2000 字元自動切圖/分段發送機制
-            if (report.length > 1900) {
-                const chunks = report.match(/[\s\S]{1,1900}(?=\n|$)/g) || [report];
-                await message.channel.send('### 📊 目前觀測到的人格圖鑑總清單：');
-                for (const chunk of chunks) {
-                    await message.channel.send(chunk);
-                }
-            } else {
-                await message.channel.send(`### 📊 目前觀測到的人格圖鑑總清單：\n${report}`);
-            }
-        } catch (error) {
-            console.error('[錯誤] 執行 !list 背包比對失敗:', error);
-            return message.reply('❌ **報告主管，無法與大腦核心同步，雲端背包讀取超時。**');
-        }
     }
 
     if (msg === '!checkrateupids') {
@@ -515,20 +446,32 @@ client.on('messageCreate', async (message) => {
         }
 
         const lines = [];
-
-        if (r000.length > 0) {
-            lines.push(`**000**\n${r000.map(v => `• ${v}`).join('\n')}`);
-        }
-
-        if (r00.length > 0) {
-            lines.push(`**00**\n${r00.map(v => `• ${v}`).join('\n')}`);
-        }
-
-        if (r0.length > 0) {
-            lines.push(`**0**\n${r0.map(v => `• ${v}`).join('\n')}`);
-        }
+        if (r000.length > 0) lines.push(`**000**\n${r000.map(v => `• ${v}`).join('\n')}`);
+        if (r00.length > 0) lines.push(`**00**\n${r00.map(v => `• ${v}`).join('\n')}`);
+        if (r0.length > 0) lines.push(`**0**\n${r0.map(v => `• ${v}`).join('\n')}`);
 
         return message.reply(`📈 **目前機率提升人格**\n\n${lines.join('\n\n')}`);
+    }
+
+    // ---------------- 📚 新增功能：!圖鑑 或 !collection (讀取雲端資料庫) ----------------
+    if (msg === '!圖鑑' || msg === '!collection') {
+        if (!MONGO_URI) {
+            return message.reply('❌ 報告主管：雲端資料庫未正常連線，無法讀取個人檔案館。');
+        }
+
+        try {
+            const userData = await User.findOne({ discordId: message.author.id });
+
+            if (!userData || !userData.ownedIdentities || userData.ownedIdentities.length === 0) {
+                return message.reply('📭 您的檔案館目前空空如也呢。請使用 `!pull` 抽取人格進行記錄吧。');
+            }
+
+            const totalOwned = userData.ownedIdentities.length;
+            return message.reply(`📚 **主管 ${message.author.username} 的個人提取圖鑑 (已解鎖 ${totalOwned} 筆紀錄)：**\n${userData.ownedIdentities.map(id => `• ${id}`).join('\n')}`);
+        } catch (err) {
+            console.error('[圖鑑讀取錯誤]', err);
+            return message.reply('❌ 提取圖鑑檔案時發生內部的認知錯誤，請稍後再試。');
+        }
     }
 
     if (msg.startsWith('!尋找機器人') || msg.startsWith('!findbot')) {
