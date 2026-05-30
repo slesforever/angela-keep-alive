@@ -4,7 +4,7 @@
   "description": "Angela Bot for Discord - Stream & Twitter Feature Version",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.cjs"
   },
   "dependencies": {
     "discord.js": "^14.14.1",
