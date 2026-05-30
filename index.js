@@ -75,7 +75,7 @@ client.once('ready', async () => {
     checkTwitterUpdates();
 });
 
-// 📡 自動高頻輪詢 (已修正：帶有 PING 身分組與極簡影像網址)
+// 📡 自動高頻輪詢 (帶有 PING 身分組與極簡影像網址)
 async function checkTwitterUpdates() {
     console.log(`⏳ Angela 正在發射高速觀測脈衝，檢查官方 @${TARGET_USER.username} 的動態...`);
     totalTweetsChecked++;
@@ -110,7 +110,7 @@ async function checkTwitterUpdates() {
                     lastFetchedId = tweetId;
                     const channel = await client.channels.fetch(NOTIFY_CHANNEL_ID);
                     if (channel) {
-                        // ✨ 這裡在自動廣播時會好好地 PING 身分組，並附上您的專屬導言
+                        // ✨ 自動輪詢發送
                         await channel.send({ content: `🔔 ${PING_ROLE_MENTION} **偵測到脈衝，已收到 Project Moon 的最新訊息：**\n${vxTweetLink}` });
                     }
                 }
@@ -137,7 +137,7 @@ client.on('messageCreate', async (message) => {
         return message.reply('「直面恐懼，創造未來。」請時刻注意收容單位的逆流計數器，主管。');
     }
 
-    // 手動指令測試 (維持純連結回覆，點擊即直接預覽)
+    // 手動指令測試 (修正：同步加上 PING 與 專屬導言)
     if (msg === '!測試官方推文' || msg === '!testtweet') {
         await message.channel.sendTyping();
         console.log(`🎯 主管手動觸發官方推文測試擷取...`);
@@ -163,8 +163,8 @@ client.on('messageCreate', async (message) => {
                     const cleanLink = rawLink.split('#')[0];
                     const vxTweetLink = cleanLink.replace(/https:\/\/[^\/]+/, 'https://vxtwitter.com');
                     
-                    // 手動測試時只回傳純連結，以便主管檢視 Discord 原生渲染效果
-                    await message.reply({ content: vxTweetLink });
+                    // ✨ 修正：手動測試現在也會正確噴出 PING 身分組與 Project Moon 的專屬導言！
+                    await message.reply({ content: `🔔 ${PING_ROLE_MENTION} **偵測到脈衝，已收到 Project Moon 的最新訊息：**\n${vxTweetLink}` });
                     fetchSuccess = true;
                     break;
                 }
