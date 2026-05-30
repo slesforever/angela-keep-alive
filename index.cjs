@@ -1,17 +1,17 @@
 const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 const express = require('express');
-// 確保這裡引用的是 .cjs 檔案
 const { pullIdentity, targetIdentities } = require('./identitiesData.cjs');
-
-// 動態引入 node-fetch，這在 CJS 環境下是正確的寫法
-const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 const systemStartTime = new Date();
 let totalTweetsChecked = 0;
-const TARGET_USER = { username: 'LimbusCompany_B', displayName: '邊獄公司 (Limbus Company) 官方最新公告' };
+
+const TARGET_USER = {
+    username: 'LimbusCompany_B',
+    displayName: '邊獄公司 (Limbus Company) 官方最新公告'
+};
 
 const NITTER_NODES = [
     'https://nitter.net',
@@ -24,210 +24,215 @@ let lastFetchedId = null;
 const NOTIFY_CHANNEL_ID = "1402282604165730348";
 const PING_ROLE_MENTION = "<@&1406984068725211177>";
 
+/* ---------------- EXPRESS ---------------- */
 app.get('/', (req, res) => {
-    res.send('Angela 系統運作正常。歡迎來到腦葉公司核心控制室。');
+    res.send('Angela 系統運作正常。');
 });
 
 app.listen(PORT, () => {
-    console.log(`網頁伺服器已在連接埠 ${PORT} 啟動`);
+    console.log(`Web server running on ${PORT}`);
 });
 
+/* ---------------- DISCORD CLIENT ---------------- */
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildMembers
+        GatewayIntentBits.MessageContent
     ]
 });
 
+/* ---------------- READY ---------------- */
 client.once('ready', async () => {
-    console.log(`🤖 遵從您的指示，Angela 已成功登入為：${client.user.tag}`);
-    
+    console.log(`Logged in as ${client.user.tag}`);
+
     client.user.setPresence({
         status: 'idle',
         activities: [{
-            name: 'customstatus',
+            name: 'observing',
             type: 4,
-            state: '正在觀測核心控制室的心理逆流與光之種進度...'
+            state: '監測 Project Moon 官方動態中...'
         }]
     });
 
     try {
         const channel = await client.channels.fetch(NOTIFY_CHANNEL_ID);
+
         if (channel) {
-            const loginEmbed = new EmbedBuilder()
-                .setTitle("🟢 系統連線：AI 助理 Angela 已重新上線")
+            const embed = new EmbedBuilder()
+                .setTitle("🟢 Angela 已上線")
                 .setColor(0x00b4d8)
-                .setDescription("「主管，精神脈衝已重新對齊。廣播模組已調整完畢，隨時準備播報 Project Moon 的最新動態。」")
+                .setDescription("系統已重新連線，開始監測官方動態。")
                 .addFields(
-                    { name: "📡 觀測目標", value: `@${TARGET_USER.username}`, inline: true },
-                    { name: "⏱️ 監聽頻率", value: "每 1 分鐘 / 1 次", inline: true }
+                    { name: "🎯 目標", value: TARGET_USER.username, inline: true },
+                    { name: "⏱️ 間隔", value: "60 秒", inline: true }
                 )
-                .setFooter({ text: "腦葉公司行政中心 - 核心AI系統" })
                 .setTimestamp();
 
-            await channel.send({ embeds: [loginEmbed] });
+            channel.send({ embeds: [embed] });
         }
-    } catch (err) {
-        console.error("❌ 啟動發送訊息失敗:", err.message);
+    } catch (e) {
+        console.error("Startup message failed:", e);
     }
-    
+
     setInterval(checkTwitterUpdates, 60 * 1000);
     checkTwitterUpdates();
 });
 
-// 📡 自動高頻輪詢
+/* ---------------- SAFE FETCH (Node18+) ---------------- */
+async function safeFetch(url) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+
+    try {
+        const res = await fetch(url, {
+            signal: controller.signal,
+            headers: {
+                'User-Agent': 'Mozilla/5.0'
+            }
+        });
+
+        clearTimeout(timeout);
+        return res;
+    } catch (e) {
+        clearTimeout(timeout);
+        throw e;
+    }
+}
+
+/* ---------------- RSS PARSER ---------------- */
+function parseLatestItem(xml) {
+    const itemMatch = xml.match(/<item>[\s\S]*?<\/item>/);
+    if (!itemMatch) return null;
+
+    const item = itemMatch[0];
+
+    const link = item.match(/<link>(.*?)<\/link>/)?.[1];
+    const guid = item.match(/<guid[^>]*>(.*?)<\/guid>/)?.[1];
+
+    if (!link || !guid) return null;
+
+    return {
+        link: link.trim().replace('http://', 'https://'),
+        id: guid.trim()
+    };
+}
+
+/* ---------------- CHECK TWITTER ---------------- */
 async function checkTwitterUpdates() {
-    console.log(`⏳ Angela 正在發射高速觀測脈衝，檢查官方 @${TARGET_USER.username} 的動態...`);
+    console.log(`Checking @${TARGET_USER.username}...`);
     totalTweetsChecked++;
 
-    for (const nodeUrl of NITTER_NODES) {
+    for (const node of NITTER_NODES) {
         try {
-            const url = `${nodeUrl}/${TARGET_USER.username}/rss`;
-            const response = await fetch(url, {
-                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-                timeout: 8000
-            });
-            
-            if (!response.ok) throw new Error(`HTTP 錯誤! 狀態碼: ${response.status}`);
-            
-            const text = await response.text();
-            const itemRegex = /<item>[\s\S]*?<link>([\s\S]*?)<\/link>[\s\S]*?<guid[\s\S]*?>([\s\S]*?)<\/guid>/g;
-            const match = itemRegex.exec(text);
+            const url = `${node}/${TARGET_USER.username}/rss`;
+            const res = await safeFetch(url);
 
-            if (match) {
-                const rawLink = match[1].trim().replace('http://', 'https://');
-                const cleanLink = rawLink.split('#')[0]; 
-                const vxTweetLink = cleanLink.replace(/https:\/\/[^\/]+/, 'https://vxtwitter.com');
-                const tweetId = match[2].trim();
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-                if (!lastFetchedId) {
-                    lastFetchedId = tweetId;
-                    console.log(`📦 [${nodeUrl}] 成功建立 @${TARGET_USER.username} 的初始推文快取：${tweetId}`);
-                    break;
-                }
+            const xml = await res.text();
+            const data = parseLatestItem(xml);
 
-                if (tweetId !== lastFetchedId) {
-                    lastFetchedId = tweetId;
-                    const channel = await client.channels.fetch(NOTIFY_CHANNEL_ID);
-                    if (channel) {
-                        await channel.send({ content: `🔔 ${PING_ROLE_MENTION} **偵測到脈衝，已收到 Project Moon 的最新訊息：**\n${vxTweetLink}` });
-                    }
-                }
+            if (!data) continue;
+
+            const vxLink = data.link.replace(
+                /^https:\/\/[^/]+/,
+                'https://vxtwitter.com'
+            );
+
+            if (!lastFetchedId) {
+                lastFetchedId = data.id;
+                console.log(`[INIT] cached tweet ${data.id}`);
                 break;
             }
-        } catch (error) {
-            console.warn(`⚠️ 節點 [${nodeUrl}] 擷取異常 (${error.message})，嘗試下一個備援空間...`);
+
+            if (data.id !== lastFetchedId) {
+                lastFetchedId = data.id;
+
+                const channel = await client.channels.fetch(NOTIFY_CHANNEL_ID);
+                if (channel) {
+                    channel.send({
+                        content: `🔔 ${PING_ROLE_MENTION}\n${vxLink}`
+                    });
+                }
+            }
+
+            break;
+        } catch (err) {
+            console.warn(`[${node}] failed: ${err.message}`);
         }
     }
 }
 
+/* ---------------- MESSAGE HANDLER ---------------- */
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
+
     const msg = message.content.trim();
 
-    if (msg === '!ping') return message.reply('pong！');
-    if (msg === '管理員' || msg === '主管') return message.reply('主管，您好。我是您的 AI 助理 Angela。請下達您的指示，今天也請為了擴張「光之種」而努力。');
-    if (msg.toLowerCase() === 'lc' || msg === '腦葉公司') return message.reply('「直面恐懼，創造未來。」請時刻注意收容單位的逆流計數器，主管。');
+    if (msg === '!ping') return message.reply('pong');
 
-    // 手動指令測試
-    if (msg === '!測試官方推文' || msg === '!testtweet') {
-        await message.channel.sendTyping();
-        let fetchSuccess = false;
-        for (const nodeUrl of NITTER_NODES) {
+    if (msg === '!測試官方推文') {
+        for (const node of NITTER_NODES) {
             try {
-                const url = `${nodeUrl}/${TARGET_USER.username}/rss`;
-                const response = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 8000 });
-                if (!response.ok) throw new Error(`HTTP 狀態碼: ${response.status}`);
-                const text = await response.text();
-                const itemRegex = /<item>[\s\S]*?<link>([\s\S]*?)<\/link>[\s\S]*?<guid[\s\S]*?>([\s\S]*?)<\/guid>/g;
-                const match = itemRegex.exec(text);
-                if (match) {
-                    const rawLink = match[1].trim().replace('http://', 'https://');
-                    const cleanLink = rawLink.split('#')[0];
-                    const vxTweetLink = cleanLink.replace(/https:\/\/[^\/]+/, 'https://vxtwitter.com');
-                    await message.reply({ content: `🔔 ${PING_ROLE_MENTION} **偵測到脈衝，已收到 Project Moon 的最新訊息：**\n${vxTweetLink}` });
-                    fetchSuccess = true;
-                    break;
-                }
-            } catch (error) { console.warn(`⚠️ 測試節點 [${nodeUrl}] 異常: ${error.message}`); }
+                const res = await safeFetch(`${node}/${TARGET_USER.username}/rss`);
+                const xml = await res.text();
+                const data = parseLatestItem(xml);
+
+                if (!data) continue;
+
+                const vxLink = data.link.replace(
+                    /^https:\/\/[^/]+/,
+                    'https://vxtwitter.com'
+                );
+
+                return message.reply(`🔔 最新推文:\n${vxLink}`);
+            } catch {}
         }
-        if (!fetchSuccess) return message.reply(`❌ **所有節點連線超時。**`);
-        return;
+
+        return message.reply('❌ 全節點失敗');
     }
 
-    if (msg === '!邊獄人數' || msg === '!limbusonline') {
+    if (msg === '!邊獄人數') {
         try {
-            const response = await fetch('https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/?appid=1973530');
-            const data = await response.json();
-            if (data?.response?.result === 1) return message.reply(`📊 **[Steam 即時數據]** 目前共有 **${data.response.player_count.toLocaleString()}** 位罪人正在《Limbus Company》中進行探索。`);
-            return message.reply('❌ 無法取得數據。');
-        } catch (error) { return message.reply('❌ 連線錯誤。'); }
+            const res = await safeFetch(
+                'https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/?appid=1973530'
+            );
+
+            const data = await res.json();
+
+            return message.reply(
+                `👥 玩家數：${data.response.player_count.toLocaleString()}`
+            );
+        } catch {
+            return message.reply('❌ Steam API error');
+        }
     }
 
-    if (msg === '!狀態' || msg === '!status') {
-        const uptimeMs = new Date() - systemStartTime;
-        const uptimeHours = (uptimeMs / (1000 * 60 * 60)).toFixed(1);
+    if (msg === '!狀態') {
+        const uptime = ((Date.now() - systemStartTime) / 3600000).toFixed(1);
+
         const embed = new EmbedBuilder()
-            .setTitle("🧠 認知心理學 - 情感共鳴與系統狀態報告")
+            .setTitle("System Status")
             .setColor(0x5a189a)
             .addFields(
-                { name: "🏷️ 當前標籤", value: "「被觀測者」", inline: true },
-                { name: "📊 心理狀態", value: "🛑 精神枯竭 (Burnout)", inline: true },
-                { name: "⏳ 核心運作時間", value: `${uptimeHours} 小時`, inline: true }
+                { name: "運行時間", value: `${uptime}h`, inline: true },
+                { name: "檢查次數", value: `${totalTweetsChecked}`, inline: true }
             );
+
         return message.reply({ embeds: [embed] });
     }
 
-    if (msg === '!ego') {
-        const egoList = [
-            { name: "薄暮 (Twilight)", grade: "ALEPH" },
-            { name: "失樂園 (Paradise Lost)", grade: "ALEPH" },
-            { name: "擬態 (Mimicry)", grade: "ALEPH" }
-        ];
-        const randomEgo = egoList[Math.floor(Math.random() * egoList.length)];
-        const embed = new EmbedBuilder()
-            .setTitle(`⚔️ 核心共鳴：E.G.O 同步觀測報告`)
-            .setColor(0xd90429)
-            .addFields({ name: "✨ 裝備", value: `**${randomEgo.name}**`, inline: true }, { name: "🔱 等級", value: `\`${randomEgo.grade}\``, inline: true });
-        return message.reply({ embeds: [embed] });
-    }
+    if (msg === '!pull') {
+        const rarity =
+            Math.random() < 0.03 ? '000' :
+            Math.random() < 0.16 ? '00' : '0';
 
-    if (msg === '!逆流') {
-        const embed = new EmbedBuilder().setTitle("⚠️ [WARNING] 腦葉公司核心控制室緊急通告").setColor(0xff0000).setDescription(`警告：當前頻道內觀測到嚴重的「心理逆流」現象！`);
-        return message.reply({ embeds: [embed] });
-    }
+        const name = pullIdentity(rarity);
 
-    // 抽卡指令
-    if (msg === '!pull' || msg === '!10pulls') {
-        const count = (msg === '!10pulls') ? 10 : 1;
-        let results = [];
-        const target = targetIdentities[message.author.id]; 
-        for (let i = 0; i < count; i++) {
-            const rand = Math.random();
-            let rarity = (rand < 0.029) ? '000' : (rand < 0.157) ? '00' : '0';
-            if (target && target.rarity === rarity && Math.random() < 0.25) {
-                results.push(`✨ **[PICK-UP!]** ${target.name}`);
-            } else {
-                const name = pullIdentity(rarity);
-                const stars = (rarity === '000') ? '★★★' : (rarity === '00') ? '★★' : '★';
-                results.push(`${name} (${stars})`);
-            }
-        }
-        return message.reply(count === 10 ? `✨ **十連抽結果：**\n${results.join('\n')}` : `🎯 **單抽結果：**\n${results[0]}`);
-    }
-
-    if (msg.startsWith('!尋找機器人') || msg.startsWith('!findbot')) {
-        const args = msg.split(' ');
-        if (args.length < 2) return message.reply('❌ 請輸入要尋找的機器人名稱！');
-        try {
-            const members = await message.guild.members.fetch();
-            const foundBots = members.filter(m => m.user.bot && m.user.username.toLowerCase().includes(args.slice(1).join(' ').toLowerCase()));
-            if (foundBots.size === 0) return message.reply(`🔍 找不到機器人。`);
-            return message.reply(`📌 **找到相關機器人：**\n` + foundBots.map(b => `🤖 **${b.user.username}** (<@${b.id}>)`).join('\n'));
-        } catch (e) { return message.reply('❌ 內部錯誤。'); }
+        return message.reply(`🎯 ${name} (${rarity})`);
     }
 });
 
+/* ---------------- LOGIN ---------------- */
 client.login(process.env.DISCORD_TOKEN);
