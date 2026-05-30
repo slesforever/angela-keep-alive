@@ -165,6 +165,22 @@ client.on('messageCreate', async (message) => {
     const msg = message.content.trim();
 
     if (msg === '!ping') return message.reply('pong！');
+    
+    if (msg === '!checkrateupids') {
+    if (rateUpIds.size === 0) {
+        return message.reply('📭 目前沒有任何機率提升中的人格。');
+    }
+
+    const list = [...rateUpIds];
+
+    const formatted = list
+        .map((id, index) => `${index + 1}. ${id}`)
+        .join('\n');
+
+    return message.reply(
+        `📈 **目前機率提升人格 (${list.length})**\n\n${formatted}`
+         );
+    }
 
     if (msg === '管理員' || msg === '主管') {
         return message.reply('主管，您好。我是您的 AI 助理 Angela。請下達您的指示，今天也請為了擴張「光之種」而努力。');
