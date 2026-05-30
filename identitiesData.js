@@ -169,22 +169,18 @@ const identities = {
   ]
 };
 
-// 你要提升機率的 identity 直接寫在這裡
 const upTargets = {
   '000': [
-    "［拉曼查地產 經理］堂吉訶德",
-    "［蜘蛛巢：食指 父輩］李箱"
+    "［拉曼查地產 經理］堂吉訶德"
   ],
   '00': [
-    "［黑獸 未支部］堂吉訶德",
-    "［W公司 2區 清道夫］浮士德"
+    "［黑獸 未支部］堂吉訶德"
   ],
   '0': []
 };
 
 function pullIdentity(rarity) {
   const pool = identities[rarity] || [];
-  if (!pool.length) return '（該稀有度沒有資料）';
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
