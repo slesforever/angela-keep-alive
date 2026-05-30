@@ -1,5 +1,5 @@
 // identitiesData.js
-export const identities = {
+export const pullIdentity = {
     '000': [
         // ========================
         // 🌟 蜘蛛巢 / 五指核心 (高階)
