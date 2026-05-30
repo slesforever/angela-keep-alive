@@ -168,7 +168,7 @@ client.once('ready', async () => {
         activities: [{
             name: 'customstatus',
             type: 4,
-            state: '正在觀測核心控制室的心理逆流與光之種進度...'
+            state: 'Sles被我吃掉了'
         }]
     });
 
