@@ -1,3 +1,9 @@
+client.on('messageCreate', (message) => {
+    // 強制測試：完全不篩選，只要你發任何訊息，它就回傳
+    if (message.content === '!debug') {
+        message.reply("Angela 系統核心接收成功！");
+    }
+});
 const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 const express = require('express');
 const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
