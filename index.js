@@ -8,7 +8,7 @@ const PORT = process.env.PORT || 3000;
 
 const systemStartTime = new Date();
 let totalTweetsChecked = 0;
-
+import { pullIdentity, targetIdentities } from './identitiesData.js';
 const TARGET_USER = { username: 'LimbusCompany_B', displayName: '邊獄公司 (Limbus Company) 官方最新公告' };
 
 const NITTER_NODES = [
