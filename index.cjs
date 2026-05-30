@@ -247,6 +247,7 @@ client.on('messageCreate', async (message) => {
 
 // 在你的 messageCreate 事件處理器中：
 if (msg === '!pull' || msg === '!10pulls') {
+    const { pullIdentity, targetIdentities } = require('./identitiesData.cjs');
     const count = (msg === '!10pulls') ? 10 : 1;
     let results = [];
     const target = targetIdentities[message.author.id]; // 獲取該用戶的目標
