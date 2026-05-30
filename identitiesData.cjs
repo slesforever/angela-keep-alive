@@ -225,14 +225,19 @@ export const identities = {
     ]
 };
 
-const targetIdentities = {
-    'ID': { rarity: '000', name: '［中指 小妹妹］堂吉訶德' },
-    '朋友的ID': { rarity: '000', name: '［蜘蛛巢：食指 父輩］李箱' }
+const upTargets = {
+    '000': "［拉曼查地產 經理］堂吉訶德",
+    '00': "［黑獸 未支部］堂吉訶德",
+    '0': null
 };
 
 function pullIdentity(rarity) {
-    const p = identities[rarity] || [];
-    return p[Math.floor(Math.random() * p.length)];
+    const pool = identities[rarity] || [];
+    return pool[Math.floor(Math.random() * pool.length)];
 }
 
-exports = { identities, targetIdentities, pullIdentity };
+module.exports = {
+    identities,
+    pullIdentity,
+    upTargets
+};
