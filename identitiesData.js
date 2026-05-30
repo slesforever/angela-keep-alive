@@ -59,6 +59,9 @@ const identities = {
     "［黑雲會 組長］以實瑪利 / Kurokumo Clan Captain Ishmael",
     "［黑雲會 組長］良秀 / Kurokumo Clan Captain Ryōshū",
     "［黑雲會 組長］格里高爾 / Kurokumo Clan Captain Gregor",
+    "［黑雲會 眾］希斯克里夫 / Kurokumo Clan Member Heathcliff",
+    "［黑雲會 眾］羅佳 / Kurokumo Clan Member Rodion",
+    "［黑雲會 眾］良秀 / Kurokumo Clan Member Ryōshū",
     "［W公司 3區 清道夫長］李箱 / W Corp. L3 Cleanup Agent Yi Sang",
     "［W公司 3區 清道夫長］良秀 / W Corp. L3 Cleanup Agent Ryōshū",
     "［W公司 3區 清道夫長］堂吉訶德 / W Corp. L3 Cleanup Agent Don Quixote",
@@ -98,10 +101,7 @@ const identities = {
 
   '00': [
     "［中指 小弟］默爾索 / Middle Brother Meursault",
-    "［黑雲會 眾］良秀 / Kurokumo Clan Member Ryōshū",
     "［黑雲會 眾］鴻璐 / Kurokumo Clan Member Hong Lu",
-    "［黑雲會 眾］希斯克里夫 / Kurokumo Clan Member Heathcliff",
-    "［黑雲會 眾］羅佳 / Kurokumo Clan Member Rodion",
     "［LCE E.G.O::提燈］李箱 / LCE E.G.O::Lantern Yi Sang",
     "［Lobotomy E.G.O::紅符］辛克萊 / Lobotomy E.G.O::Red Sheet Sinclair",
     "［Lobotomy E.G.O::游移］以實瑪利 / Lobotomy E.G.O::Sloshing Ishmael",
