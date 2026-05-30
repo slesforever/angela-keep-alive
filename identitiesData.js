@@ -225,6 +225,11 @@ export const identities = {
     ]
 };
 
+const rateUpTargets = {
+    '000': ["［蜘蛛巢：指環 父輩］鴻璐"],
+    '00': ["［黑獸 巳支部］格里高爾"]
+};
+
 function pullIdentity(rarity) {
     const p = identities[rarity] || [];
     const targets = rateUpTargets[rarity] || [];
