@@ -1,8 +1,25 @@
 const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 const express = require('express');
+const mongoose = require('mongoose'); // 💡 注入：雲端資料庫模組
 
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 const identitiesData = require('./identitiesData.js');
+
+// ==================== 🛠️ MONGODB 雲端連線與資料結構 ====================
+const MONGO_URI = process.env.MONGO_URI || 'MONGO_URI';
+
+mongoose.connect(MONGO_URI)
+    .then(() => console.log('[雲端] 成功連接至 MongoDB 資料庫'))
+    .catch(err => console.error('[錯誤] MongoDB 連線失敗:', err));
+
+// 定義使用者背包資料 Schema
+const userSchema = new mongoose.Schema({
+    discordId: { type: String, required: true, unique: true },
+    ownedIdentities: { type: [String], default: [] } // 儲存玩家擁有的完整人格字串
+});
+
+const User = mongoose.model('User', userSchema);
+// ===================================================================
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -195,8 +212,8 @@ client.once('ready', async () => {
     await announceCurrentRateUps();
     setInterval(checkTwitterUpdates, 60 * 1000);
     checkTwitterUpdates();
-
 });
+
 async function announceCurrentRateUps() {
     try {
         const channel = await client.channels.fetch(RATEUP_ANNOUNCE_CHANNEL_ID);
@@ -248,6 +265,7 @@ async function announceCurrentRateUps() {
         console.error('Rate Up 公告失敗:', err);
     }
 }
+
 async function checkTwitterUpdates() {
     console.log(`⏳ Angela 正在發射高速觀測脈衝，檢查官方 @${TARGET_USER.username} 的動態...`);
     totalTweetsChecked++;
@@ -391,7 +409,7 @@ client.on('messageCreate', async (message) => {
             .setFooter({ text: 'Angela 心理提取模組' })
             .setTimestamp();
 
-        return message.reply({ embeds: [egoEmbed] });
+        return message.reply({ embeds: [embed || egoEmbed] }); // 修正為優先返回正確的 egoEmbed
     }
 
     if (msg === '!逆流') {
@@ -409,28 +427,82 @@ client.on('messageCreate', async (message) => {
         return message.reply({ embeds: [alarmEmbed] });
     }
 
+    // ==================== 🎯 核心修正：!pull 與 !10pulls (整合雲端儲存) ====================
     if (msg === '!pull' || msg === '!10pulls') {
         const count = msg === '!10pulls' ? 10 : 1;
         const results = [];
+        const identitiesToSave = []; // 儲存準備寫入雲端的名字陣列
 
         for (let i = 0; i < count; i++) {
             const rarity = buildRarity();
             const rateUpName = pickRateUp(rarity);
 
             let result = pullIdentity(rarity);
+            let finalIdentityName = result; // 用於塞入資料庫的乾淨名稱
 
             if (rateUpName && Math.random() < 0.25) {
                 result = `✨ **[PICK-UP!]** ${rateUpName}`;
+                finalIdentityName = rateUpName; // 如果是 pick-up，雲端存 pick-up 的名字
             }
 
+            identitiesToSave.push(finalIdentityName);
             results.push(`${result} (${rarityToStars(rarity)})`);
+        }
+
+        // 💡 異步寫入雲端資料庫（使用 $addToSet 避免背包重複塞入同名角色，使用 $each 一次寫入多筆）
+        try {
+            await User.updateOne(
+                { discordId: message.author.id },
+                { $addToSet: { ownedIdentities: { $each: identitiesToSave } } },
+                { upsert: true }
+            );
+        } catch (dbError) {
+            console.error('[雲端資料庫錯誤] 寫入玩家抽卡資料失敗:', dbError);
         }
 
         return message.reply(
             count === 10
-                ? `✨ **十連抽結果：**\n${results.join('\n')}`
-                : `🎯 **單抽結果：**\n${results[0]}`
+                ? `✨ **十連抽結果：**\n${results.join('\n')}\n*(數據已成功同步至 LCB 雲端背包)*`
+                : `🎯 **單抽結果：**\n${results[0]}\n*(數據已成功同步至 LCB 雲端背包)*`
         );
+    }
+
+    // ==================== 📊 全新擴充：!list 背包查詢指令 ====================
+    if (msg === '!list' || msg === '!背包') {
+        try {
+            // 1. 自動讀取 identitiesData.js 裡的所有人格作為靜態比對總清單
+            const staticPool = identitiesData.identities || identitiesData.upTargets || identitiesData.rateUpIds || {};
+            const allIdentitiesList = Object.values(staticPool).flat().filter(v => typeof v === 'string');
+
+            // 2. 從 MongoDB 撈取該使用者的擁有資料
+            const userStatus = await User.findOne({ discordId: message.author.id });
+            const userOwnedNames = userStatus ? userStatus.ownedIdentities : [];
+
+            if (!allIdentitiesList.length) {
+                // 如果外部腳本沒提供總表，退而求其次只顯示已抽到的清單
+                return message.reply(`📊 **[雲端觀測背包]**\n您目前已解鎖的人格項目：\n${userOwnedNames.length ? userOwnedNames.map(v => `• ${v}`).join('\n') : '目前尚無觀測紀錄。'}`);
+            }
+
+            // 3. 產生全人格對比報表
+            const report = allIdentitiesList.map(identity => {
+                const hasIt = userOwnedNames.includes(identity);
+                return `${hasIt ? '✅ 有' : '❌ 無'} ｜ ${identity}`;
+            }).join('\n');
+
+            // 4. 超過 2000 字元自動切圖/分段發送機制
+            if (report.length > 1900) {
+                const chunks = report.match(/[\s\S]{1,1900}(?=\n|$)/g) || [report];
+                await message.channel.send('### 📊 目前觀測到的人格圖鑑總清單：');
+                for (const chunk of chunks) {
+                    await message.channel.send(chunk);
+                }
+            } else {
+                await message.channel.send(`### 📊 目前觀測到的人格圖鑑總清單：\n${report}`);
+            }
+        } catch (error) {
+            console.error('[錯誤] 執行 !list 背包比對失敗:', error);
+            return message.reply('❌ **報告主管，無法與大腦核心同步，雲端背包讀取超時。**');
+        }
     }
 
     if (msg === '!checkrateupids') {
@@ -486,7 +558,6 @@ client.on('messageCreate', async (message) => {
         }
     }
 });
-
 
 const TOKEN = process.env.DISCORD_TOKEN;
 client.login(TOKEN).catch(err => {
