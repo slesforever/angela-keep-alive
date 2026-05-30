@@ -2,13 +2,13 @@ name: Angela Keep Alive
 
 on:
   schedule:
-    - cron: '*/5 * * * *'  # 每 5 分鐘固定踢一次門
-  workflow_dispatch:       # 允許你手動點按鈕測試
+    - cron: '*/5 * * * *'  # 每 5 分鐘固定 ping 一次
+  workflow_dispatch:       # 允許手動測試
 
 jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Send Deploy Trigger (強迫 Angela 甦醒重啟)
+      - name: Send Ping
         run: |
-          curl -X https://angela-keep-alive.onrender.com/"
+          curl -I https://angela-keep-alive.onrender.com/
