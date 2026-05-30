@@ -1,14 +1,11 @@
 const { Client, GatewayIntentBits, EmbedBuilder, ActivityType } = require('discord.js');
 const express = require('express');
-const {
-    pullIdentity,
-    pullUpIdentity
-} = require('./identitiesData.js');
+const identitiesData = require('./identitiesData.js');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const systemStartTime = new Date();
+const systemStartTime = Date.now();
 let totalTweetsChecked = 0;
 
 const TARGET_USER = {
@@ -27,6 +24,44 @@ let lastFetchedId = null;
 const NOTIFY_CHANNEL_ID = '1402282604165730348';
 const PING_ROLE_MENTION = '<@&1406984068725211177>';
 
+/* ---------------- identitiesData 兼容層 ---------------- */
+const pullIdentity =
+    typeof identitiesData.pullIdentity === 'function'
+        ? identitiesData.pullIdentity
+        : () => '（identitiesData.js 缺少 pullIdentity）';
+
+function getUpIdentity(rarity) {
+    if (typeof identitiesData.pullUpIdentity === 'function') {
+        return identitiesData.pullUpIdentity(rarity);
+    }
+
+    const upTargets =
+        identitiesData.upTargets ||
+        identitiesData.targetIdentities ||
+        null;
+
+    if (!upTargets) return null;
+
+    const value = upTargets[rarity];
+    if (!value) return null;
+
+    if (Array.isArray(value)) {
+        if (value.length === 0) return null;
+        return value[Math.floor(Math.random() * value.length)];
+    }
+
+    if (typeof value === 'string') {
+        return value;
+    }
+
+    if (typeof value === 'object' && value.name) {
+        return value.name;
+    }
+
+    return null;
+}
+
+/* ---------------- EXPRESS ---------------- */
 app.get('/', (req, res) => {
     res.send('Angela 系統運作正常。歡迎來到腦葉公司核心控制室。');
 });
@@ -35,6 +70,7 @@ app.listen(PORT, () => {
     console.log(`網頁伺服器已在連接埠 ${PORT} 啟動`);
 });
 
+/* ---------------- DISCORD CLIENT ---------------- */
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -43,6 +79,20 @@ const client = new Client({
         GatewayIntentBits.GuildMembers
     ]
 });
+
+/* ---------------- HELPERS ---------------- */
+function buildRarity() {
+    const r = Math.random();
+    if (r < 0.029) return '000';
+    if (r < 0.157) return '00';
+    return '0';
+}
+
+function rarityToStars(rarity) {
+    if (rarity === '000') return '★★★';
+    if (rarity === '00') return '★★';
+    return '★';
+}
 
 function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
     const controller = new AbortController();
@@ -74,58 +124,70 @@ function parseLatestItem(xml) {
     };
 }
 
-function buildRarity() {
-    const r = Math.random();
-    if (r < 0.029) return '000';
-    if (r < 0.157) return '00';
-    return '0';
+async function fetchLatestTweetFromNode(nodeUrl) {
+    const url = `${nodeUrl}/${TARGET_USER.username}/rss`;
+    const response = await fetchWithTimeout(url, {}, 8000);
+
+    if (!response.ok) {
+        throw new Error(`HTTP 錯誤! 狀態碼: ${response.status}`);
+    }
+
+    const text = await response.text();
+    const data = parseLatestItem(text);
+
+    if (!data) {
+        throw new Error('RSS 解析失敗');
+    }
+
+    const cleanLink = data.link.split('#')[0];
+    const vxTweetLink = cleanLink.replace(/^https:\/\/[^/]+/, 'https://vxtwitter.com');
+
+    return {
+        id: data.id,
+        link: vxTweetLink
+    };
 }
 
 async function checkTwitterUpdates() {
     console.log(`⏳ Angela 正在發射高速觀測脈衝，檢查官方 @${TARGET_USER.username} 的動態...`);
     totalTweetsChecked++;
 
+    let lastError = null;
+
     for (const nodeUrl of NITTER_NODES) {
         try {
-            const url = `${nodeUrl}/${TARGET_USER.username}/rss`;
-            const response = await fetchWithTimeout(url);
-
-            if (!response.ok) {
-                throw new Error(`HTTP 錯誤! 狀態碼: ${response.status}`);
-            }
-
-            const text = await response.text();
-            const data = parseLatestItem(text);
-            if (!data) continue;
-
-            const cleanLink = data.link.split('#')[0];
-            const vxTweetLink = cleanLink.replace(/^https:\/\/[^/]+/, 'https://vxtwitter.com');
-            const tweetId = data.id;
+            const data = await fetchLatestTweetFromNode(nodeUrl);
 
             if (!lastFetchedId) {
-                lastFetchedId = tweetId;
-                console.log(`📦 [${nodeUrl}] 成功建立 @${TARGET_USER.username} 的初始推文快取：${tweetId}`);
-                break;
+                lastFetchedId = data.id;
+                console.log(`📦 [${nodeUrl}] 成功建立 @${TARGET_USER.username} 的初始推文快取：${data.id}`);
+                return;
             }
 
-            if (tweetId !== lastFetchedId) {
-                lastFetchedId = tweetId;
-                const channel = await client.channels.fetch(NOTIFY_CHANNEL_ID);
+            if (data.id !== lastFetchedId) {
+                lastFetchedId = data.id;
 
+                const channel = await client.channels.fetch(NOTIFY_CHANNEL_ID);
                 if (channel) {
                     await channel.send({
-                        content: `🔔 ${PING_ROLE_MENTION} **偵測到脈衝，已收到 Project Moon 的最新訊息：**\n${vxTweetLink}`
+                        content: `🔔 ${PING_ROLE_MENTION} **偵測到脈衝，已收到 Project Moon 的最新訊息：**\n${data.link}`
                     });
                 }
             }
 
-            break;
+            return;
         } catch (error) {
+            lastError = error;
             console.warn(`⚠️ 節點 [${nodeUrl}] 擷取異常 (${error.message})，嘗試下一個備援空間...`);
         }
     }
+
+    if (lastError) {
+        console.error(`❌ 所有節點失敗，最後錯誤：${lastError.message}`);
+    }
 }
 
+/* ---------------- READY ---------------- */
 client.once('ready', async () => {
     console.log(`🤖 遵從您的指示，Angela 已成功登入為：${client.user.tag}`);
 
@@ -162,6 +224,7 @@ client.once('ready', async () => {
     checkTwitterUpdates();
 });
 
+/* ---------------- COMMANDS ---------------- */
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
 
@@ -185,20 +248,10 @@ client.on('messageCreate', async (message) => {
 
         for (const nodeUrl of NITTER_NODES) {
             try {
-                const url = `${nodeUrl}/${TARGET_USER.username}/rss`;
-                const response = await fetchWithTimeout(url);
-
-                if (!response.ok) throw new Error(`HTTP 狀態碼: ${response.status}`);
-
-                const text = await response.text();
-                const data = parseLatestItem(text);
-                if (!data) continue;
-
-                const cleanLink = data.link.split('#')[0];
-                const vxTweetLink = cleanLink.replace(/^https:\/\/[^/]+/, 'https://vxtwitter.com');
+                const data = await fetchLatestTweetFromNode(nodeUrl);
 
                 await message.reply({
-                    content: `🔔 ${PING_ROLE_MENTION} **偵測到脈衝，已收到 Project Moon 的最新訊息：**\n${vxTweetLink}`
+                    content: `🔔 ${PING_ROLE_MENTION} **偵測到脈衝，已收到 Project Moon 的最新訊息：**\n${data.link}`
                 });
 
                 fetchSuccess = true;
@@ -217,7 +270,12 @@ client.on('messageCreate', async (message) => {
 
     if (msg === '!邊獄人數' || msg === '!limbusonline') {
         try {
-            const response = await fetchWithTimeout('https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/?appid=1973530');
+            const response = await fetchWithTimeout(
+                'https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/?appid=1973530',
+                {},
+                10000
+            );
+
             const data = await response.json();
 
             if (data?.response?.result === 1) {
@@ -231,7 +289,7 @@ client.on('messageCreate', async (message) => {
     }
 
     if (msg === '!狀態' || msg === '!status') {
-        const uptimeMs = new Date() - systemStartTime;
+        const uptimeMs = Date.now() - systemStartTime;
         const uptimeHours = (uptimeMs / (1000 * 60 * 60)).toFixed(1);
 
         const embed = new EmbedBuilder()
@@ -242,7 +300,8 @@ client.on('messageCreate', async (message) => {
                 { name: '🏷️ 當前標籤 (Label)', value: '「被觀測者」', inline: true },
                 { name: '📊 心理狀態 (State)', value: '🛑 精神枯竭 (Burnout)', inline: true },
                 { name: '⏳ 核心運作時間 (Uptime)', value: `${uptimeHours} 小時`, inline: true },
-                { name: '📡 監聽機制', value: '1分鐘極速輪詢 (極簡優化版)', inline: true }
+                { name: '📡 監聽機制', value: '1分鐘極速輪詢 (極簡優化版)', inline: true },
+                { name: '📈 檢查次數', value: `${totalTweetsChecked}`, inline: true }
             )
             .setFooter({ text: 'Angela 心理與系統觀測核心' })
             .setTimestamp();
@@ -294,7 +353,6 @@ client.on('messageCreate', async (message) => {
             .addFields(
                 { name: '🚨 逆流狀態', value: '第 3 階能障逆流 (Qliphoth Meltdown)', inline: false }
             )
-            .setImage('https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1000&auto=format&fit=crop')
             .setFooter({ text: '腦葉公司最高行政控制中心' })
             .setTimestamp();
 
@@ -307,14 +365,14 @@ client.on('messageCreate', async (message) => {
 
         for (let i = 0; i < count; i++) {
             const rarity = buildRarity();
-            const up = pullUpIdentity(rarity);
+            const upName = getUpIdentity(rarity);
 
             let result = pullIdentity(rarity);
-            if (up && Math.random() < 0.25) {
-                result = `✨ **[UP!]** ${up}`;
+            if (upName && Math.random() < 0.25) {
+                result = `✨ **[UP!]** ${upName}`;
             }
 
-            const stars = rarity === '000' ? '★★★' : rarity === '00' ? '★★' : '★';
+            const stars = rarityToStars(rarity);
             results.push(`${result} (${stars})`);
         }
 
@@ -332,6 +390,8 @@ client.on('messageCreate', async (message) => {
         const searchTerm = args.slice(1).join(' ').toLowerCase();
 
         try {
+            if (!message.guild) return message.reply('❌ 只能在伺服器內使用此指令。');
+
             const members = await message.guild.members.fetch();
             const foundBots = members.filter(member =>
                 member.user.bot && member.user.username.toLowerCase().includes(searchTerm)
@@ -351,6 +411,7 @@ client.on('messageCreate', async (message) => {
     }
 });
 
+/* ---------------- LOGIN ---------------- */
 const TOKEN = process.env.DISCORD_TOKEN;
 client.login(TOKEN).catch(err => {
     console.error('❌ 機器人登入失敗：', err);
