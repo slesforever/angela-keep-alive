@@ -227,17 +227,16 @@ export const identities = {
 
 const rateUpTargets = {
     '000': ["［蜘蛛巢：指環 父輩］鴻璐"],
-    '00': ["［黑獸 巳支部］格里高爾"]
+    '00':  ["［黑獸 巳支部］格里高爾"]
 };
 
 function pullIdentity(rarity) {
-    const p = identities[rarity] || []; // 修正：從 identities 讀取
+    const p = identities[rarity] || [];
     const targets = rateUpTargets[rarity] || [];
-    
     if (targets.length > 0 && Math.random() < 0.5) {
         return targets[Math.floor(Math.random() * targets.length)];
     }
     return p[Math.floor(Math.random() * p.length)];
 }
 
-module.exports = { identities, pullIdentity }; // 匯出兩者
+module.exports = { identities, pullIdentity };
