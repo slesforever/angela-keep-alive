@@ -1,6 +1,6 @@
 const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 const express = require('express');
-const mongoose = require('mongoose'); // 💡 注入：雲端資料庫模組
+const mongoose = require('mongoose'); // 💡 注入：雲端資料庫模
 
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 const identitiesData = require('./identitiesData.js');
