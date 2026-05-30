@@ -227,16 +227,19 @@ export const identities = {
 
 const rateUpTargets = {
     '000': ["［蜘蛛巢：指環 父輩］鴻璐"],
-    '00':  ["［黑獸 巳支部］格里高爾"]
+    '00': ["［黑獸 巳支部］格里高爾"]
 };
 
 function pullIdentity(rarity) {
     const p = identities[rarity] || [];
     const targets = rateUpTargets[rarity] || [];
+    
+    // 50% 機率觸發 UP
     if (targets.length > 0 && Math.random() < 0.5) {
         return targets[Math.floor(Math.random() * targets.length)];
     }
     return p[Math.floor(Math.random() * p.length)];
 }
 
+// 關鍵修改：改成 CommonJS 的匯出方式
 module.exports = { identities, pullIdentity };
