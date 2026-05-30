@@ -103,6 +103,7 @@ const identities = {
     "［臼齒船舶事務所 幫手］以實瑪利 / Molar Boatworks Fixer Ishmael",
     "［尤羅季維 第20區］鴻璐 / District 20 Yurodivy Hong Lu",
     "［玫瑰扳手工坊 代理］羅佳 / Rosespanner Workshop Rep Rodion",
+    "［Shi協會 東部3科］浮士德 / Shi Assoc. East Section 3 Faust",
   ],
 
   '00': [
