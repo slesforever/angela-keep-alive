@@ -27,25 +27,48 @@ const client = new Client({
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildMembers // 用於尋找機器人功能
+        GatewayIntentBits.GuildMembers
     ]
 });
 
-// 指定的 Twitter 通知頻道 ID
+// 指定的 Twitter 通知與上線公告頻道 ID
 const NOTIFY_CHANNEL_ID = "1402282604165730348";
 
-client.once('ready', () => {
+client.once('ready', async () => {
     console.log(`🤖 遵從您的指示，Angela 已成功登入為：${client.user.tag}`);
     
-    // 🧠 調整狀態：改成「閒置（橘燈）」，並設定自訂狀態文字 (點開個人資料可見)
+    // 🧠 調整狀態：改成「閒置（橘燈）」，並設定自訂狀態文字
     client.user.setPresence({
-        status: 'idle', // 'idle' 代表閒置橘燈
+        status: 'idle',
         activities: [{
-            name: 'customstatus', // 必須是 customstatus 才能正確顯示自訂狀態
-            type: 4,              // 4 代表 Custom 狀態
-            state: '正在觀測核心控制室的心理逆流與光之種進度...' // 💭 這裡就是她在想什麼的文字
+            name: 'customstatus',
+            type: 4,
+            state: '正在觀測核心控制室的心理逆流與光之種進度...'
         }]
     });
+
+    // 🚀 【新增功能】啟動時自動發送上線通知訊息
+    try {
+        const channel = await client.channels.fetch(NOTIFY_CHANNEL_ID);
+        if (channel) {
+            const loginEmbed = new EmbedBuilder()
+                .setTitle("🟢 系統連線：AI 助理 Angela 已重新上線")
+                .setColor(0x00b4d8)
+                .setDescription("「主管，精神脈衝已重新對齊。核心控制室各項監控模組已成功初始化。」")
+                .addFields(
+                    { name: "📡 觀測目標", value: "邊獄公司 Twitter (@LimbusCompany_B)", inline: true },
+                    { name: "📊 臨界狀態", value: "橘色閒置狀態 (Idle Pulse)", inline: true },
+                    { name: "⏰ 重啟機制", value: "GitHub Actions 引線已正常掛載", inline: false }
+                )
+                .setFooter({ text: "腦葉公司行政中心 - 核心AI系統" })
+                .setTimestamp();
+
+            await channel.send({ embeds: [loginEmbed] });
+            console.log("📢 已自動發送上線問候訊息至指定頻道。");
+        }
+    } catch (err) {
+        console.error("❌ 啟動發送訊息失敗，請檢查頻道 ID 或機器人權限:", err.message);
+    }
     
     // 機器人上線後，啟動 Twitter 定時監聽輪詢 (每 10 分鐘檢查一次)
     setInterval(checkTwitterUpdates, 10 * 60 * 1000);
@@ -53,37 +76,41 @@ client.once('ready', () => {
     checkTwitterUpdates();
 });
 
-// 定時檢查 Twitter 推文功能
+// 定時檢查 Twitter 推文功能 (已修正 404 錯誤，改用更穩定的 nitter 節點)
 async function checkTwitterUpdates() {
     try {
         console.log("⏳ Angela 正在觀測邊獄公司 Twitter 狀態...");
         totalTweetsChecked++;
 
-        // 使用 RSSHub 橋接公開推文
-        const response = await fetch('https://rsshub.app/twitter/user/LimbusCompany_B', {
-            headers: { 'User-Agent': 'Mozilla/5.0' }
+        // 🛠️ 更換為更穩定的 Nitter 公開轉接源，解決原本 RSSHub 404 的問題
+        const response = await fetch('https://nitter.net/LimbusCompany_B/rss', {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
         });
         
         if (!response.ok) throw new Error(`HTTP 錯誤! 狀態碼: ${response.status}`);
         
         const text = await response.text();
         
-        // 正則解析最新推文
-        const itemRegex = /<item>[\s\S]*?<title><!\[CDATA\[([\s\S]*?)\]\]><\/title>[\s\S]*?<link>([\s\S]*?)<\/link>[\s\S]*?<guid[\s\S]*?>([\s\S]*?)<\/guid>/g;
+        // 正則解析 XML 中的最新推文項目
+        const itemRegex = /<item>[\s\S]*?<title>([\s\S]*?)<\/title>[\s\S]*?<link>([\s\S]*?)<\/link>[\s\S]*?<guid[\s\S]*?>([\s\S]*?)<\/guid>/g;
         const match = itemRegex.exec(text);
 
         if (match) {
-            const tweetContent = match[1];
-            const tweetLink = match[2].replace('http://', 'https://').replace('twitter.com', 'x.com');
-            const tweetId = match[3];
+            let tweetContent = match[1];
+            // 清理可能夾帶的 HTML 或轉義字元
+            tweetContent = tweetContent.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1');
+            
+            // 將 Nitter 網址還原成標準的 X.com 傳送門連結
+            const tweetLink = match[2].trim().replace('http://', 'https://').replace('nitter.net', 'x.com');
+            const tweetId = match[3].trim();
 
-            // 第一次運行先記錄 ID，不發通知
+            // 第一次運行先記錄 ID，不發通知，避免每次重啟都洗頻舊推文
             if (!lastFetchedTweetId) {
                 lastFetchedTweetId = tweetId;
                 return;
             }
 
-            // 發現新推文
+            // 發現真正的新推文！
             if (tweetId !== lastFetchedTweetId) {
                 lastFetchedTweetId = tweetId;
                 
@@ -144,7 +171,7 @@ client.on('messageCreate', async (message) => {
         }
     }
 
-    // 指令：心理學與運行紀錄（整合優化版）
+    // 指令：心理學與運行紀錄
     if (msg === '!狀態' || msg === '!status') {
         const uptimeMs = new Date() - systemStartTime;
         const uptimeHours = (uptimeMs / (1000 * 60 * 60)).toFixed(1);
@@ -168,7 +195,7 @@ client.on('messageCreate', async (message) => {
         return message.reply({ embeds: [embed] });
     }
 
-    // 新增擴充功能一：🎲 腦葉公司 E.G.O 抽取與標籤分析系統
+    // 指令：🎲 腦葉公司 E.G.O 抽取與標籤分析系統
     if (msg === '!ego') {
         const egoList = [
             { name: "薄暮 (Twilight)", grade: "ALEPH", desc: "調和所有矛盾與偏見的終極大劍。暗示個體拒絕接受單一標籤，試圖在黑白混沌的世界中強行抓住平衡，常伴隨極度的精神內耗。" },
@@ -195,7 +222,7 @@ client.on('messageCreate', async (message) => {
         return message.reply({ embeds: [egoEmbed] });
     }
 
-    // 新增擴充功能二：⚠️ 核心控制室能量逆流警報卡片
+    // 指令：⚠️ 核心控制室能量逆流警報卡片
     if (msg === '!逆流') {
         const alarmEmbed = new EmbedBuilder()
             .setTitle("⚠️ [WARNING] 腦葉公司核心控制室緊急通告")
@@ -206,7 +233,7 @@ client.on('messageCreate', async (message) => {
                 { name: "👥 受影響對象", value: "全體在場人員（請勿發布不合規、引發群體 Burnout 之言論）", inline: false },
                 { name: "🛠️ 處置方針", value: "請立刻停止認知扭曲行為，回歸本職工作。Angela 將持續監控此頻道的能量波動。", inline: false }
             )
-            .setImage("https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1000&auto=format&fit=crop") // 一個充滿科幻壓迫感的抽象紅光背景
+            .setImage("https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1000&auto=format&fit=crop")
             .setFooter({ text: "腦葉公司最高行政控制中心" })
             .setTimestamp();
 
@@ -245,7 +272,7 @@ client.on('messageCreate', async (message) => {
     }
 });
 
-// 🔒 業界標準安全讀取：從 Render 后台保險箱撈取真正的 Token
+// 🔒 安全讀取環境變數 Token
 const TOKEN = process.env.DISCORD_TOKEN;
 
 client.login(TOKEN).catch(err => {
