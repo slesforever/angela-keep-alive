@@ -9,8 +9,8 @@ export function pullIdentity(rarity) {
     const pool = identities[rarity];
     const targets = rateUpTargets[rarity] || [];
     
-    // 50% 機率觸發 UP
-    if (targets.length > 0 && Math.random() < 0.5) {
+    // 50% 機率 UP
+    if (targets.length > 0 && Math.random() < 0.01) {
         return targets[Math.floor(Math.random() * targets.length)];
     }
     return pool[Math.floor(Math.random() * pool.length)];
