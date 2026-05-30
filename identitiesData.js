@@ -171,16 +171,19 @@ const identities = {
 
 const upTargets = {
   '000': [
-    "［拉曼查地產 經理］堂吉訶德"
+    "［拉曼查地產 經理］堂吉訶德",
+    "［蜘蛛巢：食指 父輩］李箱"
   ],
   '00': [
-    "［黑獸 未支部］堂吉訶德"
+    "［黑獸 未支部］堂吉訶德",
+    "［W公司 2區 清道夫］浮士德"
   ],
   '0': []
 };
 
 function pullIdentity(rarity) {
   const pool = identities[rarity] || [];
+  if (!pool.length) return '（該稀有度沒有資料）';
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
