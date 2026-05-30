@@ -131,17 +131,6 @@ client.on('messageCreate', async (message) => {
 
     const msg = message.content.trim();
     
-    if (msg === '!pull' || msg === '!10pulls') {
-        const count = (msg === '!10pulls') ? 10 : 1;
-        let results = [];
-        for (let i = 0; i < count; i++) {
-            const rand = Math.random();
-            let rarity = (rand < 0.029) ? '000' : (rand < 0.13) ? '00' : '0';
-            results.push(`${pullIdentity(rarity)} (${rarity === '000' ? '★★★' : rarity === '00' ? '★★' : '★'})`);
-        }
-        return message.reply(count === 10 ? `✨ **十連抽結果：**\n${results.join('\n')}` : `🎯 **單抽結果：**\n${results[0]}`);
-    }
-
     if (msg === '!ping') return message.reply('pong！');
 
     if (msg === '管理員' || msg === '主管') {
