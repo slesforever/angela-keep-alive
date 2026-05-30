@@ -11,4 +11,4 @@ jobs:
     steps:
       - name: Send Deploy Trigger (強迫 Angela 甦醒重啟)
         run: |
-          curl -X POST "${{ secrets.RENDER_DEPLOY_HOOK }}"
+          curl -X https://angela-keep-alive.onrender.com/"
