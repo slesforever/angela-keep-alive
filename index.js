@@ -1,4 +1,3 @@
-const { pullIdentity } = require('./identitiesData.js');
 const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 const express = require('express');
 
@@ -51,10 +50,7 @@ client.once('ready', async () => {
             state: '正在觀測核心控制室的心理逆流與光之種進度...'
         }]
     });
-    client.on('messageCreate', async (message) => {
-    if (message.author.bot) return;
-    const msg = message.content.trim();
-    
+
     try {
         const channel = await client.channels.fetch(NOTIFY_CHANNEL_ID);
         if (channel) {
@@ -129,7 +125,7 @@ client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
 
     const msg = message.content.trim();
-    
+
     if (msg === '!ping') return message.reply('pong！');
 
     if (msg === '管理員' || msg === '主管') {
