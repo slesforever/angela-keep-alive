@@ -1,37 +1,49 @@
+const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
+const express = require('express');
+const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+app.get('/', (req, res) => res.send('Angela 系統運作正常。'));
+app.listen(PORT, () => console.log(`伺服器啟動於 ${PORT}`));
+
+const client = new Client({ 
+    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers] 
+});
+
+client.once('ready', () => {
+    console.log(`🤖 Angela 已上線: ${client.user.tag}`);
+});
+
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
 
-    const msg = message.content.trim();
-
-    // 1. 優先處理抽卡指令 (一定要放在最前面，避免被其他 return 阻斷)
-    if (msg === '!pull' || msg === '!10pulls') {
+    // --- 抽卡系統區塊 ---
+    if (message.content === '!pull' || message.content === '!10pulls') {
         try {
+            // 動態引入，確保不受 require/import 混用影響
             const { pullIdentity } = await import('./gachaLogic.js');
-            const isTenPull = msg === '!10pulls';
-            const count = isTenPull ? 10 : 1;
+            const isTen = message.content === '!10pulls';
             let results = [];
-
-            for (let i = 0; i < count; i++) {
+            
+            for (let i = 0; i < (isTen ? 10 : 1); i++) {
                 const rand = Math.random();
-                let rarity = '0';
-                if (rand < 0.029) rarity = '000';
-                else if (rand < 0.13) rarity = '00';
+                let rarity = rand < 0.029 ? '000' : rand < 0.13 ? '00' : '0';
                 results.push(`${pullIdentity(rarity)} (${rarity === '000' ? '★★★' : rarity === '00' ? '★★' : '★'})`);
             }
-
-            const replyMsg = isTenPull 
-                ? `✨ **十連抽結果：**\n${results.join('\n')}`
-                : `🎯 **單抽結果：**\n${results[0]}`;
-            
-            return message.reply(replyMsg);
+            return message.reply(isTen ? `✨ **十連抽：**\n${results.join('\n')}` : `🎯 **單抽：**\n${results[0]}`);
         } catch (err) {
-            console.error("抽卡模組載入失敗:", err);
-            return message.reply("❌ 抽卡系統無法運作，請檢查模組路徑。");
+            console.error("抽卡錯誤:", err);
+            return message.reply("❌ 抽卡模組載入失敗，請確認檔案路徑。");
         }
     }
 
-    // 2. 接著才是原本的 !ping 和其他指令
-    if (msg === '!ping') return message.reply('pong！');
-    
-    // ... 後面接原本的其他指令 (管理員, lc, !狀態 等)
+    // --- 原本的推播指令與其他功能 ---
+    if (message.content === '!ping') return message.reply('pong！');
+    if (message.content === '!狀態') {
+        return message.reply('🧠 系統運作正常，目前監測機制：1分鐘極速輪詢。');
+    }
+    // ... 在這裡放入你原本其他的 if 判斷 ...
 });
+
+client.login(process.env.DISCORD_TOKEN);
