@@ -16,8 +16,10 @@ const identities = {
     "［中指 幼妹］堂吉訶德 / The Middle Little Sister Don Quixote",
     "［中指 幼弟］辛克萊 / The Middle Little Brother Sinclair",
     "［鴻園之主］鴻璐 / Lord of Hongyuan Hong Lu",
+    "［家主候選人］以實瑪利 / Family Hierarch Candidate Ishmael",
     "［鴻園的流浪武者］良秀 / Drifting Blade of Hongyuan Ryōshū",
     "［拇指東部指揮官 IIII］默爾索 / The Thumb East Capo IIII Meursault",
+    "［東部拇指 士兵 II］辛克萊 / The Thumb East Soldato II Sinclair ",
     "［黑獸-未］堂吉訶德 / Heishou Pack - Wei Branch Don Quixote",
     "［黑獸-巳］格里高爾 / Heishou Pack - Si Branch Gregor",
     "［黑獸-巳］羅佳 / Heishou Pack - Si Branch Rodion",
@@ -32,9 +34,12 @@ const identities = {
     "［拉曼查·卻領 公主］羅佳 / The Princess of La Manchaland Rodionr",
     "［拉曼查·卻領 神父］格里高爾 / The Priest of La Manchaland Gregor",
     "［拉曼查·卻領 理髮師］奧提斯 / The Barber of La Manchaland Outis",
+    "［句點事務所收尾人］希斯克里夫 / Full-Stop Office Fixer Heathcliff",
+    "［句點事務所代表］鴻璐 / Full-Stop Office Rep Hong Lu",
+    "［夜錐組隊長］格里高爾 / Night Awls Capitano Gregor",
     "［腦業公司 E.G.O::哀悼］李箱 / Lobotomy E.G.O::Solemn Lament Yi Sang",
+    "［腦業公司 E.G.O::赤瞳&懺悔］良秀 / Lobotomy E.G.O::Red Eyes & Penitence Ryōshū",
     "［腦業公司 E.G.O::懊悔］浮士德 / Lobotomy E.G.O::Regret Faust",
-    "［腦業公司 E.G.O::提燈］堂吉訶德 / Lobotomy E.G.O::Lantern Don Quixote",
     "［腦業公司 E.G.O::以愛與恨之名］堂吉訶德 / Lobotomy E.G.O::In the Name of Love and Hate Don Quixote",
     "［腦業公司 E.G.O::幽香與孤寂］良秀 / Lobotomy E.G.O::Faint Aroma & Solitude Ryōshū",
     "［腦業公司 E.G.O::大黃蜂【變異】］默爾索 / Lobotomy E.G.O::Hornet【Alteration】Meursault",
@@ -78,6 +83,7 @@ const identities = {
     "［N公司 準執柄者］辛克萊 / The One Who Shall Grip Sinclair",
     "［N公司 大錘］默爾索 / N Corp. Großhammer Meursault",
     "［N公司 E.G.O::凶彈］李箱 / N Corp. E.G.O::Fell Bullet Yi Sang",
+    "［N公司 E.G.O::輕蔑, 敬畏］良秀 / N Corp. E.G.O::Contempt, Awe Ryōshū",
     "［七協會 南部6科 部長］奧提斯 / Seven Assoc. South Section 6 Director Outis",
     "［七協會 南部4科］浮士德 / Seven Assoc. South Section 4 Faust",
     "［六協會 南部4科 部長］羅佳 / Liu Assoc. South Section 4 Rodion",
@@ -102,9 +108,10 @@ const identities = {
     "［Liu協會 南部3科］李箱 / Liu Assoc. South Section 3 Yi Sang",
     "［Liu協會 南部4科］以實瑪利 / Liu Assoc. South Section 4 Ishmael",
     "［臼齒船舶事務所 幫手］以實瑪利 / Molar Boatworks Fixer Ishmael",
-    "［尤羅季維 第20區］鴻璐 / District 20 Yurodivy Hong Lu",
+    "［20區聖愚］鴻璐 / District 20 Yurodivy Hong Lu",
     "［玫瑰扳手工坊 代理］羅佳 / Rosespanner Workshop Rep Rodion",
-    "［Shi協會 東部3科］浮士德 / Shi Assoc. East Section 3 Faust"
+    "［Shi協會 東部3科］浮士德 / Shi Assoc. East Section 3 Faust",
+    "［R.B. 廚師長］良秀 / R.B. Chef de Cuisine Ryōshū"
   ],
 
   '00': [
@@ -145,13 +152,18 @@ const identities = {
     "［臼齒船舶事務所 幫手］辛克萊 / Molar Boatworks Fixer Sinclair",
     "［臼齒事務所 幫手］李箱 / Molar Office Fixer Yi Sang",
     "［鉤子事務所 幫手］鴻璐 / Hook Office Fixer Hong Lu",
-    "［尤羅季維 第20區］良秀 / District 20 Yurodivy Ryōshū",
+    "［20區聖愚］良秀 / District 20 Yurodivy Ryōshū",
     "［洛斯馬利亞契 老大］辛克萊 / Los Mariachis Jefe Sinclair",
     "［死兔黨 老大］默爾索 / Dead Rabbits Boss Meursault",
     "［R.B. 副主廚］格里高爾 / R.B. Sous-chef Gregor",
     "［斐廓德號 一副］李箱 / Pequod First Mate Yi Sang",
     "［Dieci協會 南部4科］李箱 / Dieci Assoc. South Section 4 Yi Sang",
-    "［G公司 科長］奧提斯 / G Corp. Head Manager Outis"
+    "［G公司 科長］奧提斯 / G Corp. Head Manager Outis",
+    "［獵牙事務所收尾人］鴻璐 / Fanghunt Office Fixer Hong Lu",
+    "［腦業公司 E.G.O::提燈］堂吉訶德 / Lobotomy E.G.O::Lantern Don Quixote",
+    "［多裂紋事務所收尾人］希斯克里夫 / MultiCrack Office Fixer Heathcliff",
+    "［T公司 2級征收人員］羅佳 / T Corp. Class 2 Collection Staff Rodion",
+    "［Zwei協會南部6科］辛克萊 / Zwei Assoc. West Section 3 Sinclair"
   ],
 
   '0': [
