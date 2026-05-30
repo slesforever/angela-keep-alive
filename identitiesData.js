@@ -235,4 +235,4 @@ function pullIdentity(rarity) {
     return p[Math.floor(Math.random() * p.length)];
 }
 
-module.exports = { identities, targetIdentities, pullIdentity };
+exports = { identities, targetIdentities, pullIdentity };
