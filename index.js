@@ -10,7 +10,15 @@ const PORT = process.env.PORT || 3000;
 // 系統運行紀錄變數
 const systemStartTime = new Date();
 let totalTweetsChecked = 0;
-let lastFetchedTweetId = null; 
+
+// 📡 觀測目標矩陣 (新增主管的個人 Twitter)
+const TARGET_USERS = [
+    { username: 'LimbusCompany_B', displayName: '邊獄公司 (Limbus Company) 官方最新公告', color: 0xf24444 },
+    { username: 'slesforever', displayName: '主管 sles_forever 個人動態紀錄', color: 0x00f5d4 }
+];
+
+// 儲存每個帳號最後一次抓到的推文 ID 快取
+const lastFetchedIds = {};
 
 // 1. Web 伺服器 (Render 觸發重啟與維持生命用)
 app.get('/', (req, res) => {
@@ -47,16 +55,16 @@ client.once('ready', async () => {
         }]
     });
 
-    // 🚀 【新增功能】啟動時自動發送上線通知訊息
+    // 🚀 啟動時自動發送上線通知訊息
     try {
         const channel = await client.channels.fetch(NOTIFY_CHANNEL_ID);
         if (channel) {
             const loginEmbed = new EmbedBuilder()
                 .setTitle("🟢 系統連線：AI 助理 Angela 已重新上線")
                 .setColor(0x00b4d8)
-                .setDescription("「主管，精神脈衝已重新對齊。核心控制室各項監控模組已成功初始化。」")
+                .setDescription("「主管，精神脈衝已重新對齊。多核心社交觀測模組已成功初始化。」")
                 .addFields(
-                    { name: "📡 觀測目標", value: "邊獄公司 Twitter (@LimbusCompany_B)", inline: true },
+                    { name: "📡 觀測矩陣目標", value: TARGET_USERS.map(u => `@${u.username}`).join('\n'), inline: true },
                     { name: "📊 臨界狀態", value: "橘色閒置狀態 (Idle Pulse)", inline: true },
                     { name: "⏰ 重啟機制", value: "GitHub Actions 引線已正常掛載", inline: false }
                 )
@@ -70,20 +78,25 @@ client.once('ready', async () => {
         console.error("❌ 啟動發送訊息失敗，請檢查頻道 ID 或機器人權限:", err.message);
     }
     
-    // 機器人上線後，啟動 Twitter 定時監聽輪詢 (每 10 分鐘檢查一次)
-    setInterval(checkTwitterUpdates, 10 * 60 * 1000);
+    // 機器人上線後，啟動 Twitter 多目標定時監聽輪詢 (每 10 分鐘檢查一次)
+    setInterval(checkAllTwitterUpdates, 10 * 60 * 1000);
     // 上線時立刻先檢查一次
-    checkTwitterUpdates();
+    checkAllTwitterUpdates();
 });
 
-// 定時檢查 Twitter 推文功能 (已修正 404 錯誤，改用更穩定的 nitter 節點)
-async function checkTwitterUpdates() {
-    try {
-        console.log("⏳ Angela 正在觀測邊獄公司 Twitter 狀態...");
-        totalTweetsChecked++;
+// 核心多目標輪詢處理器
+async function checkAllTwitterUpdates() {
+    console.log(`⏳ Angela 正在發射觀測脈衝，同步檢查 ${TARGET_USERS.length} 個社交目標...`);
+    for (const target of TARGET_USERS) {
+        await fetchTwitterUserUpdates(target);
+    }
+}
 
-        // 🛠️ 更換為更穩定的 Nitter 公開轉接源，解決原本 RSSHub 404 的問題
-        const response = await fetch('https://nitter.net/LimbusCompany_B/rss', {
+// 單一 Twitter 帳號擷取功能 (改用 Nitter 公開轉接源)
+async function fetchTwitterUserUpdates(target) {
+    try {
+        totalTweetsChecked++;
+        const response = await fetch(`https://nitter.net/${target.username}/rss`, {
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
         });
         
@@ -104,32 +117,36 @@ async function checkTwitterUpdates() {
             const tweetLink = match[2].trim().replace('http://', 'https://').replace('nitter.net', 'x.com');
             const tweetId = match[3].trim();
 
-            // 第一次運行先記錄 ID，不發通知，避免每次重啟都洗頻舊推文
-            if (!lastFetchedTweetId) {
-                lastFetchedTweetId = tweetId;
+            // 第一次運行先記錄該帳號的 ID，不發通知，避免重啟洗頻
+            if (!lastFetchedIds[target.username]) {
+                lastFetchedIds[target.username] = tweetId;
+                console.log(`📦 已成功建立 @${target.username} 的初始推文快取：${tweetId}`);
                 return;
             }
 
             // 發現真正的新推文！
-            if (tweetId !== lastFetchedTweetId) {
-                lastFetchedTweetId = tweetId;
+            if (tweetId !== lastFetchedIds[target.username]) {
+                lastFetchedIds[target.username] = tweetId;
                 
                 const channel = await client.channels.fetch(NOTIFY_CHANNEL_ID);
                 if (channel) {
                     const tweetEmbed = new EmbedBuilder()
-                        .setTitle("🔔 邊獄公司 (Limbus Company) 官方最新公告")
-                        .setColor(0xf24444)
+                        .setTitle(`🔔 ${target.displayName}`)
+                        .setColor(target.color)
                         .setDescription(tweetContent.length > 500 ? tweetContent.substring(0, 500) + "..." : tweetContent)
                         .setURL(tweetLink)
                         .setTimestamp()
-                        .setFooter({ text: "Angela 社交觀測模組" });
+                        .setFooter({ text: `Angela 社交觀測模組 - @${target.username}` });
 
-                    await channel.send({ content: `📢 **主管，觀測到 Limbus Company 的最新推文！**\n傳送門：${tweetLink}`, embeds: [tweetEmbed] });
+                    await channel.send({ 
+                        content: `📢 **主管，觀測到 @${target.username} 的最新貼文！**\n傳送門：${tweetLink}`, 
+                        embeds: [tweetEmbed] 
+                    });
                 }
             }
         }
     } catch (error) {
-        console.error("❌ 擷取 Twitter 推文時發生錯誤:", error.message);
+        console.error(`❌ 擷取 @${target.username} 推文時發生錯誤:`, error.message);
     }
 }
 
@@ -184,10 +201,9 @@ client.on('messageCreate', async (message) => {
                 { name: "🏷️ 當前標籤 (Label)", value: "「被觀測者」", inline: true },
                 { name: "📊 心理狀態 (State)", value: "🛑 精神枯竭 (Burnout)", inline: true },
                 { name: "⏳ 核心運作時間 (Uptime)", value: `${uptimeHours} 小時`, inline: true },
-                { name: "📡 Twitter 監聽頻率", value: "每 10 分鐘 / 1 次", inline: true },
-                { name: "🔄 累計觀測次數", value: `${totalTweetsChecked} 次`, inline: true },
-                { name: "🔗 最新推文序號 (Cache)", value: lastFetchedTweetId || "建檔中", inline: true },
-                { name: "📝 綜合觀測紀錄", value: "個體因過度符合外界賦予的標籤，自我認知與真實存在發生偏離，導致核心能量陷入停滯。此狀態不影響機器人核心程式運行，橘色閒置脈衝、Twitter 監聽與 Steam API 通道皆處於正常臨界值。", inline: false }
+                { name: "📡 觀測目標總數", value: `${TARGET_USERS.length} 個帳號`, inline: true },
+                { name: "🔄 累計掃描脈衝", value: `${totalTweetsChecked} 次`, inline: true },
+                { name: "📝 綜合觀測紀錄", value: "系統已擴展觀測協議。除了外部 Limbus 支部的宏觀數據，亦開啟了對「主管個體」微觀思維標籤（slesforever）的鏡像觀測。雙軌通道運行平穩，未引發額外的核心逆流。", inline: false }
             )
             .setFooter({ text: "Angela 心理與系統觀測核心" })
             .setTimestamp();
