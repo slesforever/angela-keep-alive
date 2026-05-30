@@ -171,12 +171,11 @@ const identities = {
 
 const upTargets = {
   '000': [
-    "［拉曼查地產 經理］堂吉訶德",
-    "［蜘蛛巢：食指 父輩］李箱"
+    "［蜘蛛巢：中指 父輩］奧提斯 / The House of Spiders: Middle Father Outis",
+    " [蜘蛛巢：中指 學徒］以實瑪利 / House of Spiders: Middle Apprentice Ishmael"
   ],
   '00': [
-    "［黑獸 未支部］堂吉訶德",
-    "［W公司 2區 清道夫］浮士德"
+    "［中指 小弟］默爾索 / Middle Brother Meursault",
   ],
   '0': []
 };
