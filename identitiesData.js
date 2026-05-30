@@ -3,7 +3,7 @@ const identities = {
     "［蜘蛛巢：食指 父輩］李箱 / The House of Spiders: Index Father Yi Sang",
     "［蜘蛛巢：中指 父輩］奧提斯 / The House of Spiders: Middle Father Outis",
     "［蜘蛛巢：指環 父輩］鴻璐 / The House of Spiders: Ring Father Hong Lu",
-    "［蜘蛛巢之刃］良秀 / Blade of the House of Spiders Ryōshū",
+    "［蜘蛛巢之刃］良秀] / Blade of the House of Spiders Ryōshū",
     "［指環 野獸派 講解員］羅佳 / The Ring Fauvist Lecturer Rodion",
     "［指環 點描派 學生］奧提斯 / The Ring Pointillist Student Outis",
     "［指環 點描派 學生］李箱 / The Ring Pointillist Student Yi Sang",
@@ -66,7 +66,7 @@ const identities = {
     "［W公司 3區 清掃人員］李箱 / W Corp. L3 Cleanup Agent Yi Sang",
     "［W公司 3區 清掃人員］良秀 / W Corp. L3 Cleanup Agent Ryōshū",
     "［W公司 3區 清掃人員］堂吉訶德 / W Corp. L3 Cleanup Agent Don Quixote",
-    "［W公司 4區 清掃人員］希斯克里夫 / W Corp. L4 Cleanup Agent Heathcliff",
+    "［W公司 4區 清掃人員］希斯克里夫 / W Corp. L4 Cleanup Agent - CCA Heathcliff",
     "［R公司 4區 兔子組］希斯克里夫 / R Corp. 4th Pack Rabbit Heathcliff",
     "［R公司 4區 馴鹿組］以實瑪利 / R Corp. 4th Pack Reindeer Ishmael",
     "［R公司 4區 犀牛組］默爾索 / R Corp. 4th Pack Rhino Meursault",
@@ -102,7 +102,7 @@ const identities = {
     "［臼齒船舶事務所 幫手］以實瑪利 / Molar Boatworks Fixer Ishmael",
     "［尤羅季維 第20區］鴻璐 / District 20 Yurodivy Hong Lu",
     "［玫瑰扳手工坊 代理］羅佳 / Rosespanner Workshop Rep Rodion",
-    "［Shi協會 東部3科］浮士德 / Shi Assoc. East Section 3 Faust",
+    "［Shi協會 東部3科］浮士德 / Shi Assoc. East Section 3 Faust"
   ],
 
   '00': [
@@ -148,7 +148,7 @@ const identities = {
     "［R.B. 副主廚］格里高爾 / R.B. Sous-chef Gregor",
     "［皮夸德號 一副］李箱 / Pequod First Mate Yi Sang",
     "［Dieci協會 南部4科］李箱 / Dieci Assoc. South Section 4 Yi Sang",
-    "［G公司 科長］奧提斯 / G Corp. Head Manager Outis",
+    "［G公司 科長］奧提斯 / G Corp. Head Manager Outis"
   ],
 
   '0': [
