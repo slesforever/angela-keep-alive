@@ -2,14 +2,7 @@ const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 const express = require('express');
 
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
-
 const identitiesData = require('./identitiesData.js');
-const pullIdentity = typeof identitiesData.pullIdentity === 'function'
-    ? identitiesData.pullIdentity
-    : () => '（pullIdentity 未定義）';
-const pullUpIdentity = typeof identitiesData.pullUpIdentity === 'function'
-    ? identitiesData.pullUpIdentity
-    : null;
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -33,6 +26,113 @@ let lastFetchedId = null;
 const NOTIFY_CHANNEL_ID = '1402282604165730348';
 const PING_ROLE_MENTION = '<@&1406984068725211177>';
 
+/* ---------------- RATE UP DATA ----------------
+   這裡會自動讀 identitiesData.js 裡的這幾種格式：
+   - upTargets: { '000': ['...'], '00': ['...'], '0': ['...'] }
+   - rateUpIds:  { '000': ['...'], '00': ['...'], '0': ['...'] }
+   - targetIdentities: 若你還在用舊格式，也會盡量相容
+*/
+const rateUpSource =
+    identitiesData.upTargets ||
+    identitiesData.rateUpIds ||
+    identitiesData.targetIdentities ||
+    {};
+
+const pullIdentity =
+    typeof identitiesData.pullIdentity === 'function'
+        ? identitiesData.pullIdentity
+        : (rarity) => `（缺少 pullIdentity：${rarity}）`;
+
+function buildRarity() {
+    const r = Math.random();
+    if (r < 0.029) return '000';
+    if (r < 0.157) return '00';
+    return '0';
+}
+
+function rarityToStars(rarity) {
+    if (rarity === '000') return '★★★';
+    if (rarity === '00') return '★★';
+    return '★';
+}
+
+function normalizeRateUpList(rarity) {
+    const value = rateUpSource[rarity];
+    if (!value) return [];
+
+    if (Array.isArray(value)) return value.filter(Boolean);
+
+    if (typeof value === 'string') return [value];
+
+    if (typeof value === 'object') {
+        if (Array.isArray(value.names)) return value.names.filter(Boolean);
+        if (Array.isArray(value.ids)) return value.ids.filter(Boolean);
+        if (typeof value.name === 'string' && value.name.trim()) return [value.name.trim()];
+    }
+
+    return [];
+}
+
+function pickRateUp(rarity) {
+    const list = normalizeRateUpList(rarity);
+    if (!list.length) return null;
+    return list[Math.floor(Math.random() * list.length)];
+}
+
+function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    return fetch(url, {
+        ...options,
+        signal: controller.signal,
+        headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            ...(options.headers || {})
+        }
+    }).finally(() => clearTimeout(timeout));
+}
+
+function parseLatestItem(xml) {
+    const itemMatch = xml.match(/<item>[\s\S]*?<\/item>/);
+    if (!itemMatch) return null;
+
+    const item = itemMatch[0];
+    const link = item.match(/<link>(.*?)<\/link>/)?.[1];
+    const guid = item.match(/<guid[^>]*>(.*?)<\/guid>/)?.[1];
+
+    if (!link || !guid) return null;
+
+    return {
+        link: link.trim().replace('http://', 'https://'),
+        id: guid.trim()
+    };
+}
+
+async function fetchLatestTweetFromNode(nodeUrl) {
+    const url = `${nodeUrl}/${TARGET_USER.username}/rss`;
+    const response = await fetchWithTimeout(url, {}, 8000);
+
+    if (!response.ok) {
+        throw new Error(`HTTP 錯誤! 狀態碼: ${response.status}`);
+    }
+
+    const text = await response.text();
+    const data = parseLatestItem(text);
+
+    if (!data) {
+        throw new Error('RSS 解析失敗');
+    }
+
+    const cleanLink = data.link.split('#')[0];
+    const vxTweetLink = cleanLink.replace(/^https:\/\/[^/]+/, 'https://vxtwitter.com');
+
+    return {
+        id: data.id,
+        link: vxTweetLink
+    };
+}
+
 app.get('/', (req, res) => {
     res.send('Angela 系統運作正常。歡迎來到腦葉公司核心控制室。');
 });
@@ -49,29 +149,6 @@ const client = new Client({
         GatewayIntentBits.GuildMembers
     ]
 });
-
-function buildRarity() {
-    const r = Math.random();
-    if (r < 0.029) return '000';
-    if (r < 0.157) return '00';
-    return '0';
-}
-
-function rarityToStars(rarity) {
-    if (rarity === '000') return '★★★';
-    if (rarity === '00') return '★★';
-    return '★';
-}
-
-function getDisplayPullResult(rarity) {
-    const upName = pullUpIdentity ? pullUpIdentity(rarity) : null;
-
-    if (upName && Math.random() < 0.25) {
-        return `✨ **[PICK-UP!]** ${upName}`;
-    }
-
-    return pullIdentity(rarity);
-}
 
 client.once('ready', async () => {
     console.log(`🤖 遵從您的指示，Angela 已成功登入為：${client.user.tag}`);
@@ -109,50 +186,31 @@ client.once('ready', async () => {
     checkTwitterUpdates();
 });
 
-// 📡 自動高頻輪詢 (帶有 PING 身分組與極簡影像網址)
 async function checkTwitterUpdates() {
     console.log(`⏳ Angela 正在發射高速觀測脈衝，檢查官方 @${TARGET_USER.username} 的動態...`);
     totalTweetsChecked++;
 
     for (const nodeUrl of NITTER_NODES) {
         try {
-            const url = `${nodeUrl}/${TARGET_USER.username}/rss`;
-            const response = await fetch(url, {
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                },
-                timeout: 8000
-            });
+            const data = await fetchLatestTweetFromNode(nodeUrl);
 
-            if (!response.ok) throw new Error(`HTTP 錯誤! 狀態碼: ${response.status}`);
-
-            const text = await response.text();
-            const itemRegex = /<item>[\s\S]*?<link>([\s\S]*?)<\/link>[\s\S]*?<guid[\s\S]*?>([\s\S]*?)<\/guid>/g;
-            const match = itemRegex.exec(text);
-
-            if (match) {
-                const rawLink = match[1].trim().replace('http://', 'https://');
-                const cleanLink = rawLink.split('#')[0];
-                const vxTweetLink = cleanLink.replace(/https:\/\/[^\/]+/, 'https://vxtwitter.com');
-                const tweetId = match[2].trim();
-
-                if (!lastFetchedId) {
-                    lastFetchedId = tweetId;
-                    console.log(`📦 [${nodeUrl}] 成功建立 @${TARGET_USER.username} 的初始推文快取：${tweetId}`);
-                    break;
-                }
-
-                if (tweetId !== lastFetchedId) {
-                    lastFetchedId = tweetId;
-                    const channel = await client.channels.fetch(NOTIFY_CHANNEL_ID);
-                    if (channel) {
-                        await channel.send({
-                            content: `🔔 ${PING_ROLE_MENTION} **偵測到脈衝，已收到 Project Moon 的最新訊息：**\n${vxTweetLink}`
-                        });
-                    }
-                }
+            if (!lastFetchedId) {
+                lastFetchedId = data.id;
+                console.log(`📦 [${nodeUrl}] 成功建立 @${TARGET_USER.username} 的初始推文快取：${data.id}`);
                 break;
             }
+
+            if (data.id !== lastFetchedId) {
+                lastFetchedId = data.id;
+                const channel = await client.channels.fetch(NOTIFY_CHANNEL_ID);
+                if (channel) {
+                    await channel.send({
+                        content: `🔔 ${PING_ROLE_MENTION} **偵測到脈衝，已收到 Project Moon 的最新訊息：**\n${data.link}`
+                    });
+                }
+            }
+
+            break;
         } catch (error) {
             console.warn(`⚠️ 節點 [${nodeUrl}] 擷取異常 (${error.message})，嘗試下一個備援空間...`);
         }
@@ -165,22 +223,6 @@ client.on('messageCreate', async (message) => {
     const msg = message.content.trim();
 
     if (msg === '!ping') return message.reply('pong！');
-    
-    if (msg === '!checkrateupids') {
-    if (rateUpIds.size === 0) {
-        return message.reply('📭 目前沒有任何機率提升中的人格。');
-    }
-
-    const list = [...rateUpIds];
-
-    const formatted = list
-        .map((id, index) => `${index + 1}. ${id}`)
-        .join('\n');
-
-    return message.reply(
-        `📈 **目前機率提升人格 (${list.length})**\n\n${formatted}`
-         );
-    }
 
     if (msg === '管理員' || msg === '主管') {
         return message.reply('主管，您好。我是您的 AI 助理 Angela。請下達您的指示，今天也請為了擴張「光之種」而努力。');
@@ -198,31 +240,14 @@ client.on('messageCreate', async (message) => {
 
         for (const nodeUrl of NITTER_NODES) {
             try {
-                const url = `${nodeUrl}/${TARGET_USER.username}/rss`;
-                const response = await fetch(url, {
-                    headers: {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
-                    },
-                    timeout: 8000
+                const data = await fetchLatestTweetFromNode(nodeUrl);
+
+                await message.reply({
+                    content: `🔔 ${PING_ROLE_MENTION} **偵測到脈衝，已收到 Project Moon 的最新訊息：**\n${data.link}`
                 });
 
-                if (!response.ok) throw new Error(`HTTP 狀態碼: ${response.status}`);
-
-                const text = await response.text();
-                const itemRegex = /<item>[\s\S]*?<link>([\s\S]*?)<\/link>[\s\S]*?<guid[\s\S]*?>([\s\S]*?)<\/guid>/g;
-                const match = itemRegex.exec(text);
-
-                if (match) {
-                    const rawLink = match[1].trim().replace('http://', 'https://');
-                    const cleanLink = rawLink.split('#')[0];
-                    const vxTweetLink = cleanLink.replace(/https:\/\/[^\/]+/, 'https://vxtwitter.com');
-
-                    await message.reply({
-                        content: `🔔 ${PING_ROLE_MENTION} **偵測到脈衝，已收到 Project Moon 的最新訊息：**\n${vxTweetLink}`
-                    });
-                    fetchSuccess = true;
-                    break;
-                }
+                fetchSuccess = true;
+                break;
             } catch (error) {
                 console.warn(`⚠️ 測試時節點 [${nodeUrl}] 異常: ${error.message}`);
             }
@@ -236,14 +261,16 @@ client.on('messageCreate', async (message) => {
 
     if (msg === '!邊獄人數' || msg === '!limbusonline') {
         try {
-            const response = await fetch('https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/?appid=1973530');
+            const response = await fetchWithTimeout(
+                'https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/?appid=1973530'
+            );
             const data = await response.json();
 
-            if (data && data.response && data.response.result === 1) {
+            if (data?.response?.result === 1) {
                 return message.reply(`📊 **[Steam 即時數據]** 目前共有 **${data.response.player_count.toLocaleString()}** 位罪人正在《Limbus Company》中進行探索。`);
-            } else {
-                return message.reply('❌ 無法從 Steam API 取得正確的數據。');
             }
+
+            return message.reply('❌ 無法從 Steam API 取得正確的數據。');
         } catch (error) {
             return message.reply('❌ 連線至 Steam 伺服器時發生內部錯誤。');
         }
@@ -261,7 +288,8 @@ client.on('messageCreate', async (message) => {
                 { name: '🏷️ 當前標籤 (Label)', value: '「被觀測者」', inline: true },
                 { name: '📊 心理狀態 (State)', value: '🛑 精神枯竭 (Burnout)', inline: true },
                 { name: '⏳ 核心運作時間 (Uptime)', value: `${uptimeHours} 小時`, inline: true },
-                { name: '📡 監聽機制', value: '1分鐘極速輪詢 (極簡優化版)', inline: true }
+                { name: '📡 監聽機制', value: '1分鐘極速輪詢 (極簡優化版)', inline: true },
+                { name: '📈 檢查次數', value: `${totalTweetsChecked}`, inline: true }
             )
             .setFooter({ text: 'Angela 心理與系統觀測核心' })
             .setTimestamp();
@@ -289,7 +317,6 @@ client.on('messageCreate', async (message) => {
         ];
 
         const randomEgo = egoList[Math.floor(Math.random() * egoList.length)];
-
         const egoEmbed = new EmbedBuilder()
             .setTitle('⚔️ 核心共鳴：E.G.O 同步觀測報告')
             .setColor(0xd90429)
@@ -326,9 +353,15 @@ client.on('messageCreate', async (message) => {
 
         for (let i = 0; i < count; i++) {
             const rarity = buildRarity();
-            let result = getDisplayPullResult(rarity);
-            const stars = rarityToStars(rarity);
-            results.push(`${result} (${stars})`);
+            const rateUpName = pickRateUp(rarity);
+
+            let result = pullIdentity(rarity);
+
+            if (rateUpName && Math.random() < 0.25) {
+                result = `✨ **[PICK-UP!]** ${rateUpName}`;
+            }
+
+            results.push(`${result} (${rarityToStars(rarity)})`);
         }
 
         return message.reply(
@@ -338,6 +371,32 @@ client.on('messageCreate', async (message) => {
         );
     }
 
+    if (msg === '!checkrateupids') {
+        const r000 = normalizeRateUpList('000');
+        const r00 = normalizeRateUpList('00');
+        const r0 = normalizeRateUpList('0');
+
+        if (r000.length === 0 && r00.length === 0 && r0.length === 0) {
+            return message.reply('📭 目前沒有設定任何機率提升中的人格。');
+        }
+
+        const lines = [];
+
+        if (r000.length > 0) {
+            lines.push(`**000**\n${r000.map(v => `• ${v}`).join('\n')}`);
+        }
+
+        if (r00.length > 0) {
+            lines.push(`**00**\n${r00.map(v => `• ${v}`).join('\n')}`);
+        }
+
+        if (r0.length > 0) {
+            lines.push(`**0**\n${r0.map(v => `• ${v}`).join('\n')}`);
+        }
+
+        return message.reply(`📈 **目前機率提升人格**\n\n${lines.join('\n\n')}`);
+    }
+
     if (msg.startsWith('!尋找機器人') || msg.startsWith('!findbot')) {
         const args = msg.split(' ');
         if (args.length < 2) return message.reply('❌ 請輸入要尋找的機器人名稱！');
@@ -345,6 +404,8 @@ client.on('messageCreate', async (message) => {
         const searchTerm = args.slice(1).join(' ').toLowerCase();
 
         try {
+            if (!message.guild) return message.reply('❌ 只能在伺服器內使用此指令。');
+
             const members = await message.guild.members.fetch();
             const foundBots = members.filter(member =>
                 member.user.bot && member.user.username.toLowerCase().includes(searchTerm)
