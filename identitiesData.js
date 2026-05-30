@@ -3,7 +3,7 @@ const identities = {
     "［蜘蛛巢：食指 父輩］李箱 / The House of Spiders: Index Father Yi Sang",
     "［蜘蛛巢：中指 父輩］奧提斯 / The House of Spiders: Middle Father Outis",
     "［蜘蛛巢：指環 父輩］鴻璐 / The House of Spiders: Ring Father Hong Lu",
-    "［蜘蛛巢之刃］良秀] / Blade of the House of Spiders Ryōshū",
+    "［蜘蛛巢之刃] 良秀 / Blade of the House of Spiders Ryōshū",
     "［指環 野獸派 講解員］羅佳 / The Ring Fauvist Lecturer Rodion",
     "［指環 點描派 學生］奧提斯 / The Ring Pointillist Student Outis",
     "［指環 點描派 學生］李箱 / The Ring Pointillist Student Yi Sang",
@@ -96,7 +96,7 @@ const identities = {
     "［鄭氏事務所 代理］以實瑪利 / Jeong's Office Representative Ishmael",
     "［多裂紋事務所 代理］浮士德 / Multicrack Office Representative Faust",
     "［火拳事務所 倖存者］格里高爾 / Firefist Office Survivor Gregor",
-    "［雙鉤海賊團 一副］格里高爾 / Twinhook Pirates First Mate Gregor"
+    "［雙鉤海賊團 一副］格里高爾 / Twinhook Pirates First Mate Gregor",
     "［Liu協會 南部3科］李箱 / Liu Assoc. South Section 3 Yi Sang",
     "［Liu協會 南部4科］以實瑪利 / Liu Assoc. South Section 4 Ishmael",
     "［臼齒船舶事務所 幫手］以實瑪利 / Molar Boatworks Fixer Ishmael",
