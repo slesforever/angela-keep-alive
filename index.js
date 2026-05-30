@@ -150,7 +150,6 @@ client.on('messageCreate', async (message) => {
     if (msg.toLowerCase() === 'lc' || msg === '腦葉公司') {
         return message.reply('「直面恐懼，創造未來。」請時刻注意收容單位的逆流計數器，主管。');
     }
-}
 
     // 手動指令測試 (修正：同步加上 PING 與 專屬導言)
     if (msg === '!測試官方推文' || msg === '!testtweet') {
