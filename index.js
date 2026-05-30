@@ -122,11 +122,9 @@ async function checkTwitterUpdates() {
 }
 
 client.on('messageCreate', async (message) => {
+    // 檢查機器人本身，避免無限迴圈
     if (message.author.bot) return;
 
-    const msg = message.content.trim();
-    
-    if (message.author.bot) return;
     const msg = message.content.trim();
 
     // 抽卡邏輯
@@ -151,7 +149,7 @@ client.on('messageCreate', async (message) => {
         return message.reply('「直面恐懼，創造未來。」請時刻注意收容單位的逆流計數器，主管。');
     }
 
-    // 手動指令測試 (修正：同步加上 PING 與 專屬導言)
+    // 手動指令測試
     if (msg === '!測試官方推文' || msg === '!testtweet') {
         await message.channel.sendTyping();
         console.log(`🎯 主管手動觸發官方推文測試擷取...`);
@@ -177,7 +175,6 @@ client.on('messageCreate', async (message) => {
                     const cleanLink = rawLink.split('#')[0];
                     const vxTweetLink = cleanLink.replace(/https:\/\/[^\/]+/, 'https://vxtwitter.com');
                     
-                    // ✨ 修正：手動測試現在也會正確噴出 PING 身分組與 Project Moon 的專屬導言！
                     await message.reply({ content: `🔔 ${PING_ROLE_MENTION} **偵測到脈衝，已收到 Project Moon 的最新訊息：**\n${vxTweetLink}` });
                     fetchSuccess = true;
                     break;
