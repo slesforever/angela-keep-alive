@@ -127,20 +127,6 @@ client.on('messageCreate', async (message) => {
 
     const msg = message.content.trim();
 
-    // 抽卡邏輯
-    if (msg === '!pull' || msg === '!10pulls') {
-        const { pullIdentity } = require('./identitiesData');
-        console.log(pullIdentity('000')); // 測試呼叫
-        const count = (msg === '!10pulls') ? 10 : 1;
-        let results = [];
-        for (let i = 0; i < count; i++) {
-            const rand = Math.random();
-            let rarity = (rand < 0.029) ? '000' : (rand < 0.13) ? '00' : '0';
-            results.push(`${pullIdentity(rarity)} (${rarity === '000' ? '★★★' : rarity === '00' ? '★★' : '★'})`);
-        }
-        return message.reply(count === 10 ? `✨ **十連抽結果：**\n${results.join('\n')}` : `🎯 **單抽結果：**\n${results[0]}`);
-    }
-
     if (msg === '!ping') return message.reply('pong！');
 
     if (msg === '管理員' || msg === '主管') {
@@ -258,6 +244,40 @@ client.on('messageCreate', async (message) => {
             .setTimestamp();
         return message.reply({ embeds: [alarmEmbed] });
     }
+    const { pullIdentity, targetIdentities } = require('./identitiesData');
+
+// 在你的 messageCreate 事件處理器中：
+if (msg === '!pull' || msg === '!10pulls') {
+    const count = (msg === '!10pulls') ? 10 : 1;
+    let results = [];
+    const target = targetIdentities[message.author.id]; // 獲取該用戶的目標
+
+    for (let i = 0; i < count; i++) {
+        const rand = Math.random();
+        // 累積機率分配: 2.9% (000), 12.8% (00), 84.3% (0)
+        let rarity = (rand < 0.029) ? '000' : (rand < 0.157) ? '00' : '0';
+        
+        let chosenIdentity;
+
+        // 【Rate Up 邏輯】
+        // 1. 如果抽中了對應稀有度
+        // 2. 且該用戶有設定目標
+        // 3. 且目標符合這次抽中的稀有度
+        // 4. 有 25% 機率 (0.25) 觸發 Rate Up
+        if (target && target.rarity === rarity && Math.random() < 0.25) {
+            chosenIdentity = `✨ **[PICK-UP!]** ${target.name}`;
+        } else {
+            // 正常抽取
+            const name = pullIdentity(rarity);
+            const stars = (rarity === '000') ? '★★★' : (rarity === '00') ? '★★' : '★';
+            chosenIdentity = `${name} (${stars})`;
+        }
+        
+        results.push(chosenIdentity);
+    }
+    
+    return message.reply(count === 10 ? `✨ **十連抽結果：**\n${results.join('\n')}` : `🎯 **單抽結果：**\n${results[0]}`);
+}
 
     if (msg.startsWith('!尋找機器人') || msg.startsWith('!findbot')) {
         const args = msg.split(' ');
