@@ -26,6 +26,15 @@ let lastFetchedId = null;
 const NOTIFY_CHANNEL_ID = '1402282604165730348';
 const PING_ROLE_MENTION = '<@&1406984068725211177>';
 
+const RATEUP_LOG_CHANNEL_ID = '1510153086281187330';
+
+let lastRateUpSnapshot = JSON.stringify(
+    identitiesData.upTargets ||
+    identitiesData.rateUpIds ||
+    identitiesData.targetIdentities ||
+    {}
+);
+
 /* ---------------- RATE UP DATA ----------------
    這裡會自動讀 identitiesData.js 裡的這幾種格式：
    - upTargets: { '000': ['...'], '00': ['...'], '0': ['...'] }
@@ -184,6 +193,8 @@ client.once('ready', async () => {
 
     setInterval(checkTwitterUpdates, 60 * 1000);
     checkTwitterUpdates();
+
+    setInterval(checkRateUpChanges, 30000);
 });
 
 async function checkTwitterUpdates() {
@@ -424,6 +435,63 @@ client.on('messageCreate', async (message) => {
         }
     }
 });
+async function checkRateUpChanges() {
+    try {
+        delete require.cache[require.resolve('./identitiesData.js')];
+
+        const freshData = require('./identitiesData.js');
+
+        const currentRateUps =
+            freshData.upTargets ||
+            freshData.rateUpIds ||
+            freshData.targetIdentities ||
+            {};
+
+        const currentSnapshot = JSON.stringify(currentRateUps);
+
+        if (currentSnapshot === lastRateUpSnapshot) return;
+
+        const oldRateUps = JSON.parse(lastRateUpSnapshot);
+        lastRateUpSnapshot = currentSnapshot;
+
+        const channel = await client.channels.fetch(RATEUP_LOG_CHANNEL_ID);
+
+        if (!channel) return;
+
+        let msg = '📢 **Rate Up IDs 已更新！**\n\n';
+
+        for (const rarity of ['000', '00', '0']) {
+            const oldList = oldRateUps[rarity] || [];
+            const newList = currentRateUps[rarity] || [];
+
+            if (JSON.stringify(oldList) === JSON.stringify(newList))
+                continue;
+
+            msg += `## ${rarity}\n`;
+
+            msg += '**舊：**\n';
+            msg += oldList.length
+                ? oldList.map(x => `• ${x}`).join('\n')
+                : '（無）';
+
+            msg += '\n\n';
+
+            msg += '**新：**\n';
+            msg += newList.length
+                ? newList.map(x => `• ${x}`).join('\n')
+                : '（無）';
+
+            msg += '\n\n';
+        }
+
+        await channel.send(msg);
+
+        console.log('📢 Rate Up 更新公告已送出');
+
+    } catch (err) {
+        console.error('RateUp檢查失敗:', err);
+    }
+}
 
 const TOKEN = process.env.DISCORD_TOKEN;
 client.login(TOKEN).catch(err => {
