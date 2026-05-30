@@ -1,3 +1,5 @@
+// index.js (在檔案最上方)
+const { pullIdentity } = require('./identitiesData.js');
 const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 const express = require('express');
 
