@@ -1,18 +1,13 @@
-name: Angela Keep Alive
+name: Angela Awake Protocol
 
 on:
   schedule:
-    - cron: '*/5 * * * *'
-  workflow_dispatch:
+    - cron: '*/5 * * * *' # 每 5 分鐘自動踢門一次
+  workflow_dispatch:      # 🟢 加這行！這就是「手動觸發」的秘密開關
 
 jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Wake Angela
-        run: |
-          echo "Pinging Angela..."
-          curl -L --fail --silent --show-error \
-            https://angela-keep-alive.onrender.com/ \
-            > /dev/null
-          echo "Success!"
+      - name: Send Signal to Angela
+        run: curl -s https://angela-keep-alive.onrender.com/
