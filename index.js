@@ -1,6 +1,5 @@
 'use strict';
 
-// ==================== 🛡️ 全域防崩潰守護神系統 ====================
 process.on('unhandledRejection', (reason) => {
   console.error('⚠️ [全域安全攔截] 未處理的 Promise 拒絕：', reason);
 });
@@ -8,6 +7,8 @@ process.on('uncaughtException', (err) => {
   console.error('❌ [全域安全攔截] 未捕獲的例外事件：', err);
 });
 
+const fs = require('fs');
+const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
 const {
@@ -22,7 +23,6 @@ const {
 
 const identitiesData = require('./identitiesData.js');
 
-// ==================== ⚙️ 基本設定 ====================
 const TOKEN = process.env.DISCORD_TOKEN;
 const OWNER_ID = process.env.OWNER_ID || '1330463890122735642';
 const NOTIFY_CHANNEL_ID = process.env.NOTIFY_CHANNEL_ID || '1402282604165730348';
@@ -35,34 +35,58 @@ const TARGET_USER = {
 };
 const CHECK_INTERVAL_MS = 60 * 1000;
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36';
+const DAILY_BASE_REWARD = 130;
+const DAILY_STREAK_BONUS = 1;
+const DB_FILE = process.env.DB_FILE || path.join(__dirname, 'players.json');
 
 const NITTER_NODES = (process.env.NITTER_NODES || 'https://nitter.net,https://nitter.poast.org,https://nitter.cz,https://nitter.lucabased.xyz,https://nitter.so,https://nitter.moomoo.me')
   .split(',')
   .map(s => s.trim())
   .filter(Boolean);
 
-// ==================== 🧠 暫存資料庫 ====================
+fs.mkdirSync(path.dirname(DB_FILE), { recursive: true });
+
 let playersDB = {};
 let saveTimer = null;
 let lastFetchedId = null;
+let lastSteamNewsId = null;
 let totalTweetsChecked = 0;
-let lastRateUpSnapshot = JSON.stringify(identitiesData?.upTargets || identitiesData?.rateUpIds || identitiesData?.targetIdentities || {});
+let lastRateUpSnapshot = null;
 const activeTrades = new Map();
-const DAILY_BASE_REWARD = 130;
-const DAILY_STREAK_BONUS = 1;
-
-function getTaipeiDateKey(date = new Date()) {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Taipei',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(date);
-}
 
 function scheduleSave() {
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {}, 150);
+  saveTimer = setTimeout(() => {
+    saveDatabase();
+  }, 150);
+}
+
+function loadDatabase() {
+  try {
+    if (!fs.existsSync(DB_FILE)) {
+      playersDB = {};
+      saveDatabase();
+      return;
+    }
+    const raw = fs.readFileSync(DB_FILE, 'utf8').trim();
+    playersDB = raw ? JSON.parse(raw) : {};
+    if (!playersDB || typeof playersDB !== 'object' || Array.isArray(playersDB)) playersDB = {};
+    console.log(`💾 資料庫讀取成功：${DB_FILE}`);
+  } catch (err) {
+    console.error('❌ 資料庫讀取失敗，已重置為空資料：', err);
+    playersDB = {};
+  }
+}
+
+function saveDatabase() {
+  try {
+    fs.mkdirSync(path.dirname(DB_FILE), { recursive: true });
+    const tmp = `${DB_FILE}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(playersDB, null, 2), 'utf8');
+    fs.renameSync(tmp, DB_FILE);
+  } catch (err) {
+    console.error('❌ 資料寫入失敗：', err);
+  }
 }
 
 function ensurePlayer(userId) {
@@ -74,6 +98,8 @@ function ensurePlayer(userId) {
       team: [],
       equipped: null,
       starterGranted: false,
+      dailyStreak: 0,
+      lastDailyClaimDate: '',
     };
     const baseSinners = identitiesData?.identities?.['0'] || [];
     for (const sinner of baseSinners) {
@@ -85,19 +111,30 @@ function ensurePlayer(userId) {
   }
 
   const p = playersDB[userId];
-  if (typeof p.lunacy !== 'number') { p.lunacy = 0; scheduleSave(); }
-  if (!p.inventory || typeof p.inventory !== 'object' || Array.isArray(p.inventory)) { p.inventory = {}; scheduleSave(); }
-  if (!p.egos || typeof p.egos !== 'object' || Array.isArray(p.egos)) { p.egos = {}; scheduleSave(); }
-  if (!Array.isArray(p.team)) { p.team = []; scheduleSave(); }
-  if (p.equipped === undefined) { p.equipped = null; scheduleSave(); }
-  if (typeof p.dailyStreak !== 'number') { p.dailyStreak = 0; scheduleSave(); }
-  if (typeof p.lastDailyClaimDate !== 'string') { p.lastDailyClaimDate = ''; scheduleSave(); }
-  if (typeof p.starterGranted !== 'boolean') { p.starterGranted = true; scheduleSave(); }
+  let changed = false;
+  if (typeof p.lunacy !== 'number') { p.lunacy = 0; changed = true; }
+  if (!p.inventory || typeof p.inventory !== 'object' || Array.isArray(p.inventory)) { p.inventory = {}; changed = true; }
+  if (!p.egos || typeof p.egos !== 'object' || Array.isArray(p.egos)) { p.egos = {}; changed = true; }
+  if (!Array.isArray(p.team)) { p.team = []; changed = true; }
+  if (p.equipped === undefined) { p.equipped = null; changed = true; }
+  if (typeof p.dailyStreak !== 'number') { p.dailyStreak = 0; changed = true; }
+  if (typeof p.lastDailyClaimDate !== 'string') { p.lastDailyClaimDate = ''; changed = true; }
+  if (typeof p.starterGranted !== 'boolean') { p.starterGranted = true; changed = true; }
+  if (changed) scheduleSave();
   return p;
 }
 
 function getPlayer(userId) {
   return ensurePlayer(userId);
+}
+
+function getTaipeiDateKey(date = new Date()) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Taipei',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
 }
 
 function safeTrim(text) {
@@ -120,31 +157,12 @@ function stripHtml(html = '') {
     .trim();
 }
 
-function readTimelineText(rawText = '') {
-  const raw = String(rawText || '').trim();
-  if (!raw) return '';
-  try {
-    const json = JSON.parse(raw);
-    return String(json?.body ?? raw);
-  } catch (_) {}
-  const jsonpMatch = raw.match(/^[^(]+\(([\s\S]*)\)\s*;?\s*$/);
-  if (jsonpMatch) {
-    try {
-      const json = JSON.parse(jsonpMatch[1]);
-      return String(json?.body ?? jsonpMatch[1]);
-    } catch (_) {
-      return jsonpMatch[1];
-    }
-  }
-  return raw;
-}
-
 function extractTweetIdsFromText(text = '') {
   const raw = String(text || '');
   const ids = new Set();
   for (const m of raw.matchAll(/data-tweet-id="(\d{10,25})"/g)) ids.add(m[1]);
   for (const m of raw.matchAll(/status\/(\d{10,25})/g)) ids.add(m[1]);
-  for (const m of raw.matchAll(/tweet_id[=:\"'](\d{10,25})/g)) ids.add(m[1]);
+  for (const m of raw.matchAll(/tweet_id[=:"'](\d{10,25})/g)) ids.add(m[1]);
   for (const m of raw.matchAll(/"id_str"\s*:\s*"(\d{10,25})"/g)) ids.add(m[1]);
   for (const m of raw.matchAll(/"id"\s*:\s*"(\d{10,25})"/g)) ids.add(m[1]);
   return [...ids];
@@ -165,10 +183,14 @@ function extractMetaValues(html = '', keys = []) {
   return [...new Set(out.filter(Boolean))];
 }
 
-function fetchFn(url, options = {}, timeoutMs = 8000) {
+async function fetchCompat(url, options = {}, timeoutMs = 8000) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  return fetch(url, {
+  const fetchImpl = typeof fetch === 'function'
+    ? fetch.bind(globalThis)
+    : (await import('node-fetch')).default;
+
+  return fetchImpl(url, {
     ...options,
     signal: controller.signal,
     headers: {
@@ -179,7 +201,7 @@ function fetchFn(url, options = {}, timeoutMs = 8000) {
   }).finally(() => clearTimeout(timeout));
 }
 
-async function sendLike(target, payload) {
+async function replyLike(target, payload) {
   if (!target) return null;
   if (typeof target.reply === 'function') return target.reply(payload);
   if (typeof target.send === 'function') return target.send(payload);
@@ -196,7 +218,6 @@ function rarityToStars(rarity) {
   return '★';
 }
 
-// ==================== 🎲 抽卡機率 ====================
 const RARITY_RATES = {
   'Color Fixer': 0.00000143,
   'Special': 0.0001,
@@ -247,7 +268,11 @@ function pickRateUp(rarity) {
   return list[Math.floor(Math.random() * list.length)];
 }
 
-// ==================== 🔎 Twitter / X 觀測 ====================
+function pullIdentity(rarity) {
+  if (typeof identitiesData?.pullIdentity === 'function') return identitiesData.pullIdentity(rarity);
+  return `（缺少 pullIdentity：${rarity}）`;
+}
+
 async function parseLatestItem(xml) {
   const itemMatch = xml.match(/<item>[\s\S]*?<\/item>/i);
   if (!itemMatch) return null;
@@ -264,8 +289,7 @@ async function parseLatestItem(xml) {
 }
 
 async function fetchLatestTweetFromNode(nodeUrl) {
-  const url = `${nodeUrl}/${TARGET_USER.username}/rss`;
-  const response = await fetchFn(url, {}, 8000);
+  const response = await fetchCompat(`${nodeUrl}/${TARGET_USER.username}/rss`, {}, 8000);
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const text = await response.text();
   const data = await parseLatestItem(text);
@@ -275,324 +299,113 @@ async function fetchLatestTweetFromNode(nodeUrl) {
   return { id: data.id, link: vxTweetLink, title: data.title };
 }
 
-async function fetchTwitterTimelineProfile(screenName) {
-  const attempts = [
-    `https://syndication.twitter.com/timeline/profile?screen_name=${encodeURIComponent(screenName)}&lang=zh-hant&dnt=false&callback=__twttrf.callback&rnd=${Math.random()}`,
-    `https://syndication.twitter.com/timeline/profile?screen_name=${encodeURIComponent(screenName)}&lang=en&dnt=false&callback=__twttrf.callback&rnd=${Math.random()}`,
-  ];
-  let lastError = null;
-  for (const url of attempts) {
-    try {
-      const response = await fetchFn(url, {}, 10000);
-      if (!response.ok) {
-        lastError = new Error(`timeline/profile HTTP ${response.status}`);
-        continue;
-      }
-      const text = await response.text();
-      const body = readTimelineText(text);
-      const tweetIds = extractTweetIdsFromText(body);
-      if (tweetIds.length > 0) return { raw: text, body, tweetIds };
-      lastError = new Error('timeline/profile 沒有抓到 tweet id');
-    } catch (e) {
-      lastError = e;
-    }
-  }
-  throw lastError || new Error('timeline/profile 失敗');
-}
-
-async function fetchTweetResult(tweetId) {
-  const attempts = [
-    `https://cdn.syndication.twimg.com/tweet-result?id=${encodeURIComponent(tweetId)}&lang=zh`,
-    `https://cdn.syndication.twimg.com/tweet-result?id=${encodeURIComponent(tweetId)}&lang=en`,
-    `https://cdn.syndication.twimg.com/tweet-result?id=${encodeURIComponent(tweetId)}&lang=zh&token=!`,
-  ];
-  let lastError = null;
-  for (const url of attempts) {
-    try {
-      const response = await fetchFn(url, {}, 10000);
-      if (!response.ok) {
-        lastError = new Error(`tweet-result HTTP ${response.status}`);
-        continue;
-      }
-      return await response.json();
-    } catch (e) {
-      lastError = e;
-    }
-  }
-  throw lastError || new Error('tweet-result 失敗');
-}
-
-async function fetchTweetHtml(tweetUrl) {
-  const response = await fetchFn(tweetUrl, {}, 10000);
-  if (!response.ok) throw new Error(`tweet page HTTP ${response.status}`);
-  return await response.text();
-}
-
-function extractTweetMedia(tweet) {
-  const rawCandidates = [];
-  const walk = (value, path = []) => {
-    if (value == null) return;
-    if (typeof value === 'string') {
-      if (/^https?:\/\//i.test(value)) {
-        const pathStr = path.join('.').toLowerCase();
-        if (/(photo|photos|media|mediadetails|video|variant|thumb|thumbnail|poster|preview|image|card|gallery)/i.test(pathStr)) {
-          rawCandidates.push({ url: value, path });
-        }
-      }
-      return;
-    }
-    if (Array.isArray(value)) {
-      for (let i = 0; i < value.length; i++) walk(value[i], path.concat(String(i)));
-      return;
-    }
-    if (typeof value === 'object') {
-      for (const [k, v] of Object.entries(value)) walk(v, path.concat(k));
-    }
-  };
-  walk(tweet);
-
-  const images = [];
-  const videos = [];
-  for (const { url, path } of rawCandidates) {
-    const u = String(url).toLowerCase();
-    const key = path.join('.').toLowerCase();
-    if (/profile_images|emoji/i.test(u)) continue;
-    const looksLikeVideo =
-      u.includes('video.twimg.com') ||
-      u.endsWith('.mp4') ||
-      u.endsWith('.mov') ||
-      u.endsWith('.webm') ||
-      u.endsWith('.m3u8') ||
-      key.includes('video') ||
-      key.includes('mp4') ||
-      key.includes('variant') ||
-      key.includes('playback') ||
-      key.includes('stream');
-    const looksLikeImage =
-      u.includes('pbs.twimg.com/media') ||
-      u.endsWith('.jpg') ||
-      u.endsWith('.jpeg') ||
-      u.endsWith('.png') ||
-      u.endsWith('.gif') ||
-      u.endsWith('.webp') ||
-      key.includes('photo') ||
-      key.includes('image') ||
-      key.includes('poster') ||
-      key.includes('thumb') ||
-      key.includes('thumbnail');
-    if (looksLikeVideo) videos.push(url);
-    else if (looksLikeImage) images.push(url);
-  }
-  return { images: [...new Set(images)], videos: [...new Set(videos)] };
-}
-
-function buildTwitterPayloadFromTweetResult(tweet, fallbackScreenName = TARGET_USER.username) {
-  const tweetId = tweet?.id_str || tweet?.id || '';
-  const screenName = tweet?.user?.screen_name || fallbackScreenName;
-  const authorName = tweet?.user?.name || screenName;
-  const tweetUrl = `https://x.com/${screenName}/status/${tweetId}`;
-  const vxUrl = `https://vxtwitter.com/${screenName}/status/${tweetId}`;
-  const rawText = tweet?.full_text || tweet?.text || tweet?.legacy?.full_text || tweet?.legacy?.text || tweet?.body || '';
-  const text = stripHtml(rawText);
-  const { images, videos } = extractTweetMedia(tweet);
-
-  const mainEmbed = new EmbedBuilder()
-    .setTitle(`🐦 ${authorName} 發布新推文`)
-    .setURL(vxUrl)
-    .setColor(0x1DA1F2)
-    .setTimestamp(tweet?.created_at ? new Date(tweet.created_at) : new Date())
-    .setDescription((text || '（沒有文字內容）').slice(0, 4000));
-
-  if (images[0]) mainEmbed.setImage(images[0]);
-  if (videos.length > 0) {
-    mainEmbed.addFields({ name: '🎬 影片', value: videos.slice(0, 5).map((u, i) => `[影片 ${i + 1}](${u})`).join('\n') });
-  }
-  if (images.length > 1) {
-    mainEmbed.addFields({ name: '📷 其他圖片', value: images.slice(1, 5).map((u, i) => `[圖片 ${i + 2}](${u})`).join('\n') });
-  }
-
-  const embeds = [mainEmbed];
-  for (const img of images.slice(1, 5)) {
-    embeds.push(new EmbedBuilder().setColor(0x1DA1F2).setURL(vxUrl).setImage(img));
-  }
-  if (videos.length > 0) {
-    embeds.push(
-      new EmbedBuilder()
-        .setColor(0x1DA1F2)
-        .setURL(vxUrl)
-        .setDescription(`🎬 影片連結：\n${videos.slice(0, 5).map((u, i) => `[影片 ${i + 1}](${u})`).join('\n')}`)
-    );
-  }
-
+async function fetchLatestTweetFromXProfile() {
+  const response = await fetchCompat(`https://x.com/${TARGET_USER.username}`, {}, 10000);
+  if (!response.ok) throw new Error(`X profile HTTP ${response.status}`);
+  const html = await response.text();
+  const ids = [...new Set([...html.matchAll(/status\/(\d{10,25})/g)].map(m => m[1]))];
+  if (!ids.length) throw new Error('X profile 解析失敗');
+  const id = ids[0];
   return {
-    content: `🔔 ${PING_ROLE_MENTION}\n${vxUrl}`,
-    embeds,
+    id,
+    link: `https://vxtwitter.com/${TARGET_USER.username}/status/${id}`,
+    title: '',
+  };
+}
+
+async function getLatestTweet() {
+  const shuffled = [...NITTER_NODES].sort(() => Math.random() - 0.5);
+  const errors = [];
+  for (const nodeUrl of shuffled) {
+    try {
+      return await fetchLatestTweetFromNode(nodeUrl);
+    } catch (err) {
+      errors.push(`${nodeUrl} (${err.message})`);
+    }
+  }
+  try {
+    return await fetchLatestTweetFromXProfile();
+  } catch (err) {
+    errors.push(`X profile (${err.message})`);
+  }
+  throw new Error(errors.join('\n') || '所有節點無法連線');
+}
+
+function buildTweetContent(tweet) {
+  const titleLine = tweet?.title ? `> ${tweet.title}\n` : '';
+  return {
+    content: `🔔 ${PING_ROLE_MENTION} **偵測到脈衝，已收到 Project Moon 的最新訊息：**\n${titleLine}${tweet.link}`,
     allowedMentions: { roles: [PING_ROLE_ID] },
   };
-}
-
-function buildTwitterPayloadFromHtml(html, tweetUrl, fallbackTitle = '最新推文') {
-  const vxUrl = tweetUrl.replace('https://x.com/', 'https://vxtwitter.com/');
-  const titleValues = extractMetaValues(html, ['og:title', 'twitter:title']);
-  const descValues = extractMetaValues(html, ['og:description', 'twitter:description']);
-  const imageValues = extractMetaValues(html, ['og:image', 'twitter:image']);
-  const videoValues = extractMetaValues(html, ['og:video', 'og:video:url', 'twitter:player:stream']);
-
-  const title = titleValues[0] || fallbackTitle;
-  const desc = descValues[0] || '（無法直接讀取文字內容）';
-  const embed = new EmbedBuilder()
-    .setTitle(`🐦 ${title}`)
-    .setURL(vxUrl)
-    .setColor(0x1DA1F2)
-    .setTimestamp()
-    .setDescription(stripHtml(desc).slice(0, 4000));
-
-  if (imageValues[0]) embed.setImage(imageValues[0]);
-  const fields = [];
-  if (imageValues.length > 1) fields.push({ name: '📷 其他圖片', value: imageValues.slice(1, 5).map((u, i) => `[圖片 ${i + 2}](${u})`).join('\n') });
-  if (videoValues.length > 0) fields.push({ name: '🎬 影片', value: videoValues.slice(0, 5).map((u, i) => `[影片 ${i + 1}](${u})`).join('\n') });
-  if (fields.length > 0) embed.addFields(fields);
-
-  const embeds = [embed];
-  for (const img of imageValues.slice(1, 5)) {
-    embeds.push(new EmbedBuilder().setColor(0x1DA1F2).setURL(vxUrl).setImage(img));
-  }
-
-  return {
-    content: `🔔 ${PING_ROLE_MENTION}\n${vxUrl}`,
-    embeds,
-    allowedMentions: { roles: [PING_ROLE_ID] },
-  };
-}
-
-async function deliverTwitterTweetById(tweetId, manual = false, target = null, fallbackScreenName = TARGET_USER.username) {
-  const tweetUrl = `https://x.com/${fallbackScreenName}/status/${tweetId}`;
-  try {
-    const tweet = await fetchTweetResult(tweetId);
-    const payload = buildTwitterPayloadFromTweetResult(tweet, fallbackScreenName);
-    if (manual) return sendLike(target, payload);
-    const channel = await client.channels.fetch(NOTIFY_CHANNEL_ID).catch(() => null);
-    if (channel) await channel.send(payload).catch(() => {});
-    return;
-  } catch (e1) {
-    console.error('⚠️ tweet-result 失敗，改抓 X HTML：', e1?.message || e1);
-  }
-
-  try {
-    const html = await fetchTweetHtml(tweetUrl);
-    const payload = buildTwitterPayloadFromHtml(html, tweetUrl, '最新推文');
-    if (manual) return sendLike(target, payload);
-    const channel = await client.channels.fetch(NOTIFY_CHANNEL_ID).catch(() => null);
-    if (channel) await channel.send(payload).catch(() => {});
-    return;
-  } catch (e2) {
-    console.error('⚠️ X HTML 也失敗：', e2?.message || e2);
-    const fallback = {
-      content: `🔔 ${PING_ROLE_MENTION}\n${tweetUrl}\n（內容抓取失敗，只能先丟連結）`,
-      allowedMentions: { roles: [PING_ROLE_ID] },
-    };
-    if (manual) return sendLike(target, fallback);
-    const channel = await client.channels.fetch(NOTIFY_CHANNEL_ID).catch(() => null);
-    if (channel) await channel.send(fallback).catch(() => {});
-  }
 }
 
 async function checkTwitterUpdates(manual = false, target = null) {
+  console.log(`⏳ Angela 正在檢查官方 @${TARGET_USER.username} 的動態...`);
+  totalTweetsChecked++;
+
+  let latestTweet = null;
   let lastError = null;
-  let latest = null;
-
-  // 1) RSS / Nitter
-  const shuffled = [...NITTER_NODES].sort(() => Math.random() - 0.5);
-  for (const nodeUrl of shuffled) {
-    try {
-      const data = await fetchLatestTweetFromNode(nodeUrl);
-      latest = { source: 'rss', ...data };
-      break;
-    } catch (e) {
-      lastError = e;
-      console.warn(`⚠️ 節點 [${nodeUrl}] 擷取異常 (${e.message})，嘗試下一個備援空間...`);
-    }
+  try {
+    latestTweet = await getLatestTweet();
+  } catch (err) {
+    lastError = err;
   }
 
-  // 2) RSS 全失敗時，才用 timeline/profile
-  if (!latest) {
-    try {
-      const timeline = await fetchTwitterTimelineProfile(TARGET_USER.username);
-      const latestTweetId = timeline.tweetIds?.[0];
-      if (latestTweetId) {
-        latest = {
-          source: 'timeline',
-          id: latestTweetId,
-          link: `https://vxtwitter.com/${TARGET_USER.username}/status/${latestTweetId}`,
-          title: '',
-        };
-      }
-    } catch (e) {
-      lastError = e;
+  if (!latestTweet?.id) {
+    if (manual) {
+      return replyLike(target, `❌ **觀測失敗**\n${lastError?.message || '所有節點無法連線'}`);
     }
-  }
-
-  if (!latest?.id) {
-    if (manual) return sendLike(target, `❌ **觀測失敗**\n${lastError?.message || '所有節點無法連線'}`);
-    throw lastError || new Error('沒有抓到任何推文 ID');
+    return;
   }
 
   if (lastFetchedId === null) {
-    lastFetchedId = latest.id;
+    lastFetchedId = latestTweet.id;
     if (!manual) {
-      console.log(`📡 [觀測系統] Twitter 初始基線鎖定成功，最新 ID: ${latest.id}`);
+      console.log(`📦 成功建立 @${TARGET_USER.username} 的初始推文快取：${latestTweet.id}`);
       return;
     }
   }
 
-  if (manual) {
-    await deliverTwitterTweetById(latest.id, true, target);
-    return;
-  }
+  if (manual) return replyLike(target, buildTweetContent(latestTweet));
 
-  if (latest.id !== lastFetchedId) {
-    lastFetchedId = latest.id;
-    await deliverTwitterTweetById(latest.id, false, null);
+  if (latestTweet.id !== lastFetchedId) {
+    lastFetchedId = latestTweet.id;
+    const channel = await client.channels.fetch(NOTIFY_CHANNEL_ID).catch(() => null);
+    if (channel) await channel.send(buildTweetContent(latestTweet)).catch(() => {});
   }
 }
 
-// ==================== 🚂 Steam 觀測 ====================
 async function checkSteamUpdates(manual = false, target = null) {
   try {
-    const response = await fetchFn('https://api.steampowered.com/ISteamNews/GetNewsForApp/v0002/?appid=1973530&count=5&format=json', {}, 10000);
+    const response = await fetchCompat('https://api.steampowered.com/ISteamNews/GetNewsForApp/v0002/?appid=1973530&count=5&format=json', {}, 10000);
     if (!response.ok) throw new Error(`Steam API HTTP ${response.status}`);
     const data = await response.json();
     const newsItems = Array.isArray(data?.appnews?.newsitems) ? data.appnews.newsitems : [];
     const newsItem = newsItems[0];
+
     if (!newsItem) {
-      if (manual) return sendLike(target, '❌ 沒有抓到 Steam 新聞。');
+      if (manual) return replyLike(target, '❌ 沒有抓到 Steam 新聞。');
       return;
     }
 
     if (lastSteamNewsId === null) {
       lastSteamNewsId = String(newsItem.gid);
       if (!manual) {
-        console.log(`🚂 [觀測系統] Steam 新聞初始基線鎖定成功，當前最新 ID: ${newsItem.gid}`);
+        console.log(`🚂 Steam 新聞初始基線鎖定成功，當前最新 ID: ${newsItem.gid}`);
         return;
       }
     }
 
-    if (manual) {
-      const embed = new EmbedBuilder()
-        .setTitle(`🚂 [Steam新聞] ${newsItem.title}`)
-        .setURL(newsItem.url)
-        .setColor(0x00A8E8)
-        .setTimestamp();
-      return sendLike(target, { embeds: [embed] });
-    }
+    const embed = new EmbedBuilder()
+      .setTitle(`🚂 [Steam新聞] ${newsItem.title}`)
+      .setURL(newsItem.url)
+      .setColor(0x00A8E8)
+      .setTimestamp();
+
+    if (manual) return replyLike(target, { embeds: [embed] });
 
     if (String(newsItem.gid) !== String(lastSteamNewsId)) {
       lastSteamNewsId = String(newsItem.gid);
-      const embed = new EmbedBuilder()
-        .setTitle(`🚂 [Steam新聞] ${newsItem.title}`)
-        .setURL(newsItem.url)
-        .setColor(0x00A8E8)
-        .setTimestamp();
       const channel = await client.channels.fetch(NOTIFY_CHANNEL_ID).catch(() => null);
       if (channel) {
         await channel.send({
@@ -602,10 +415,18 @@ async function checkSteamUpdates(manual = false, target = null) {
         }).catch(() => {});
       }
     }
-  } catch (e) {
-    console.error('❌ [Steam] 觀測失敗：', e?.message || e);
-    if (manual) return sendLike(target, '❌ **Steam API 錯誤**');
+  } catch (err) {
+    console.error('❌ [Steam] 觀測失敗：', err?.message || err);
+    if (manual) return replyLike(target, '❌ **Steam API 錯誤**');
   }
+}
+
+async function checkSteamPlayerCount(manualTarget) {
+  const response = await fetchCompat('https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/?appid=1973530', {}, 10000);
+  if (!response.ok) throw new Error(`Steam player count HTTP ${response.status}`);
+  const data = await response.json();
+  if (data?.response?.result !== 1) throw new Error('Steam player count 回傳格式錯誤');
+  return replyLike(manualTarget, `📊 **[Steam 即時數據]** 目前共有 **${data.response.player_count.toLocaleString()}** 位罪人正在《Limbus Company》中進行探索。`);
 }
 
 async function performSystemChecks() {
@@ -613,11 +434,10 @@ async function performSystemChecks() {
   await checkSteamUpdates(false, null).catch(() => {});
 }
 
-// ==================== 📣 Rate Up 公告 ====================
 async function announceCurrentRateUps() {
   try {
     const currentSnapshot = JSON.stringify(identitiesData?.upTargets || identitiesData?.rateUpIds || identitiesData?.targetIdentities || {});
-    if (currentSnapshot === lastRateUpSnapshot) return;
+    if (lastRateUpSnapshot !== null && currentSnapshot === lastRateUpSnapshot) return;
     lastRateUpSnapshot = currentSnapshot;
 
     const channel = await client.channels.fetch(RATEUP_ANNOUNCE_CHANNEL_ID).catch(() => null);
@@ -626,7 +446,6 @@ async function announceCurrentRateUps() {
     const r000 = normalizeRateUpList('000');
     const r00 = normalizeRateUpList('00');
     const r0 = normalizeRateUpList('0');
-
     const sections = [];
     if (r000.length) sections.push(`### 000\n${r000.map(v => `• ${v}`).join('\n')}`);
     if (r00.length) sections.push(`### 00\n${r00.map(v => `• ${v}`).join('\n')}`);
@@ -643,11 +462,10 @@ async function announceCurrentRateUps() {
       ],
     }).catch(() => {});
   } catch (err) {
-    console.error('Rate Up 公告失敗:', err);
+    console.error('Rate Up 公告失敗：', err);
   }
 }
 
-// ==================== 🛠️ UI ====================
 function buildPackEmbed(userId, page) {
   const pData = getPlayer(userId);
   const user = client.users.cache.get(userId);
@@ -728,7 +546,7 @@ function buildListEmbed(rarity, page) {
   return { embeds: [embed], components: [selectMenuRow, navRow] };
 }
 
-function refreshTradeMessageEmbed(trade) {
+function buildTradePanel(trade) {
   return new EmbedBuilder()
     .setTitle('🔄 交易終端')
     .setColor(0x2A9D8F)
@@ -743,7 +561,7 @@ async function refreshTradeMessage(trade) {
   if (!channel) return;
   const originalMsg = await channel.messages.fetch(trade.originalMsgId).catch(() => null);
   if (!originalMsg) return;
-  await originalMsg.edit({ embeds: [refreshTradeMessageEmbed(trade)] }).catch(() => {});
+  await originalMsg.edit({ embeds: [buildTradePanel(trade)] }).catch(() => {});
 }
 
 function createTrade({ channelId, originalMsgId, p1, p2 }) {
@@ -786,7 +604,61 @@ function transferItem(fromDB, toDB, itemName) {
   return false;
 }
 
-// ==================== 🤖 Discord Bot ====================
+function buildCommandsEmbed() {
+  return new EmbedBuilder()
+    .setTitle('📜 Angela 指令總覽')
+    .setColor(0x457B9D)
+    .setDescription([
+      '**觀測 / 狀態**',
+      '`!status` `!ping` `!testtweet` `!測試官方推文` `!teststeam` `!steam` `!steamnews` `!邊獄人數` `!limbusonline`',
+      '',
+      '**簽到 / 發放**',
+      '`!claimdaily` `!daily` `!givelunacy @user 數量` `!updaterewards 數量`',
+      '',
+      '**抽卡 / 檔案館 / 戰鬥**',
+      '`!pull` `!10pulls` `!pack` `!check` `!list` `!stages`',
+      '',
+      '**交易 / 其他**',
+      '`!trade @user` `!checkrateupids` `!findbot` `!尋找機器人` `!ego` `!逆流`',
+    ].join('\n'))
+    .setFooter({ text: 'Angela 指令中心' })
+    .setTimestamp();
+}
+
+function buildStatusEmbed() {
+  const uptimeMs = Date.now() - client.readyTimestamp;
+  const uptimeHours = (uptimeMs / (1000 * 60 * 60)).toFixed(1);
+  return new EmbedBuilder()
+    .setTitle('🧠 認知心理學 - 情感共鳴與系統狀態報告')
+    .setColor(0x5a189a)
+    .setDescription('在當前社會標籤與認知扭曲下，個體的情感投影與核心控制室運行紀錄：')
+    .addFields(
+      { name: '🏷️ 當前標籤 (Label)', value: '「被觀測者」', inline: true },
+      { name: '📊 心理狀態 (State)', value: '🛑 精神枯竭 (Burnout)', inline: true },
+      { name: '⏳ 核心運作時間 (Uptime)', value: `${uptimeHours} 小時`, inline: true },
+      { name: '📡 監聽機制', value: '1分鐘極速輪詢 (極簡優化版)', inline: true },
+      { name: '📈 檢查次數', value: `${totalTweetsChecked}`, inline: true },
+      { name: '💾 儲存位置', value: DB_FILE, inline: false },
+      { name: '🚦 Twitter 基線', value: lastFetchedId ? `已鎖定 ID: \`${lastFetchedId}\`` : '尚未建立', inline: false },
+      { name: '🚂 Steam 基線', value: lastSteamNewsId ? `已鎖定 ID: \`${lastSteamNewsId}\`` : '尚未建立', inline: false },
+    )
+    .setFooter({ text: 'Angela 心理與系統觀測核心' })
+    .setTimestamp();
+}
+
+function buildDailyEmbed(reward, streak, todayKey) {
+  return new EmbedBuilder()
+    .setTitle('🎁 每日簽到完成')
+    .setColor(0x2A9D8F)
+    .addFields(
+      { name: '💎 本日獎勵', value: `${reward} Lunacy`, inline: true },
+      { name: '🔥 連續簽到', value: `${streak} 天`, inline: true },
+      { name: '📅 今日日期', value: todayKey, inline: true },
+    )
+    .setDescription(streak >= 2 ? `連續簽到第 ${streak} 天，獎勵已提升。` : '今天是你的第一天簽到。')
+    .setTimestamp();
+}
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -796,7 +668,6 @@ const client = new Client({
   ],
 });
 
-// ==================== 🌐 Web Health ====================
 const app = express();
 const PORT = process.env.PORT || 3000;
 app.get('/', (_, res) => res.sendStatus(200));
@@ -806,18 +677,20 @@ try {
     if (err.code === 'EADDRINUSE') {
       console.error(`⚠️ [網路警告] 連接埠 ${PORT} 已被佔用，跳過網頁監聽，Discord 服務繼續啟動...`);
     } else {
-      console.error('❌ 網頁伺服器發生異常:', err);
+      console.error('❌ 網頁伺服器發生異常：', err);
     }
   });
 } catch (e) {
-  console.error('❌ 網頁伺服器啟動失敗:', e);
+  console.error('❌ 網頁伺服器啟動失敗：', e);
 }
 
 client.once('ready', async () => {
   console.log(`🤖 Angela 已登入：${client.user.tag}`);
+  loadDatabase();
+
   client.user.setPresence({
     status: 'idle',
-    activities: [{ name: 'customstatus', type: 4, state: '基線鎖定與狀態監控版' }],
+    activities: [{ name: 'customstatus', type: 4, state: 'Sles被我吃掉了' }],
   });
 
   try {
@@ -826,7 +699,7 @@ client.once('ready', async () => {
       const loginEmbed = new EmbedBuilder()
         .setTitle('🟢 系統連線：AI 助理 Angela 已重新上線')
         .setColor(0x00b4d8)
-        .setDescription('主管，廣播模組已調整完畢，隨時準備播報 Project Moon 的最新動態。')
+        .setDescription('「主管，精神脈衝已重新對齊。廣播模組已調整完畢，隨時準備播報 Project Moon 的最新動態。」')
         .addFields(
           { name: '📡 觀測目標', value: `@${TARGET_USER.username}`, inline: true },
           { name: '⏱️ 監聽頻率', value: '每 1 分鐘 / 1 次', inline: true },
@@ -836,18 +709,14 @@ client.once('ready', async () => {
       await channel.send({ embeds: [loginEmbed] }).catch(() => {});
     }
   } catch (err) {
-    console.error('❌ 啟動發送訊息失敗:', err.message);
+    console.error('❌ 啟動發送訊息失敗：', err?.message || err);
   }
 
-  try {
-    await announceCurrentRateUps();
-  } catch (_) {}
-
+  await announceCurrentRateUps().catch(() => {});
   setInterval(performSystemChecks, CHECK_INTERVAL_MS);
   performSystemChecks();
 });
 
-// ==================== 📬 指令處理 ====================
 client.on('messageCreate', async (message) => {
   try {
     if (message.author.bot) return;
@@ -858,41 +727,12 @@ client.on('messageCreate', async (message) => {
     const cmd = args[0].toLowerCase();
 
     if (cmd === '!ping') return message.reply('pong！').catch(() => {});
-
-    if (cmd === '!cmds') {
-      const embed = new EmbedBuilder()
-        .setTitle('📜 Angela 指令總覽')
-        .setColor(0x457B9D)
-        .setDescription([
-          '**觀測 / 狀態**',
-          '`!status` `!ping` `!testtweet` `!teststeam` `!邊獄人數` `!limbusonline`',
-          '',
-          '**簽到 / 發放**',
-          '`!claimdaily` `!givelunacy @user 數量` `!updaterewards 數量`',
-          '',
-          '**抽卡 / 檔案館 / 戰鬥**',
-          '`!pull` `!10pulls` `!pack` `!check` `!list` `!stages`',
-          '',
-          '**交易**',
-          '`!trade @user`',
-          '',
-          '**其他**',
-          '`!ego` `!逆流` `!尋找機器人` `!findbot` `!checkrateupids`',
-        ].join('
-'))
-        .setFooter({ text: 'Angela 指令中心' })
-        .setTimestamp();
-      return message.reply({ embeds: [embed] }).catch(() => {});
-    }
+    if (cmd === '!cmds') return message.reply({ embeds: [buildCommandsEmbed()] }).catch(() => {});
 
     if (cmd === '!claimdaily' || cmd === '!daily') {
       const player = getPlayer(message.author.id);
       const todayKey = getTaipeiDateKey();
-
-      if (player.lastDailyClaimDate === todayKey) {
-        return message.reply(`❌ 你今天已經領過了。
-下一次請等明天再來。`).catch(() => {});
-      }
+      if (player.lastDailyClaimDate === todayKey) return message.reply('❌ 你今天已經領過了。\n下一次請等明天再來。').catch(() => {});
 
       if (player.lastDailyClaimDate) {
         const prev = new Date(`${player.lastDailyClaimDate}T00:00:00+08:00`);
@@ -908,28 +748,11 @@ client.on('messageCreate', async (message) => {
       player.lunacy += reward;
       player.lastDailyClaimDate = todayKey;
       scheduleSave();
-
-      const embed = new EmbedBuilder()
-        .setTitle('🎁 每日簽到完成')
-        .setColor(0x2A9D8F)
-        .addFields(
-          { name: '💎 本日獎勵', value: `${reward} Lunacy`, inline: true },
-          { name: '🔥 連續簽到', value: `${player.dailyStreak} 天`, inline: true },
-          { name: '📅 今日日期', value: todayKey, inline: true },
-        )
-        .setDescription(player.dailyStreak >= 2 ? `連續簽到第 ${player.dailyStreak} 天，獎勵已提升。` : '今天是你的第一天簽到。')
-        .setTimestamp();
-
-      return message.reply({ embeds: [embed] }).catch(() => {});
+      return message.reply({ embeds: [buildDailyEmbed(reward, player.dailyStreak, todayKey)] }).catch(() => {});
     }
 
-    if (msg === '管理員' || msg === '主管') {
-      return message.reply('主管，您好。我是您的 AI 助理 Angela。').catch(() => {});
-    }
-
-    if (msg.toLowerCase() === 'lc' || msg === '腦葉公司') {
-      return message.reply('「直面恐懼，創造未來。」請時刻注意收容單位的逆流計數器，主管。').catch(() => {});
-    }
+    if (msg === '管理員' || msg === '主管') return message.reply('主管，您好。我是您的 AI 助理 Angela。').catch(() => {});
+    if (msg.toLowerCase() === 'lc' || msg === '腦葉公司') return message.reply('「直面恐懼，創造未來。」請時刻注意收容單位的逆流計數器，主管。').catch(() => {});
 
     if (cmd === '!測試官方推文' || cmd === '!testtweet') {
       await message.channel.sendTyping().catch(() => {});
@@ -937,41 +760,19 @@ client.on('messageCreate', async (message) => {
       return checkTwitterUpdates(true, message);
     }
 
-    if (cmd === '!測試steam' || cmd === '!teststeam') {
+    if (cmd === '!測試steam' || cmd === '!teststeam' || cmd === '!steam' || cmd === '!steamnews') {
       return checkSteamUpdates(true, message);
     }
 
     if (msg === '!邊獄人數' || msg === '!limbusonline') {
       try {
-        const response = await fetchFn('https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/?appid=1973530', {}, 10000);
-        const data = await response.json();
-        if (data?.response?.result === 1) {
-          return message.reply(`📊 **[Steam 即時數據]** 目前共有 **${data.response.player_count.toLocaleString()}** 位罪人正在《Limbus Company》中進行探索。`).catch(() => {});
-        }
-        return message.reply('❌ 無法從 Steam API 取得正確的數據。').catch(() => {});
-      } catch (error) {
+        return await checkSteamPlayerCount(message);
+      } catch {
         return message.reply('❌ 連線至 Steam 伺服器時發生內部錯誤。').catch(() => {});
       }
     }
 
-    if (msg === '!狀態' || msg === '!status') {
-      const uptimeMs = Date.now() - client.readyTimestamp;
-      const uptimeHours = (uptimeMs / (1000 * 60 * 60)).toFixed(1);
-      const embed = new EmbedBuilder()
-        .setTitle('🧠 認知心理學 - 情感共鳴與系統狀態報告')
-        .setColor(0x5a189a)
-        .setDescription('在當前社會標籤與認知扭曲下，個體的情感投影與核心控制室運行紀錄：')
-        .addFields(
-          { name: '🏷️ 當前標籤 (Label)', value: '「被觀測者」', inline: true },
-          { name: '📊 心理狀態 (State)', value: '🛑 精神枯竭 (Burnout)', inline: true },
-          { name: '⏳ 核心運作時間 (Uptime)', value: `${uptimeHours} 小時`, inline: true },
-          { name: '📡 監聽機制', value: '1分鐘極速輪詢 (極簡優化版)', inline: true },
-          { name: '📈 檢查次數', value: `${totalTweetsChecked}`, inline: true },
-        )
-        .setFooter({ text: 'Angela 心理與系統觀測核心' })
-        .setTimestamp();
-      return message.reply({ embeds: [embed] }).catch(() => {});
-    }
+    if (msg === '!狀態' || msg === '!status') return message.reply({ embeds: [buildStatusEmbed()] }).catch(() => {});
 
     if (msg === '!ego') {
       const egoList = [
@@ -1008,16 +809,16 @@ client.on('messageCreate', async (message) => {
 
     if (cmd === '!pull' || cmd === '!10pulls') {
       const count = cmd === '!10pulls' ? 10 : 1;
-      const results = [];
-      const player = getPlayer(message.author.id);
       const cost = count === 10 ? 1300 : 130;
+      const player = getPlayer(message.author.id);
       if (player.lunacy < cost) return message.reply(`❌ **Lunacy 不足** (餘額: ${player.lunacy})`).catch(() => {});
       player.lunacy -= cost;
 
+      const results = [];
       for (let i = 0; i < count; i++) {
         const rarity = (count === 10 && i === 9) ? buildRarityGuaranteed() : buildRarity();
         const rateUpName = pickRateUp(rarity);
-        let result = identitiesData?.pullIdentity?.(rarity) || `（缺少 pullIdentity：${rarity}）`;
+        let result = pullIdentity(rarity);
         if (rateUpName && Math.random() < 0.25) result = `✨ **[PICK-UP!]** ${rateUpName}`;
         if (rarity === 'Egos') player.egos[result] = (player.egos[result] || 0) + 1;
         else player.inventory[result] = (player.inventory[result] || 0) + 1;
@@ -1079,13 +880,18 @@ client.on('messageCreate', async (message) => {
       if (!target || target.id === message.author.id) return message.reply('📝 用法: `!trade @目標玩家`').catch(() => {});
       if (target.bot) return message.reply('❌ 無法與 AI 交易。').catch(() => {});
 
-      const embed = new EmbedBuilder().setTitle('🔄 交易請求').setDescription(`<@${target.id}>，**${message.author.username}** 發起交易。是否接受？`).setColor(0xF4A261);
       const tradeId = crypto.randomUUID();
+      const tradeEmbed = new EmbedBuilder()
+        .setTitle('🔄 交易請求')
+        .setDescription(`<@${target.id}>，**${message.author.username}** 發起交易。是否接受？`)
+        .setColor(0xF4A261);
+
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(`trade_acc_${tradeId}`).setLabel('✅ 接受').setStyle(ButtonStyle.Success),
         new ButtonBuilder().setCustomId(`trade_dec_${tradeId}`).setLabel('❌ 拒絕').setStyle(ButtonStyle.Danger),
       );
-      const tradeMsg = await message.reply({ content: `<@${target.id}>`, embeds: [embed], components: [row] }).catch(() => null);
+
+      const tradeMsg = await message.reply({ content: `<@${target.id}>`, embeds: [tradeEmbed], components: [row] }).catch(() => null);
       if (tradeMsg) {
         activeTrades.set(tradeId, {
           channelId: tradeMsg.channel.id,
@@ -1139,19 +945,17 @@ client.on('messageCreate', async (message) => {
       foundBots.forEach(bot => { responseList += `🤖 **${bot.user.username}** (<@${bot.id}>)\n`; });
       return message.reply(responseList).catch(() => {});
     }
-  } catch (error) {
-    console.error('⚠️ messageCreate 錯誤:', error);
+  } catch (err) {
+    console.error('⚠️ messageCreate 錯誤：', err);
   }
 });
 
-// ==================== 🎛️ 互動處理 ====================
 client.on('interactionCreate', async (interaction) => {
   try {
     if (!interaction.isButton() && !interaction.isStringSelectMenu()) return;
     const customId = interaction.customId;
     if (!customId) return;
 
-    // --- 檔案館 ---
     if (interaction.isButton() && customId.startsWith('pack_')) {
       const parts = customId.split('_');
       const action = parts[1];
@@ -1211,13 +1015,10 @@ client.on('interactionCreate', async (interaction) => {
         if (pData.team.includes(selection)) pData.team = pData.team.filter(x => x !== selection);
         else if (pData.team.length < 7) pData.team.push(selection);
         scheduleSave();
-        return interaction.update({
-          embeds: [new EmbedBuilder().setTitle('👥 編隊').setDescription(`隊伍 (${pData.team.length}/7)：\n${pData.team.join(', ') || '無'}`).setColor(0x457B9D)],
-        }).catch(() => {});
+        return interaction.update({ embeds: [new EmbedBuilder().setTitle('👥 編隊').setDescription(`隊伍 (${pData.team.length}/7)：\n${pData.team.join(', ') || '無'}`).setColor(0x457B9D)] }).catch(() => {});
       }
     }
 
-    // --- List ---
     if (interaction.isStringSelectMenu() && customId === 'list_select') {
       return interaction.update(buildListEmbed(interaction.values[0], 0)).catch(() => {});
     }
@@ -1226,12 +1027,12 @@ client.on('interactionCreate', async (interaction) => {
       return interaction.update(buildListEmbed(parts[2], parseInt(parts[3], 10))).catch(() => {});
     }
 
-    // --- 戰鬥 ---
     if (interaction.isStringSelectMenu() && customId.startsWith('stage_select_')) {
       const expectedUserId = customId.split('_')[2];
       if (interaction.user.id !== expectedUserId && interaction.user.id !== OWNER_ID) {
         return interaction.reply({ content: '❌ 這不是你的作戰面板！', ephemeral: true }).catch(() => {});
       }
+
       const player = getPlayer(interaction.user.id);
       const [powerStr, rewardStr] = interaction.values[0].split('_');
       const eFinal = parseInt(powerStr, 10) * (0.9 + Math.random() * 0.2);
@@ -1241,6 +1042,7 @@ client.on('interactionCreate', async (interaction) => {
       }
       const pFinal = pClash * (0.8 + Math.random() * 0.4);
       const isWin = pFinal >= eFinal;
+
       const embed = new EmbedBuilder()
         .setTitle('⚔️ 戰鬥結算報告')
         .addFields(
@@ -1249,6 +1051,7 @@ client.on('interactionCreate', async (interaction) => {
           { name: '🏆 戰役結果', value: isWin ? `✅ 壓制成功！獲得 **${rewardStr}** Lunacy` : '❌ 壓制失敗，小隊全滅回溯。', inline: false },
         )
         .setColor(isWin ? 0x2A9D8F : 0xE63946);
+
       if (isWin) {
         player.lunacy += parseInt(rewardStr, 10);
         scheduleSave();
@@ -1256,12 +1059,12 @@ client.on('interactionCreate', async (interaction) => {
       return interaction.update({ embeds: [embed], components: [] }).catch(() => {});
     }
 
-    // --- 交易 ---
     if (customId.startsWith('trade_')) {
       const parts = customId.split('_');
       const act = parts[1];
       const tId = parts[2];
       const trade = activeTrades.get(tId);
+
       if (!trade) return interaction.reply({ content: '❌ 交易過期。', ephemeral: true }).catch(() => {});
       if (Date.now() > trade.expiresAt) {
         clearTrade(tId);
@@ -1275,7 +1078,7 @@ client.on('interactionCreate', async (interaction) => {
           new ButtonBuilder().setCustomId(`trade_pick_${tId}_p2`).setLabel(`${trade.p2.name} 選物`).setStyle(ButtonStyle.Primary),
           new ButtonBuilder().setCustomId(`trade_ok_${tId}`).setLabel('✅ 確認交易').setStyle(ButtonStyle.Success),
         );
-        return interaction.update({ content: null, embeds: [refreshTradeMessageEmbed(trade)], components: [row] }).catch(() => {});
+        return interaction.update({ content: null, embeds: [buildTradePanel(trade)], components: [row] }).catch(() => {});
       }
 
       if (act === 'dec') {
@@ -1286,10 +1089,14 @@ client.on('interactionCreate', async (interaction) => {
 
       if (act === 'pick') {
         const playerKey = parts[3];
-        if (interaction.user.id !== trade[playerKey].id && interaction.user.id !== OWNER_ID) return interaction.reply({ content: '❌ 非您的按鈕。', ephemeral: true }).catch(() => {});
+        if (interaction.user.id !== trade[playerKey].id && interaction.user.id !== OWNER_ID) {
+          return interaction.reply({ content: '❌ 非您的按鈕。', ephemeral: true }).catch(() => {});
+        }
+
         const pData = getPlayer(trade[playerKey].id);
         const allItems = [...Object.keys(pData.inventory), ...Object.keys(pData.egos)];
         if (allItems.length === 0) return interaction.reply({ content: '❌ 背包空。', ephemeral: true }).catch(() => {});
+
         const rows = [];
         for (let i = 0; i < allItems.length && rows.length < 5; i += 25) {
           rows.push(new ActionRowBuilder().addComponents(
@@ -1304,7 +1111,9 @@ client.on('interactionCreate', async (interaction) => {
 
       if (act === 'sel') {
         const playerKey = parts[3];
-        if (interaction.user.id !== trade[playerKey].id && interaction.user.id !== OWNER_ID) return interaction.reply({ content: '❌ 非您的選單。', ephemeral: true }).catch(() => {});
+        if (interaction.user.id !== trade[playerKey].id && interaction.user.id !== OWNER_ID) {
+          return interaction.reply({ content: '❌ 非您的選單。', ephemeral: true }).catch(() => {});
+        }
         trade[playerKey].offer = interaction.values[0];
         trade.p1.confirmed = false;
         trade.p2.confirmed = false;
@@ -1317,12 +1126,14 @@ client.on('interactionCreate', async (interaction) => {
         const isP2 = interaction.user.id === trade.p2.id;
         if (!isP1 && !isP2 && interaction.user.id !== OWNER_ID) return interaction.reply({ content: '❌ 無權限。', ephemeral: true }).catch(() => {});
         if (!trade.p1.offer || !trade.p2.offer) return interaction.reply({ content: '❌ 雙方皆須放物品。', ephemeral: true }).catch(() => {});
+
         if (isP1) trade.p1.confirmed = true;
         if (isP2) trade.p2.confirmed = true;
         if (interaction.user.id === OWNER_ID) {
           trade.p1.confirmed = true;
           trade.p2.confirmed = true;
         }
+
         if (trade.p1.confirmed && trade.p2.confirmed) {
           const p1Data = getPlayer(trade.p1.id);
           const p2Data = getPlayer(trade.p2.id);
@@ -1331,6 +1142,7 @@ client.on('interactionCreate', async (interaction) => {
           if (!p1OK || !p2OK) return interaction.reply({ content: '❌ 其中一方的物品已不存在，交易已取消。', ephemeral: true }).catch(() => {});
           scheduleSave();
           await refreshTradeMessage(trade);
+
           const channel = await client.channels.fetch(trade.channelId).catch(() => null);
           if (channel) {
             const originalMsg = await channel.messages.fetch(trade.originalMsgId).catch(() => null);
@@ -1344,11 +1156,12 @@ client.on('interactionCreate', async (interaction) => {
           clearTrade(tId);
           return interaction.update({ content: '✅ 交易完成。', embeds: [], components: [] }).catch(() => {});
         }
+
         return interaction.reply({ content: '✅ 您已確認。等待對方...', ephemeral: true }).catch(() => {});
       }
     }
-  } catch (e) {
-    console.error('⚠️ 互動異常：', e);
+  } catch (err) {
+    console.error('⚠️ 互動異常：', err);
     try {
       if (interaction.isRepliable()) {
         await interaction.reply({ content: '❌ 互動處理失敗。', ephemeral: true }).catch(() => {});
@@ -1357,7 +1170,6 @@ client.on('interactionCreate', async (interaction) => {
   }
 });
 
-// ==================== 🚀 啟動 ====================
 if (!TOKEN) {
   console.error('❌ 缺少 DISCORD_TOKEN。');
   process.exit(1);
