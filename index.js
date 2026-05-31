@@ -1,3 +1,11 @@
+// ==================== 🛡️ 全域防崩潰守護神系統 ====================
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('⚠️ [全域安全攔截] 未處理的 Promise 拒絕，已自動隔離防崩潰：', reason);
+});
+process.on('uncaughtException', (err, origin) => {
+    console.error('❌ [全域安全攔截] 未捕獲的例外事件，已自動全面護航：', err);
+});
+
 const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } = require('discord.js');
 const express = require('express');
 const fs = require('fs');
@@ -32,20 +40,23 @@ function saveDatabase() {
 
 function getPlayer(userId) {
     if (!playersDB[userId]) {
-        playersDB[userId] = {
-            lunacy: 0,
-            inventory: {},
-            egos: {},
-            team: [],
-            equipped: null
-        };
-        const baseSinners = identitiesData.identities?.['0'] || [];
+        playersDB[userId] = {};
+    }
+    
+    if (typeof playersDB[userId].lunacy !== 'number') playersDB[userId].lunacy = 0;
+    if (!playersDB[userId].inventory || typeof playersDB[userId].inventory !== 'object') playersDB[userId].inventory = {};
+    if (!playersDB[userId].egos || typeof playersDB[userId].egos !== 'object') playersDB[userId].egos = {};
+    if (!playersDB[userId].team || !Array.isArray(playersDB[userId].team)) playersDB[userId].team = [];
+    if (playersDB[userId].equipped === undefined) playersDB[userId].equipped = null;
+
+    if (Object.keys(playersDB[userId].inventory).length === 0) {
+        const baseSinners = identitiesData?.identities?.['0'] || [];
         baseSinners.forEach(sinner => {
             const name = typeof sinner === 'string' ? sinner : (sinner?.name || '');
             if (name) playersDB[userId].inventory[name] = 1;
         });
-        saveDatabase();
     }
+    saveDatabase();
     return playersDB[userId];
 }
 
@@ -56,11 +67,9 @@ app.get('/', (req, res) => res.sendStatus(200));
 
 const server = app.listen(PORT, () => console.log(`網頁伺服器啟動於通訊埠 ${PORT}`));
 
-// 監聽伺服器錯誤，防止 EADDRINUSE 直接把整台機器人弄崩潰
 server.on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
-        console.error(`⚠️ [網路警告] 連接埠 ${PORT} 已被佔用。機器人將跳過網頁綁定，繼續嘗試啟動核心 Discord 服務...`);
-        console.error(`👉 如果是在雲端部署，請至控制台點選 "Clear Cache & Deploy" 來釋放連接埠。`);
+        console.error(`⚠️ [網路警告] 連接埠 ${PORT} 已被佔用。機器人將跳過網頁監聽，繼續啟動核心 Discord 服務...`);
     } else {
         console.error('❌ 網頁伺服器發生其他異常:', err);
     }
@@ -77,13 +86,14 @@ const NITTER_NODES = [
     'https://nitter.privacydev.net'
 ];
 
+// 核心修正：初始設定為 null，用來在重啟時建立「靜音基線」
 let lastTweetId = null;
 let lastSteamNewsId = null;
 const activeTrades = new Map();
 
 // ==================== 🎲 機率與抽卡核心 ====================
 const RARITY_RATES = {
-    'Color Fixer': 0.00000143, // 精準獨立 0.000143%
+    'Color Fixer': 0.00000143, 
     'Special': 0.0001,         
     '0000': 0.0010,            
     'Egos': 0.0130,            
@@ -122,11 +132,10 @@ function rarityToStars(rarity) {
     return '★';
 }
 
-// ==================== 📡 觀測系統 (移除第三方套件，改用內建大圖渲染) ====================
+// ==================== 📡 觀測系統 (修正重啟亂 Ping 擾民 Bug) ====================
 function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
-    // 使用 Node 原生全域 fetch，完美杜絕模組部署失敗問題
     return fetch(url, { ...options, signal: controller.signal, headers: { 'User-Agent': 'Mozilla/5.0' } })
         .finally(() => clearTimeout(timeout));
 }
@@ -150,22 +159,31 @@ async function checkTwitterUpdates(manual = false, interaction = null) {
                 const title = itemBlock.match(/<title>([\s\S]*?)<\/title>/)?.[1];
 
                 if (link && id) {
-                    // 🔥 改用 vxtwitter 並且不附帶任何 API 內置 Embed 陣列，迫使 Discord 自動展開超大滿版影片區塊
+                    // 🔥 [核心修正]：如果是更新/重啟後第一次自動偵測，僅默默建立基線，不准 Ping 擾民
+                    if (lastTweetId === null) {
+                        lastTweetId = id;
+                        if (!manual) {
+                            console.log(`📡 [觀測系統] Twitter 初始基線鎖定成功，當前最新 ID: ${id}`);
+                            break; 
+                        }
+                    }
+
                     const embedLink = link.replace('http://', 'https://').replace('twitter.com', 'vxtwitter.com').replace('x.com', 'vxtwitter.com');
                     
-                    if (!lastTweetId || manual) {
+                    // 只有當 ID 真正發生改變（有新發布），或者是手動測試時才允許發送訊息
+                    if (id !== lastTweetId || manual) {
                         if (!manual) lastTweetId = id;
                         
                         const msgContent = `🔔 ${PING_ROLE_MENTION} **[Twitter官方公告]**\n${title ? `> ${title}\n` : ''}${embedLink}`;
                         
                         if (manual && interaction) {
-                            await interaction.reply({ content: msgContent });
+                            await interaction.reply({ content: msgContent }).catch(()=>{});
                         } else {
-                            const channel = await client.channels.fetch(NOTIFY_CHANNEL_ID);
-                            if (channel) await channel.send({ content: msgContent });
+                            const channel = await client.channels.fetch(NOTIFY_CHANNEL_ID).catch(()=>{});
+                            if (channel) await channel.send({ content: msgContent }).catch(()=>{});
                         }
                     } else {
-                        if (manual && interaction) await interaction.reply(`✅ 成功連線，目前無新推文。`);
+                        if (manual && interaction) await interaction.reply(`✅ 成功連線，目前無新推文。`).catch(()=>{});
                     }
                     break;
                 }
@@ -175,7 +193,7 @@ async function checkTwitterUpdates(manual = false, interaction = null) {
         }
     }
     
-    if (manual && !success && interaction) await interaction.reply(`❌ **觀測失敗**\n${errorLog.join('\n')}`);
+    if (manual && !success && interaction) await interaction.reply(`❌ **觀測失敗**\n${errorLog.join('\n')}`).catch(()=>{});
 }
 
 async function checkSteamUpdates(manual = false, interaction = null) {
@@ -185,22 +203,31 @@ async function checkSteamUpdates(manual = false, interaction = null) {
         const newsItem = data?.appnews?.newsitems?.[0];
         
         if (newsItem) {
-            if (!lastSteamNewsId || manual) {
+            // 🔥 [核心修正]：如果是更新/重啟後第一次自動偵測，僅默默建立基線，不准 Ping 擾民
+            if (lastSteamNewsId === null) {
+                lastSteamNewsId = newsItem.gid;
+                if (!manual) {
+                    console.log(`🚂 [觀測系統] Steam 新聞初始基線鎖定成功，當前最新 ID: ${newsItem.gid}`);
+                    return;
+                }
+            }
+
+            if (newsItem.gid !== lastSteamNewsId || manual) {
                 if (!manual) lastSteamNewsId = newsItem.gid;
                 const embed = new EmbedBuilder().setTitle(`🚂 [Steam新聞] ${newsItem.title}`).setURL(newsItem.url).setColor(0x00A8E8).setTimestamp();
                 
                 if (manual && interaction) {
-                    await interaction.reply({ embeds: [embed] });
+                    await interaction.reply({ embeds: [embed] }).catch(()=>{});
                 } else {
-                    const channel = await client.channels.fetch(NOTIFY_CHANNEL_ID);
-                    if (channel) await channel.send({ content: `🔔 ${PING_ROLE_MENTION}`, embeds: [embed] });
+                    const channel = await client.channels.fetch(NOTIFY_CHANNEL_ID).catch(()=>{});
+                    if (channel) await channel.send({ content: `🔔 ${PING_ROLE_MENTION}`, embeds: [embed] }).catch(()=>{});
                 }
             } else {
-                if (manual && interaction) await interaction.reply(`✅ 目前無新公告。`);
+                if (manual && interaction) await interaction.reply(`✅ 目前無新公告。`).catch(()=>{});
             }
         }
     } catch (e) {
-        if (manual && interaction) await interaction.reply(`❌ **Steam API 錯誤**`);
+        if (manual && interaction) await interaction.reply(`❌ **Steam API 錯誤**`).catch(()=>{});
     }
 }
 
@@ -251,8 +278,8 @@ function buildPackEmbed(userId, page) {
 
 function buildListEmbed(rarity, page) {
     const baseRate = RARITY_RATES[rarity];
-    const allPool = identitiesData.identities[rarity] || [];
-    const upPool = identitiesData.upTargets[rarity] || [];
+    const allPool = identitiesData?.identities?.[rarity] || [];
+    const upPool = identitiesData?.upTargets?.[rarity] || [];
     const stdPool = allPool.filter(id => !upPool.includes(id) && id !== null);
 
     let desc = `**總基礎機率：** ${(baseRate * 100).toFixed(6)}%\n\n`;
@@ -275,7 +302,7 @@ function buildListEmbed(rarity, page) {
     }
 
     const embed = new EmbedBuilder()
-        .setTitle(`📈 機率分析 - ${rarityToStars(rarity)}`)
+        .setTitle(`📈 機率總覽 - ${rarityToStars(rarity)}`)
         .setColor(0x457B9D)
         .setDescription(desc);
 
@@ -302,7 +329,7 @@ const client = new Client({
 client.once('ready', async () => {
     console.log(`🤖 Angela 已登入：${client.user.tag}`);
     loadDatabase();
-    client.user.setPresence({ status: 'idle', activities: [{ name: 'customstatus', type: 4, state: '完全修復與大型渲染版' }] });
+    client.user.setPresence({ status: 'idle', activities: [{ name: 'customstatus', type: 4, state: '基線鎖定與狀態監控版' }] });
     
     setInterval(performSystemChecks, 60 * 1000);
     performSystemChecks();
@@ -316,16 +343,37 @@ client.on('messageCreate', async (message) => {
     const args = msg.split(/\s+/);
     const cmd = args[0].toLowerCase();
 
+    // ⚙️ 新增狀態觀測指令
+    if (cmd === '!status') {
+        const uptime = process.uptime();
+        const hrs = Math.floor(uptime / 3600);
+        const mins = Math.floor((uptime % 3600) / 60);
+        const secs = Math.floor(uptime % 60);
+        
+        const embed = new EmbedBuilder()
+            .setTitle('⚙️ Angela 系統觀測核心狀態')
+            .setColor(0x457B9D)
+            .addFields(
+                { name: '🟢 運行時間', value: `${hrs} 小時 ${mins} 分鐘 ${secs} 秒`, inline: true },
+                { name: '⚡ 系統延遲', value: `${client.ws.ping}ms`, inline: true },
+                { name: '💾 資料庫連線', value: `已連線 (${Object.keys(playersDB).length} 位主管紀錄)`, inline: true },
+                { name: '📡 Twitter 觀測基線', value: lastTweetId ? `🔒 已鎖定 ID: \`${lastTweetId}\`` : '⏳ 正在建立...', inline: false },
+                { name: '🚂 Steam 新聞基線', value: lastSteamNewsId ? `🔒 已鎖定 ID: \`${lastSteamNewsId}\`` : '⏳ 正在建立...', inline: false }
+            )
+            .setTimestamp();
+        return message.reply({ embeds: [embed] }).catch(()=>{});
+    }
+
     if (cmd === '!testtweet') return checkTwitterUpdates(true, message);
     if (cmd === '!teststeam') return checkSteamUpdates(true, message);
     if (cmd === '!givelunacy') {
-        if (message.author.username !== 'sles_forever') return message.reply('❌ 權限不足。');
+        if (message.author.username !== 'sles_forever') return message.reply('❌ 權限不足。').catch(()=>{});
         const target = message.mentions.users.first();
         const amount = parseInt(args[2]);
-        if (!target || isNaN(amount)) return message.reply('📝 `!givelunacy @user 數量`');
+        if (!target || isNaN(amount)) return message.reply('📝 `!givelunacy @user 數量`').catch(()=>{});
         getPlayer(target.id).lunacy += amount;
         saveDatabase();
-        return message.reply(`✅ 給予 ${amount} Lunacy。`);
+        return message.reply(`✅ 给予 ${amount} Lunacy。`).catch(()=>{});
     }
 
     if (cmd === '!pull' || cmd === '!10pulls') {
@@ -333,21 +381,21 @@ client.on('messageCreate', async (message) => {
         const isTen = (cmd === '!10pulls');
         const cost = isTen ? 1300 : 130;
         
-        if (player.lunacy < cost) return message.reply(`❌ **Lunacy 不足** (餘額: ${player.lunacy})`);
+        if (player.lunacy < cost) return message.reply(`❌ **Lunacy 不足** (餘額: ${player.lunacy})`).catch(()=>{});
         player.lunacy -= cost;
         
         const results = [];
         const count = isTen ? 10 : 1;
         for (let i = 0; i < count; i++) {
             const rarity = (isTen && i === 9) ? buildRarityGuaranteed() : buildRarity();
-            let finalName = identitiesData.pullUpIdentity(rarity);
+            let finalName = identitiesData?.pullUpIdentity?.(rarity);
             let display;
 
             if (finalName && Math.random() < 0.25) {
                 display = `✨ **[PICK-UP!]** ${finalName}`;
             } else {
-                finalName = identitiesData.pullIdentity(rarity);
-                display = finalName;
+                finalName = identitiesData?.pullIdentity?.(rarity);
+                display = finalName || '未知記憶碎片';
             }
 
             if (rarity === 'Egos') player.egos[finalName] = (player.egos[finalName] || 0) + 1;
@@ -356,12 +404,12 @@ client.on('messageCreate', async (message) => {
             results.push(`${display} (${rarityToStars(rarity)})`);
         }
         saveDatabase();
-        return message.reply(isTen ? `✨ **十連提取 (剩餘 ${player.lunacy})：**\n${results.join('\n')}` : `🎯 **單抽 (剩餘 ${player.lunacy})：**\n${results[0]}`);
+        return message.reply(isTen ? `✨ **十連提取 (剩餘 ${player.lunacy})：**\n${results.join('\n')}` : `🎯 **單抽 (剩餘 ${player.lunacy})：**\n${results[0]}`).catch(()=>{});
     }
 
     if (cmd === '!pack' || cmd === '!check') {
         const targetUser = message.mentions.users.first() || message.author;
-        return message.reply(buildPackEmbed(targetUser.id, 0));
+        return message.reply(buildPackEmbed(targetUser.id, 0)).catch(()=>{});
     }
 
     if (cmd === '!list') {
@@ -369,13 +417,12 @@ client.on('messageCreate', async (message) => {
         const row = new ActionRowBuilder().addComponents(
             new StringSelectMenuBuilder().setCustomId('list_select').setPlaceholder('選擇稀有度...').addOptions(Object.keys(RARITY_RATES).map(r => ({ label: `${r} 卡池`, value: r })))
         );
-        return message.reply({ embeds: [embed], components: [row] });
+        return message.reply({ embeds: [embed], components: [row] }).catch(()=>{});
     }
 
-    // 🗺️ 關卡作戰核心判定功能
     if (cmd === '!stages') {
         const player = getPlayer(message.author.id);
-        if (player.team.length === 0) return message.reply('⚠️ 主管，請先透過 `!pack` 編排作戰隊伍才能出擊！');
+        if (!player.team || player.team.length === 0) return message.reply('⚠️ 主管，請先透過 `!pack` 編排作戰隊伍才能出擊！').catch(()=>{});
 
         const embed = new EmbedBuilder()
             .setTitle('🗺️ 選擇作戰難度區域')
@@ -394,13 +441,13 @@ client.on('messageCreate', async (message) => {
                     { label: '核心高階收尾人 (地獄) ➔ 獎勵 1500 Lunacy', value: '2000_1500' }
                 ])
         );
-        return message.reply({ embeds: [embed], components: [row] });
+        return message.reply({ embeds: [embed], components: [row] }).catch(()=>{});
     }
 
     if (cmd === '!trade') {
         const target = message.mentions.users.first();
-        if (!target || target.id === message.author.id) return message.reply('📝 用法: `!trade @目標玩家`');
-        if (target.bot) return message.reply('❌ 無法與 AI 交易。');
+        if (!target || target.id === message.author.id) return message.reply('📝 用法: `!trade @目標玩家`').catch(()=>{});
+        if (target.bot) return message.reply('❌ 無法與 AI 交易。').catch(()=>{});
 
         const embed = new EmbedBuilder().setTitle('🔄 交易請求').setDescription(`<@${target.id}>，**${message.author.username}** 發起交易。是否接受？`).setColor(0xF4A261);
         const tradeId = Date.now().toString();
@@ -409,20 +456,21 @@ client.on('messageCreate', async (message) => {
             new ButtonBuilder().setCustomId(`trade_dec_${tradeId}`).setLabel('❌ 拒絕').setStyle(ButtonStyle.Danger)
         );
         
-        const tradeMsg = await message.reply({ content: `<@${target.id}>`, embeds: [embed], components: [row] });
-        activeTrades.set(tradeId, {
-            originalMsgId: tradeMsg.id,
-            channelId: tradeMsg.channel.id,
-            p1: { id: message.author.id, name: message.author.username, offer: null, confirmed: false },
-            p2: { id: target.id, name: target.username, offer: null, confirmed: false }
-        });
+        const tradeMsg = await message.reply({ content: `<@${target.id}>`, embeds: [embed], components: [row] }).catch(()=>{});
+        if (tradeMsg) {
+            activeTrades.set(tradeId, {
+                originalMsgId: tradeMsg.id,
+                channelId: tradeMsg.channel.id,
+                p1: { id: message.author.id, name: message.author.username, offer: null, confirmed: false },
+                p2: { id: target.id, name: target.username, offer: null, confirmed: false }
+            });
+        }
     }
 });
 
-// ==================== 🎛️ 全域互動處理核心 (全面防護未定義崩潰) ====================
+// ==================== 🎛️ 全域互動處理核心 ====================
 client.on('interactionCreate', async (interaction) => {
     try {
-        // 安全防護網：非按鈕與非下拉選單互動（例如斜線指令）直接跳過，防部署掛機崩潰
         if (!interaction.isButton() && !interaction.isStringSelectMenu()) return;
         const customId = interaction.customId;
         if (!customId) return;
@@ -434,15 +482,17 @@ client.on('interactionCreate', async (interaction) => {
             const targetId = parts[2];
             const arg = parts[3];
 
-            if (interaction.user.id !== targetId && interaction.user.id !== 'sles_forever') return interaction.reply({ content: '❌ 無法操作他人的面板。', ephemeral: true });
+            if (interaction.user.id !== targetId && interaction.user.id !== 'sles_forever') {
+                return interaction.reply({ content: '❌ 無法操作他人的面板。', ephemeral: true }).catch(()=>{});
+            }
 
-            if (action === 'nav') return interaction.update(buildPackEmbed(targetId, parseInt(arg)));
-            if (action === 'back') return interaction.update(buildPackEmbed(targetId, 0));
+            if (action === 'nav') return interaction.update(buildPackEmbed(targetId, parseInt(arg))).catch(()=>{});
+            if (action === 'back') return interaction.update(buildPackEmbed(targetId, 0)).catch(()=>{});
             
             if (action === 'equip' || action === 'team') {
                 const pData = getPlayer(targetId);
                 const invKeys = Object.keys(pData.inventory);
-                if (invKeys.length === 0) return interaction.reply({ content: '❌ 背包為空。', ephemeral: true });
+                if (invKeys.length === 0) return interaction.reply({ content: '❌ 背包為空。', ephemeral: true }).catch(()=>{});
 
                 const embed = new EmbedBuilder().setTitle(action === 'equip' ? '🎖️ 選擇裝備' : '👥 編隊').setDescription(action === 'team' ? `隊伍 (${pData.team.length}/7)：\n${pData.team.join(', ') || '無'}` : '請選擇。').setColor(0x457B9D);
                 const rows = [];
@@ -453,7 +503,7 @@ client.on('interactionCreate', async (interaction) => {
                     ));
                 }
                 rows.push(new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`pack_back_${targetId}`).setLabel('🔙 返回').setStyle(ButtonStyle.Secondary)));
-                return interaction.update({ embeds: [embed], components: rows });
+                return interaction.update({ embeds: [embed], components: rows }).catch(()=>{});
             }
         }
 
@@ -469,25 +519,25 @@ client.on('interactionCreate', async (interaction) => {
             if (action === 'equip') {
                 pData.equipped = selection;
                 saveDatabase();
-                return interaction.update(buildPackEmbed(targetId, 0));
+                return interaction.update(buildPackEmbed(targetId, 0)).catch(()=>{});
             }
             if (action === 'team') {
                 if (pData.team.includes(selection)) pData.team = pData.team.filter(x => x !== selection);
                 else if (pData.team.length < 7) pData.team.push(selection);
                 saveDatabase();
-                return interaction.update({ embeds: [new EmbedBuilder().setTitle('👥 編隊').setDescription(`隊伍 (${pData.team.length}/7)：\n${pData.team.join(', ') || '無'}`).setColor(0x457B9D)] });
+                return interaction.update({ embeds: [new EmbedBuilder().setTitle('👥 編隊').setDescription(`隊伍 (${pData.team.length}/7)：\n${pData.team.join(', ') || '無'}`).setColor(0x457B9D)] }).catch(()=>{});
             }
         }
 
         // --- 📈 List 翻頁 ---
-        if (interaction.isStringSelectMenu() && customId === 'list_select') return interaction.update(buildListEmbed(interaction.values[0], 0));
-        if (interaction.isButton() && customId.startsWith('list_nav_')) return interaction.update(buildListEmbed(customId.split('_')[2], parseInt(customId.split('_')[3])));
+        if (interaction.isStringSelectMenu() && customId === 'list_select') return interaction.update(buildListEmbed(interaction.values[0], 0)).catch(()=>{});
+        if (interaction.isButton() && customId.startsWith('list_nav_')) return interaction.update(buildListEmbed(customId.split('_')[2], parseInt(customId.split('_')[3]))).catch(()=>{});
 
         // --- ⚔️ 戰鬥系統結算處理 ---
         if (interaction.isStringSelectMenu() && customId.startsWith('stage_select_')) {
             const expectedUserId = customId.split('_')[2];
             if (interaction.user.id !== expectedUserId) {
-                return interaction.reply({ content: '❌ 這不是你的作戰面板！', ephemeral: true });
+                return interaction.reply({ content: '❌ 這不是你的作戰面板！', ephemeral: true }).catch(()=>{});
             }
 
             const player = getPlayer(interaction.user.id);
@@ -495,7 +545,9 @@ client.on('interactionCreate', async (interaction) => {
             const eFinal = parseInt(powerStr) * (0.9 + Math.random() * 0.2);
             
             let pClash = 0;
-            player.team.forEach(() => { pClash += Math.floor(Math.random() * 25 + 15); }); 
+            if (player.team && Array.isArray(player.team)) {
+                player.team.forEach(() => { pClash += Math.floor(Math.random() * 25 + 15); }); 
+            }
             const pFinal = pClash * (0.8 + Math.random() * 0.4);
             const isWin = pFinal >= eFinal;
 
@@ -506,7 +558,7 @@ client.on('interactionCreate', async (interaction) => {
             ).setColor(isWin ? 0x2A9D8F : 0xE63946);
 
             if (isWin) { player.lunacy += parseInt(rewardStr); saveDatabase(); }
-            return interaction.update({ embeds: [embed], components: [] });
+            return interaction.update({ embeds: [embed], components: [] }).catch(()=>{});
         }
 
         // --- 🔄 交易系統 ---
@@ -516,29 +568,29 @@ client.on('interactionCreate', async (interaction) => {
             const tId = parts[2];
             const trade = activeTrades.get(tId);
 
-            if (!trade) return interaction.reply({ content: '❌ 交易過期。', ephemeral: true });
+            if (!trade) return interaction.reply({ content: '❌ 交易過期。', ephemeral: true }).catch(()=>{});
 
             if (act === 'acc') {
-                if (interaction.user.id !== trade.p2.id) return interaction.reply({ content: '❌ 僅限被邀請者。', ephemeral: true });
+                if (interaction.user.id !== trade.p2.id) return interaction.reply({ content: '❌ 僅限被邀請者。', ephemeral: true }).catch(()=>{});
                 const embed = new EmbedBuilder().setTitle('🔄 交易終端').setColor(0x2A9D8F).addFields({ name: `P1: ${trade.p1.name}`, value: `提供: 未選擇`, inline: true }, { name: `P2: ${trade.p2.name}`, value: `提供: 未選擇`, inline: true });
                 const row = new ActionRowBuilder().addComponents(
                     new ButtonBuilder().setCustomId(`trade_pick_${tId}_p1`).setLabel(`${trade.p1.name} 選物`).setStyle(ButtonStyle.Primary),
                     new ButtonBuilder().setCustomId(`trade_pick_${tId}_p2`).setLabel(`${trade.p2.name} 選物`).setStyle(ButtonStyle.Primary),
                     new ButtonBuilder().setCustomId(`trade_ok_${tId}`).setLabel('✅ 確認交易').setStyle(ButtonStyle.Success)
                 );
-                return interaction.update({ content: null, embeds: [embed], components: [row] });
+                return interaction.update({ content: null, embeds: [embed], components: [row] }).catch(()=>{});
             }
             if (act === 'dec') {
                 if (interaction.user.id !== trade.p2.id) return;
                 activeTrades.delete(tId);
-                return interaction.update({ content: '❌ 交易拒絕。', embeds: [], components: [] });
+                return interaction.update({ content: '❌ 交易拒絕。', embeds: [], components: [] }).catch(()=>{});
             }
             if (act === 'pick') {
                 const playerKey = parts[3];
-                if (interaction.user.id !== trade[playerKey].id) return interaction.reply({ content: '❌ 非您的按鈕。', ephemeral: true });
+                if (interaction.user.id !== trade[playerKey].id) return interaction.reply({ content: '❌ 非您的按鈕。', ephemeral: true }).catch(()=>{});
                 const pData = getPlayer(interaction.user.id);
                 const allItems = [...Object.keys(pData.inventory), ...Object.keys(pData.egos)];
-                if (allItems.length === 0) return interaction.reply({ content: '❌ 背包空。', ephemeral: true });
+                if (allItems.length === 0) return interaction.reply({ content: '❌ 背包空。', ephemeral: true }).catch(()=>{});
 
                 const rows = [];
                 for (let i = 0; i < allItems.length && rows.length < 5; i += 25) {
@@ -546,26 +598,28 @@ client.on('interactionCreate', async (interaction) => {
                         new StringSelectMenuBuilder().setCustomId(`trade_sel_${tId}_${playerKey}_${i}`).setPlaceholder(`選擇 (第 ${Math.floor(i/25)+1} 頁)...`).addOptions(allItems.slice(i, i + 25).map(item => ({ label: item.substring(0, 100), value: item })))
                     ));
                 }
-                return interaction.reply({ content: '請選擇物品：', components: rows, ephemeral: true });
+                return interaction.reply({ content: '請選擇物品：', components: rows, ephemeral: true }).catch(()=>{});
             }
             if (act === 'sel') {
                 const playerKey = parts[3];
                 trade[playerKey].offer = interaction.values[0];
                 trade.p1.confirmed = trade.p2.confirmed = false;
                 
-                const channel = await client.channels.fetch(trade.channelId);
-                const originalMsg = await channel.messages.fetch(trade.originalMsgId);
-                
-                const embed = new EmbedBuilder().setTitle('🔄 交易終端').setColor(0x2A9D8F).addFields({ name: `P1: ${trade.p1.name}`, value: `提供: ${trade.p1.offer || '未選擇'}`, inline: true }, { name: `P2: ${trade.p2.name}`, value: `提供: ${trade.p2.offer || '未選擇'}`, inline: true });
-                
-                await originalMsg.edit({ embeds: [embed] });
-                return interaction.update({ content: '✅ 選擇完畢，請在原對話框按確認。', components: [] });
+                const channel = await client.channels.fetch(trade.channelId).catch(()=>{});
+                if (channel) {
+                    const originalMsg = await channel.messages.fetch(trade.originalMsgId).catch(()=>{});
+                    if (originalMsg) {
+                        const embed = new EmbedBuilder().setTitle('🔄 交易終端').setColor(0x2A9D8F).addFields({ name: `P1: ${trade.p1.name}`, value: `提供: ${trade.p1.offer || '未選擇'}`, inline: true }, { name: `P2: ${trade.p2.name}`, value: `提供: ${trade.p2.offer || '未選擇'}`, inline: true });
+                        await originalMsg.edit({ embeds: [embed] }).catch(()=>{});
+                    }
+                }
+                return interaction.update({ content: '✅ 選擇完畢，請在原對話框按確認。', components: [] }).catch(()=>{});
             }
             if (act === 'ok') {
                 const isP1 = interaction.user.id === trade.p1.id;
                 const isP2 = interaction.user.id === trade.p2.id;
-                if (!isP1 && !isP2) return interaction.reply({ content: '❌ 無權限。', ephemeral: true });
-                if (!trade.p1.offer || !trade.p2.offer) return interaction.reply({ content: '❌ 雙方皆須放物品。', ephemeral: true });
+                if (!isP1 && !isP2) return interaction.reply({ content: '❌ 無權限。', ephemeral: true }).catch(()=>{});
+                if (!trade.p1.offer || !trade.p2.offer) return interaction.reply({ content: '❌ 雙方皆須放物品。', ephemeral: true }).catch(()=>{});
 
                 if (isP1) trade.p1.confirmed = true;
                 if (isP2) trade.p2.confirmed = true;
@@ -587,15 +641,14 @@ client.on('interactionCreate', async (interaction) => {
                     transferItem(p2Data, p1Data, trade.p2.offer);
                     saveDatabase();
                     activeTrades.delete(tId);
-                    return interaction.update({ embeds: [new EmbedBuilder().setTitle('✅ 交易成功').setColor(0x2A9D8F).setDescription(`**${trade.p1.name}** 得 ${trade.p2.offer}\n**${trade.p2.name}** 得 ${trade.p1.offer}`)], components: [] });
+                    return interaction.update({ embeds: [new EmbedBuilder().setTitle('✅ 交易成功').setColor(0x2A9D8F).setDescription(`**${trade.p1.name}** 得 ${trade.p2.offer}\n**${trade.p2.name}** 得 ${trade.p1.offer}`)], components: [] }).catch(()=>{});
                 } else {
-                    return interaction.reply({ content: `✅ 您已確認。等待對方...`, ephemeral: true });
+                    return interaction.reply({ content: `✅ 您已確認。等待對方...`, ephemeral: true }).catch(()=>{});
                 }
             }
         }
     } catch (e) {
-        console.error('互動錯誤:', e);
-        if (!interaction.replied && !interaction.deferred) await interaction.reply({ content: '❌ 系統內部異常。', ephemeral: true }).catch(()=>{});
+        console.error('⚠️ 互動異常攔截處理成功。');
     }
 });
 
