@@ -182,6 +182,15 @@ const identities = {
   ]
 };
 
+egos: [
+        "[ZAYIN] 緋色眼睛 / Scarlet Eyes - 羅秀",
+        "[HE] 表皮 / Shrewd Skinny - 奧提斯",
+        "[WAW] 盲目 / Blind Obsession - 石墨",
+        "[ALEPH] 失樂園 / Paradise Lost - 白夜"
+        // 👈 主管之後直接在下方像這樣加一條一條的引號字串即可！
+    ]
+};
+
 const upTargets = {
   '000': [
     "［蜘蛛巢：中指 父輩］奧提斯 / The House of Spiders: Middle Father Outis",
