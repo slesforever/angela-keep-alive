@@ -3,8 +3,8 @@ const identities = {
     "［漆黑噤默］羅蘭 / The Black Silence Roland",
   ],
    'Special': [
-    "[NULL] 這裡沒有任何東西 / theres nothing"  
-  ]
+    "[NULL] 這裡沒有任何東西 / theres nothing"
+  ],
   '0000': [
     "［黃金迪］索爾茲 / Gold of The Dih Solzc",
   ],
