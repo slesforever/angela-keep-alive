@@ -4,7 +4,7 @@ const express = require('express');
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 const identitiesData = require('./identitiesData.js');
 
-// ==================== 🧠 純記憶體（In-Memory）本地資料庫 ====================
+// ==================== 🧠 純記憶體（In-Memory）本地資料庫 ===================
 const memoryInventories = {}; 
 
 // ==================== 網頁伺服器設定 (Render 喚醒用) ====================
