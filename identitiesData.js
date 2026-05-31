@@ -189,10 +189,6 @@ const identities = {
   ]
 };
 
-
-    ]
-};
-
 const upTargets = {
   '000': [
     "［蜘蛛巢：中指 父輩］奧提斯 / The House of Spiders: Middle Father Outis",
