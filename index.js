@@ -1,35 +1,12 @@
 const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
-const mongoose = require('mongoose'); // 引入雲端資料庫核心
 const express = require('express');
 
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 const identitiesData = require('./identitiesData.js');
 
-// ==================== 🛠️ MONGODB 資料庫連線與狀態隔離鎖 ====================
-const MONGO_URI = process.env.MONGO_URI;
-let isDbConnected = false; // 核心狀態鎖：用來追蹤資料庫到底開門了沒
-
-if (!MONGO_URI) {
-    console.error('[警告] 找不到 MONGO_URI 環境變數！請記得至 Render 後台設定。');
-} else {
-    mongoose.connect(MONGO_URI)
-        .then(() => {
-            isDbConnected = true; // 成功連線，亮綠燈
-            console.log('[⚡ 資料庫] 成功連接至 MongoDB 雲端資料庫！');
-        })
-        .catch(err => {
-            isDbConnected = false; // 連線失敗，保持紅燈隔離，防止塞車
-            console.error('[❌ 資料庫] 連線失敗，請檢查金鑰或密碼:', err);
-        });
-}
-
-// 定義玩家的資料庫儲存結構 (Schema)
-const userSchema = new mongoose.Schema({
-    discordId: { type: String, required: true, unique: true },
-    ownedIdentities: [String] // 儲存玩家抽到的角色名稱陣列
-});
-
-const User = mongoose.model('User', userSchema);
+// ==================== 🧠 純記憶體（In-Memory）本地資料庫 ====================
+// 取代原本的 Mongoose，改用 RAM 暫存。重啟時會自動刷新歸零。
+const memoryInventories = {}; 
 
 // ==================== 網頁伺服器設定 (Render 喚醒用) ====================
 const app = express();
@@ -162,7 +139,7 @@ async function fetchLatestTweetFromNode(nodeUrl) {
 }
 
 app.get('/', (req, res) => {
-    res.sendStatus(200); // 極簡回應，優化連線頻寬
+    res.sendStatus(200); 
 });
 
 app.listen(PORT, () => {
@@ -180,6 +157,7 @@ const client = new Client({
 
 client.once('ready', async () => {
     console.log(`🤖 遵從您的指示，Angela 已成功登入為：${client.user.tag}`);
+    console.log('✨ [系統訊息] 記憶體卡池紀錄模組已就緒！');
 
     client.user.setPresence({
         status: 'idle',
@@ -405,6 +383,7 @@ client.on('messageCreate', async (message) => {
 
     // ---------------- 🎯 抽卡邏輯系統 (!pull / !10pulls) ----------------
     if (msg === '!pull' || msg === '!10pulls') {
+        const userId = message.author.id;
         const count = msg === '!10pulls' ? 10 : 1;
         const results = [];
         const identitiesToSave = [];
@@ -425,22 +404,20 @@ client.on('messageCreate', async (message) => {
             results.push(`${displayResult} (${rarityToStars(rarity)})`);
         }
 
-        // 🚀 狀態鎖保護：只有在資料庫確定成功通電 (isDbConnected === true) 時才進背景寫入，斷線或塞線直接繞道，絕不卡頓
-        if (MONGO_URI && isDbConnected) {
-            User.updateOne(
-                { discordId: message.author.id },
-                { $addToSet: { ownedIdentities: { $each: identitiesToSave } } },
-                { upsert: true }
-            ).catch(dbError => {
-                console.error('[雲端資料庫錯誤] 背景寫入玩家抽卡資料失敗:', dbError);
-            });
+        // 🧠 純記憶體處理：完全模擬原本 MongoDB $addToSet 的重複檢查機制
+        if (!memoryInventories[userId]) {
+            memoryInventories[userId] = [];
         }
+        identitiesToSave.forEach(id => {
+            if (!memoryInventories[userId].includes(id)) {
+                memoryInventories[userId].push(id);
+            }
+        });
 
-        // 根據目前連線綠燈或紅燈，給予主管最準確的後台通知
         return message.reply(
             count === 10
-                ? `✨ **十連抽結果：**\n${results.join('\n')}\n${isDbConnected ? '*(檔案館數據同步中...)*' : '*(⚠️ 資料庫未連線，本次不計入圖鑑)*'}`
-                : `🎯 **單抽結果：**\n${results[0]}\n${isDbConnected ? '*(檔案館數據同步中...)*' : '*(⚠️ 資料庫未連線，本次不計入圖鑑)*'}`
+                ? `✨ **十連抽結果：**\n${results.join('\n')}\n*(檔案館記憶體同步中...)*`
+                : `🎯 **單抽結果：**\n${results[0]}\n*(檔案館記憶體同步中...)*`
         );
     }
 
@@ -463,23 +440,19 @@ client.on('messageCreate', async (message) => {
 
     // ---------------- 📚 檔案館查詢系統 (!圖鑑 / !collection) ----------------
     if (msg === '!圖鑑' || msg === '!collection') {
-        if (!MONGO_URI || !isDbConnected) {
-            return message.reply('❌ 報告主管：雲端資料庫目前未正常連線，無法讀取個人檔案館。');
+        const userId = message.author.id;
+        const userBag = memoryInventories[userId] || [];
+
+        if (userBag.length === 0) {
+            return message.reply('📭 您的檔案館目前空空如也呢。請使用 `!pull` 抽取人格進行記錄吧。');
         }
 
-        try {
-            const userData = await User.findOne({ discordId: message.author.id });
-
-            if (!userData || !userData.ownedIdentities || userData.ownedIdentities.length === 0) {
-                return message.reply('📭 您的檔案館目前空空如也呢。請使用 `!pull` 抽取人格進行記錄吧。');
-            }
-
-            const totalOwned = userData.ownedIdentities.length;
-            return message.reply(`📚 **主管 ${message.author.username} 的個人提取圖鑑 (已解鎖 ${totalOwned} 筆紀錄)：**\n${userData.ownedIdentities.map(id => `• ${id}`).join('\n')}`);
-        } catch (err) {
-            console.error('[圖鑑讀取錯誤]', err);
-            return message.reply('❌ 提取圖鑑檔案時發生內部的認知錯誤，請稍後再試。');
-        }
+        const totalOwned = userBag.length;
+        return message.reply(
+            `📚 **主管 ${message.author.username} 的個人提取圖鑑 (已解鎖 ${totalOwned} 筆紀錄)：**\n` +
+            `${userBag.map(id => `• ${id}`).join('\n')}\n\n` +
+            `*⚠️ 提示：資料目前儲存於核心暫存記憶體中，每次系統重啟時皆會自動歸零重新整理。*`
+        );
     }
 
     if (msg.startsWith('!尋找機器人') || msg.startsWith('!findbot')) {
