@@ -198,6 +198,7 @@ function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
     }).finally(() => clearTimeout(timeout));
 }
 
+// ----------------- 處理跨組件互動 -----------------
 function parseLatestItem(xml) {
     const itemMatch = xml.match(/<item>[\s\S]*?<\/item>/);
     if (!itemMatch) return null;
@@ -325,24 +326,26 @@ client.once('ready', async () => {
     checkSteamUpdates(false, null);
 });
 
+// 【此處已修正：補全所有階級的 Rate Up 資料同步觀測】
 async function announceCurrentRateUps() {
     try {
         const channel = await client.channels.fetch(RATEUP_ANNOUNCE_CHANNEL_ID);
         if (!channel) return;
 
-        const rarities = ['000', '00', '0'];
+        // 修正：從 Color Fixer 到 0 級全部納入動態掃描
+        const rarities = ['Color Fixer', 'Special', '0000', 'Egos', '000', '00', '0'];
         const sections = [];
         for (const r of rarities) {
             const list = normalizeRateUpList(r);
-            if (list.length) sections.push(`### 稀有度 ${r}\n${list.map(v => `• ${v}`).join('\n')}`);
+            if (list.length) sections.push(`### ${rarityToStars(r)}\n${list.map(v => `• ${v}`).join('\n')}`);
         }
 
         await channel.send({
             embeds: [
                 new EmbedBuilder()
                     .setColor(0xffd166)
-                    .setTitle('📢 Rate Up 人格資料已載入')
-                    .setDescription(sections.length ? sections.join('\n\n') : '目前沒有設定任何 Rate Up 人格。')
+                    .setTitle('📢 Rate Up 人格與物資資料已成功載入')
+                    .setDescription(sections.length ? sections.join('\n\n') : '目前池內沒有設定任何 Rate Up 對象。')
                     .setFooter({ text: '資料來源：identitiesData.js' })
                     .setTimestamp()
             ]
@@ -396,7 +399,6 @@ async function checkTwitterUpdates(isManual = false, messageContext = null) {
     }
 }
 
-// 輔助計算中文字串視覺排版寬度的函數（解決!list對齊問題）
 function getVisualWidth(str) {
     let width = 0;
     for (let i = 0; i < str.length; i++) {
@@ -423,19 +425,16 @@ client.on('messageCreate', async (message) => {
         return message.reply('「直面恐懼，創造未來。」請時刻注意收容單位的逆流計數器，主管。');
     }
 
-    // 手動 Steam 公告指令
     if (msg === '!steam') {
         await message.channel.sendTyping();
         return checkSteamUpdates(true, message);
     }
 
-    // 手動推特公告測試指令
     if (msg === '!測試官方推文' || msg === '!testtweet') {
         await message.channel.sendTyping();
         return checkTwitterUpdates(true, message);
     }
 
-    // 主管專屬後台指令
     if (msg.startsWith('!givelunacy') || msg.startsWith('!updaterewards') || msg.startsWith('!updatebuff')) {
         if (message.author.id !== OWNER_ID && message.author.username !== ADMIN_ID) {
             return message.reply('❌ 權限同步失敗：您並非最高控制權限持有者。');
@@ -471,13 +470,11 @@ client.on('messageCreate', async (message) => {
         }
     }
 
-    // ----------------- !list：機率觀測站 (智慧動態分頁，徹底解決排不下問題) -----------------
     if (msg === '!list') {
         const rarities = Object.keys(BASE_RATES);
-        const ITEMS_PER_PAGE = 12; // 每頁固定容納的人格數量，防爆防擠
+        const ITEMS_PER_PAGE = 12; 
         const listPages = [];
 
-        // 預先對所有稀有度進行動態分割
         rarities.forEach(rarity => {
             const pool = identitiesData.identities[rarity] || [];
             const poolSize = pool.length;
@@ -535,7 +532,6 @@ client.on('messageCreate', async (message) => {
                     const prefix = isUp ? `🔼 [UP] ${name}` : `• ${name}`;
                     const currentWidth = getVisualWidth(prefix);
                     
-                    // 用動態點點將機率均勻推至右側
                     const dotCount = Math.max(2, 52 - currentWidth);
                     const dots = ".".repeat(dotCount);
                     
@@ -614,7 +610,7 @@ client.on('messageCreate', async (message) => {
         return message.reply({ embeds: [embed] });
     }
 
-    // ----------------- !pack：背包分頁與配置戰隊 -----------------
+    // ----------------- !pack：背包分頁 -----------------
     if (msg === '!pack') {
         const player = db[message.author.id];
         const allItems = [...player.identities, ...player.egos.map(e => `[E.G.O] ${e}`)];
@@ -679,7 +675,7 @@ client.on('messageCreate', async (message) => {
         return;
     }
 
-    // ----------------- !trade：安全物資交易 -----------------
+    // ----------------- !trade：物資交易 -----------------
     if (msg.startsWith('!trade')) {
         const receiverUser = message.mentions.users.first();
         if (!receiverUser || receiverUser.id === message.author.id) {
@@ -778,7 +774,6 @@ client.on('messageCreate', async (message) => {
         return message.reply({ embeds: [embed], components: [new ActionRowBuilder().addComponents(menu)] });
     }
 
-    // 常駐協助導航頁面
     if (msg === '!help' || msg === '!cmds') {
         const embed = new EmbedBuilder()
             .setTitle('📋 Angela 的中央控制核心指令總覽')
