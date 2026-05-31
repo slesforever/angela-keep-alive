@@ -193,20 +193,20 @@ const identities = {
   'Egos': [
     "[ZAYIN] 緋色眼睛 / Scarlet Eyes - 羅秀",
     "[HE] 表皮 / Shrewd Skinny - 奧提斯",
-    "[WAW] 盲目 / Blind Obsession - 石墨",
+    "[WAW] 盲目 / Blind Obsession - 以實瑪利",
     "[ALEPH] 失樂園 / Paradise Lost - 白夜"
   ]
 };
 
 const upTargets = {
   'Special': [
-    null
+    "［漆黑噤默］羅蘭 / The Black Silence Roland"
   ],
   '0000': [
-    null
+    "［黃金迪］索爾茲 / Gold of The Dih Solzc"
   ],
   'Egos': [
-    null
+    "[WAW] 盲目 / Blind Obsession - 以實瑪利"
   ],
   '000': [
     "［蜘蛛巢：中指 父輩］奧提斯 / The House of Spiders: Middle Nursefather Outis",
@@ -217,7 +217,7 @@ const upTargets = {
     "［中指 小弟］默爾索 / Middle Brother Meursault"
   ],
   '0': [
-     null
+     "［邊獄公司 罪人］格里高爾 / LCB Sinner Gregor"
   ]
 };
 
