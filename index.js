@@ -170,7 +170,6 @@ async function checkSteamUpdates(isManual = false, messageContext = null) {
 
         if (!lastSteamNewsId) {
             lastSteamNewsId = newsItem.gid;
-            console.log(`📦 [Steam] 初始公告快取建立：${newsItem.gid}`);
             if (!isManual) return;
         }
 
@@ -209,14 +208,14 @@ function parseLatestItem(xml) {
     const itemMatch = xml.match(/<item>[\s\S]*?<\/item>/);
     if (!itemMatch) return null;
     const item = itemMatch[0];
-    const link = item.match(/<link>(.*?)<\/link>/)?.[1];
-    const guid = item.match(/<guid[^>]*>(.*?)<\/guid>/)?.[1];
+    const link = itemMatch[0].match(/<link>(.*?)<\/link>/)?.[1];
+    const guid = itemMatch[0].match(/<guid[^>]*>(.*?)<\/guid>/)?.[1];
     if (!link || !guid) return null;
     return { link: link.trim(), id: guid.trim() };
 }
 
-async function checkTwitterUpdates() {
-    totalTweetsChecked++;
+async function checkTwitterUpdates(isManual = false, messageContext = null) {
+    if (!isManual) totalTweetsChecked++;
     for (const nodeUrl of NITTER_NODES) {
         try {
             const response = await fetch(`${nodeUrl}/${TARGET_USER.username}/rss`);
@@ -225,22 +224,32 @@ async function checkTwitterUpdates() {
             const data = parseLatestItem(text);
             if (!data) continue;
 
-            if (!lastFetchedId) {
+            if (!lastFetchedId && !isManual) {
                 lastFetchedId = data.id;
                 break;
             }
-            if (data.id !== lastFetchedId) {
-                lastFetchedId = data.id;
+            if (data.id !== lastFetchedId || isManual) {
+                if (!isManual) lastFetchedId = data.id;
                 const cleanLink = data.link.split('#')[0].replace(/^https:\/\/[^/]+/, 'https://vxtwitter.com');
-                const channel = await client.channels.fetch(NOTIFY_CHANNEL_ID);
-                if (channel) {
-                    await channel.send({ content: `🔔 ${PING_ROLE_MENTION} **Project Moon 官方發布最新推特公告：**\n${cleanLink}` });
+                
+                if (isManual && messageContext) {
+                    await messageContext.reply(`🐦 **[推特手動測試]** 成功抓取最新推文：\n${cleanLink}`);
+                } else {
+                    const channel = await client.channels.fetch(NOTIFY_CHANNEL_ID);
+                    if (channel) {
+                        await channel.send({ content: `🔔 ${PING_ROLE_MENTION} **Project Moon 官方發布最新推特公告：**\n${cleanLink}` });
+                    }
                 }
             }
-            break;
+            return; // 成功獲取就直接結束，不繼續嘗試其他節點
         } catch (e) {
             // 自動嘗試備援節點
         }
+    }
+    
+    // 如果跑完所有節點都失敗且為手動觸發
+    if (isManual && messageContext) {
+        messageContext.reply('❌ 推特 RSS 節點全數無回應，抓取失敗。');
     }
 }
 
@@ -261,12 +270,12 @@ client.once('ready', () => {
     console.log(`🤖 Angela 已成功上線：${client.user.tag}`);
     client.user.setPresence({
         status: 'idle',
-        activities: [{ name: 'customstatus', type: 4, state: '管理員的指令對齊中' }]
+        activities: [{ name: 'customstatus', type: 4, state: '主管的專屬 AI 助理' }]
     });
     
     // 背景輪詢排程
     setInterval(() => {
-        checkTwitterUpdates();
+        checkTwitterUpdates(false);
         checkSteamUpdates(false);
     }, 60 * 1000);
 });
@@ -282,11 +291,18 @@ client.on('messageCreate', async (message) => {
     const args = msg.split(/\s+/);
 
     if (msg === '!ping') return message.reply('pong！');
-    if (msg === '主管' || msg === '管理員') return message.reply('主管，您好。我是您的 AI 助理 Angela。請隨時下達指令。');
+    if (msg === '主管' || msg === '管理員') return message.reply('主管，您好。我是您的 AI 助理 Angela。已準備好接收您的指示。');
 
     // 手動 Steam 指令
     if (msg === '!steam') {
         return checkSteamUpdates(true, message);
+    }
+    
+    // 手動 Twitter 測試指令 (主管要求的 !testtweet)
+    if (msg === '!testtweet') {
+        if (message.author.id !== OWNER_ID) return message.reply('❌ 權限不足：您並非最高管理員。');
+        message.reply('⏳ 正在強制啟動 Twitter(X) 通訊協議測試，連接節點中...');
+        return checkTwitterUpdates(true, message);
     }
 
     // ----------------- 主管專屬高級權限指令 -----------------
@@ -307,14 +323,18 @@ client.on('messageCreate', async (message) => {
             return message.reply(`✅ 已成功向 <@${mention.id}> 注入 **${amount}** 點狂氣。`);
         }
 
-        // !updaterewards 數量 (直接給予主管自己 Lunacy)
+        // !updaterewards 數量 (全伺服器/全資料庫發放)
         if (msg.startsWith('!updaterewards')) {
             const amount = parseInt(args[1]);
             if (isNaN(amount)) return message.reply('❌ 語法錯誤：`!updaterewards <數量>`');
             
-            db[OWNER_ID].lunacy += amount;
+            let count = 0;
+            for (const userId in db) {
+                db[userId].lunacy += amount;
+                count++;
+            }
             savePlayerData(db);
-            return message.reply(`✅ 成功向主管帳戶直接注入 **${amount}** 點狂氣！目前餘額：${db[OWNER_ID].lunacy}`);
+            return message.reply(`✅ 補償/獎勵發放完畢！已成功向伺服器中註冊的 **${count}** 位員工派發每人 **${amount}** 點狂氣！`);
         }
 
         // !updatebuff 倍率 (修改迷宮獎勵倍率)
@@ -359,24 +379,56 @@ client.on('messageCreate', async (message) => {
         return message.reply({ embeds: [embed] });
     }
 
-    // ----------------- !list：動態概率觀測站 -----------------
+    // ----------------- !list：動態概率觀測站 (已改為分頁) -----------------
     if (msg === '!list') {
-        const embed = new EmbedBuilder()
-            .setTitle('🗂️ 核心控制室 — 當前扭蛋池抽取機率清單')
-            .setColor(0x3a0ca3)
-            .setDescription('各稀有度分配機率將依據池內現有人格總量進行等比精確正規化劃分：\n\n' + 
-                Object.keys(BASE_RATES).map(rarity => {
-                    const pool = identitiesData.identities[rarity] || [];
-                    const poolSize = pool.length;
-                    const basePercent = (BASE_RATES[rarity] * 100).toFixed(4);
-                    
-                    if (poolSize === 0) return `### ${rarityToStars(rarity)} (總: ${basePercent}%)\n* 池內暫無可抽到的人格`;
-                    
-                    const individualPercent = ((BASE_RATES[rarity] / poolSize) * 100).toFixed(4);
-                    return `### ${rarityToStars(rarity)} (總: ${basePercent}%)\n• 單體概率: \`${individualPercent}%\` (共 ${poolSize} 位)\n\`\`\`${pool.slice(0, 10).join(', ')}${pool.length > 10 ? '...' : ''}\`\`\``;
-                }).join('\n')
+        const rarities = Object.keys(BASE_RATES);
+        let currentPage = 0;
+
+        const makeListEmbed = (page) => {
+            const rarity = rarities[page];
+            const pool = identitiesData.identities[rarity] || [];
+            const poolSize = pool.length;
+            const basePercent = (BASE_RATES[rarity] * 100).toFixed(4);
+            
+            let desc = '';
+            if (poolSize === 0) {
+                desc = `* 池內暫無可抽到的人格`;
+            } else {
+                const individualPercent = ((BASE_RATES[rarity] / poolSize) * 100).toFixed(4);
+                desc = `• 階級總機率: \`${basePercent}%\`\n• 單體中獎率: \`${individualPercent}%\`\n• 總共 \`${poolSize}\` 位實體\n\n\`\`\`\n${pool.join(', ')}\n\`\`\``;
+            }
+
+            return new EmbedBuilder()
+                .setTitle('🗂️ 核心控制室 — 扭蛋池機率清單')
+                .setColor(0x3a0ca3)
+                .setDescription(`### ${rarityToStars(rarity)}\n${desc}`)
+                .setFooter({ text: `分頁: ${page + 1} / ${rarities.length} | 使用下方按鈕切換稀有度` });
+        };
+
+        const makeListComponents = (page) => {
+            const row = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId('list_prev').setLabel('◀ 往上個階級').setStyle(ButtonStyle.Primary).setDisabled(page === 0),
+                new ButtonBuilder().setCustomId('list_next').setLabel('往下個階級 ▶').setStyle(ButtonStyle.Primary).setDisabled(page === rarities.length - 1)
             );
-        return message.reply({ embeds: [embed] });
+            return [row];
+        };
+
+        const listMsg = await message.reply({ embeds: [makeListEmbed(currentPage)], components: makeListComponents(currentPage) });
+        
+        const collector = listMsg.createMessageComponentCollector({ time: 60000 });
+        collector.on('collect', async (interaction) => {
+            if (interaction.user.id !== message.author.id) {
+                return interaction.reply({ content: '❌ 請自行輸入 !list 來查詢。', ephemeral: true });
+            }
+            if (interaction.customId === 'list_prev') {
+                currentPage--;
+                await interaction.update({ embeds: [makeListEmbed(currentPage)], components: makeListComponents(currentPage) });
+            } else if (interaction.customId === 'list_next') {
+                currentPage++;
+                await interaction.update({ embeds: [makeListEmbed(currentPage)], components: makeListComponents(currentPage) });
+            }
+        });
+        return;
     }
 
     // ----------------- !pack：背包分頁 + UI組隊 -----------------
@@ -596,11 +648,11 @@ client.on('messageCreate', async (message) => {
             .addFields(
                 { name: '🚀 抽取人格', value: '`!pull` (130 狂氣) | `!10pulls` (1300 狂氣，含正規保底)', inline: false },
                 { name: '🎒 個人物資', value: '`!pack` (內建分頁與 **👥 UI配置隊伍功能**)', inline: false },
-                { name: '🗂️ 核心概率', value: '`!list` (查閱扭蛋池內各稀有度單體動態隨機概率)', inline: false },
+                { name: '🗂️ 核心概率', value: '`!list` (**✨ 新增 UI 分頁機制**，查閱稀有度與詳細名單)', inline: false },
                 { name: '⚔️ 戰術出擊', value: '`!stages` (突入鏡像衝突戰鬥迷宮，收益受倍率調整影響)', inline: false },
                 { name: '🤝 特許交易', value: '`!trade @用戶` (雙向安全 UI 下拉選單式智慧交易系統)', inline: false },
-                { name: '📡 官方監控', value: '`!steam` (即時抓取 Steam 繁中活動公告)', inline: false },
-                { name: '👑 管理員專屬', value: '`!updaterewards 數量` | `!updatebuff 倍率` | `!givelunacy @用戶 數量`', inline: false }
+                { name: '📡 官方監控', value: '`!steam` (抓取 Steam 公告) | `!testtweet` (管理員強制測試推特 RSS)', inline: false },
+                { name: '👑 管理員專屬', value: '`!updaterewards 數量` (全服派發狂氣) | `!updatebuff 倍率` | `!givelunacy @用戶 數量`', inline: false }
             );
         return message.reply({ embeds: [embed] });
     }
@@ -608,6 +660,9 @@ client.on('messageCreate', async (message) => {
 
 // ----------------- 處理跨組件互動 -----------------
 client.on('interactionCreate', async (interaction) => {
+    // 忽略 !list 的互動，因為已經在 collector 中處理了
+    if (interaction.isButton() && (interaction.customId === 'list_prev' || interaction.customId === 'list_next')) return;
+
     const db = loadPlayerData();
     const player = db[interaction.user.id];
 
