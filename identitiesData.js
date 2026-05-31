@@ -1,4 +1,10 @@
 const identities = {
+  'Color Fixer': [
+    "［漆黑噤默］羅蘭 / The Black Silence Roland",
+  ],
+   'Special': [
+    "[NULL] 這裡沒有任何東西 / theres nothing"  
+  ]
   '0000': [
     "［黃金迪］索爾茲 / Gold of The Dih Solzc",
   ],
@@ -189,12 +195,6 @@ const identities = {
     "[HE] 表皮 / Shrewd Skinny - 奧提斯",
     "[WAW] 盲目 / Blind Obsession - 石墨",
     "[ALEPH] 失樂園 / Paradise Lost - 白夜"
-  ],
-    
- 'Special': [
-    "[NULL] 這裡沒有任何東西 / theres nothing"
-
-    
   ]
 };
 
