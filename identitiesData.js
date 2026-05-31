@@ -1,6 +1,7 @@
 const identities = {
   '0000': [
     "［黃金迪］索爾茲 / Gold of The Dih Solzc",
+  ],
   '000': [
     "［蜘蛛巢：食指 父輩］李箱 / The House of Spiders: Index Nursefather Yi Sang",
     "［蜘蛛巢：中指 父輩］奧提斯 / The House of Spiders: Middle Nursefather Outis",
@@ -188,7 +189,7 @@ const identities = {
     "[HE] 表皮 / Shrewd Skinny - 奧提斯",
     "[WAW] 盲目 / Blind Obsession - 石墨",
     "[ALEPH] 失樂園 / Paradise Lost - 白夜"
-  ]
+  ],
     
  'Special': [
     "[NULL] 這裡沒有任何東西 / theres nothing"
