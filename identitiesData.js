@@ -1,7 +1,6 @@
 const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } = require('discord.js');
 const express = require('express');
 const fs = require('fs');
-const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 const identitiesData = require('./identitiesData.js');
 
 // ==================== 💾 檔案館持久化資料庫系統 ====================
@@ -11,10 +10,11 @@ let playersDB = {};
 function loadDatabase() {
     if (fs.existsSync(DB_FILE)) {
         try {
-            playersDB = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+            const data = fs.readFileSync(DB_FILE, 'utf8').trim();
+            playersDB = data ? JSON.parse(data) : {};
             console.log('💾 檔案館 (players.json) 讀取成功！');
         } catch (e) {
-            console.error('❌ 資料庫讀取失敗，已初始化全新檔案庫。', e);
+            console.error('❌ 資料庫讀取失敗，已重置全新檔案庫：', e);
             playersDB = {};
         }
     } else {
@@ -72,7 +72,7 @@ const activeTrades = new Map();
 
 // ==================== 🎲 機率與抽卡核心 ====================
 const RARITY_RATES = {
-    'Color Fixer': 0.00000143, // 精準 0.000143%
+    'Color Fixer': 0.00000143, // 精準獨立 0.000143%
     'Special': 0.0001,         
     '0000': 0.0010,            
     'Egos': 0.0130,            
@@ -102,20 +102,22 @@ function buildRarityGuaranteed() {
 }
 
 function rarityToStars(rarity) {
-    if (rarity === 'Color Fixer') return '[ColorFixer★★]';
-    if (rarity === 'Special') return '[Special★]';
-    if (rarity === '0000') return '★★★★';
-    if (rarity === 'Egos') return 'E.G.O ★★★';
+    if (rarity === 'Color Fixer') return '⬛ [色彩收尾人]';
+    if (rarity === 'Special') return '⚠️ [特殊]';
+    if (rarity === '0000') return '👑 ★★★★';
+    if (rarity === 'Egos') return '⚔️ E.G.O 同步';
     if (rarity === '000') return '★★★';
     if (rarity === '00') return '★★';
     return '★';
 }
 
-// ==================== 📡 觀測系統 (大圖大預覽優化) ====================
+// ==================== 📡 觀測系統 (移除第三方套件，改用內建大圖渲染) ====================
 function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
-    return fetch(url, { ...options, signal: controller.signal, headers: { 'User-Agent': 'Mozilla/5.0' } }).finally(() => clearTimeout(timeout));
+    // 使用 Node 原生全域 fetch，完美杜絕模組部署失敗問題
+    return fetch(url, { ...options, signal: controller.signal, headers: { 'User-Agent': 'Mozilla/5.0' } })
+        .finally(() => clearTimeout(timeout));
 }
 
 async function checkTwitterUpdates(manual = false, interaction = null) {
@@ -135,32 +137,21 @@ async function checkTwitterUpdates(manual = false, interaction = null) {
                 let link = itemBlock.match(/<link>(.*?)<\/link>/)?.[1];
                 const id = itemBlock.match(/<guid[^>]*>(.*?)<\/guid>/)?.[1];
                 const title = itemBlock.match(/<title>([\s\S]*?)<\/title>/)?.[1];
-                const desc = itemBlock.match(/<description>([\s\S]*?)<\/description>/i)?.[1] || "";
 
                 if (link && id) {
-                    // 🔥 使用 vxtwitter 提供最優秀的大型影像/影片區塊嵌入，不再被 Discord 壓縮
+                    // 🔥 改用 vxtwitter 並且不附帶任何 API 內置 Embed 陣列，迫使 Discord 自動展開超大滿版影片區塊
                     const embedLink = link.replace('http://', 'https://').replace('twitter.com', 'vxtwitter.com').replace('x.com', 'vxtwitter.com');
                     
-                    // 從 RSS description 抓取所有圖片，強制用大圖 Embed (.setImage) 展開渲染，解決「太小」的問題
-                    const mediaEmbeds = [];
-                    const imgRegex = /<img[^>]+src="([^">]+)"/g;
-                    let m;
-                    while ((m = imgRegex.exec(desc)) !== null) {
-                        let imgUrl = m[1];
-                        if (imgUrl.startsWith('/')) imgUrl = nodeUrl + imgUrl;
-                        mediaEmbeds.push(new EmbedBuilder().setURL(embedLink).setImage(imgUrl).setColor(0x1DA1F2));
-                    }
-
                     if (!lastTweetId || manual) {
                         if (!manual) lastTweetId = id;
                         
                         const msgContent = `🔔 ${PING_ROLE_MENTION} **[Twitter官方公告]**\n${title ? `> ${title}\n` : ''}${embedLink}`;
                         
                         if (manual && interaction) {
-                            await interaction.reply({ content: msgContent, embeds: mediaEmbeds.slice(0, 4) });
+                            await interaction.reply({ content: msgContent });
                         } else {
                             const channel = await client.channels.fetch(NOTIFY_CHANNEL_ID);
-                            if (channel) await channel.send({ content: msgContent, embeds: mediaEmbeds.slice(0, 4) });
+                            if (channel) await channel.send({ content: msgContent });
                         }
                     } else {
                         if (manual && interaction) await interaction.reply(`✅ 成功連線，目前無新推文。`);
@@ -300,7 +291,7 @@ const client = new Client({
 client.once('ready', async () => {
     console.log(`🤖 Angela 已登入：${client.user.tag}`);
     loadDatabase();
-    client.user.setPresence({ status: 'idle', activities: [{ name: 'customstatus', type: 4, state: '完全修復版本' }] });
+    client.user.setPresence({ status: 'idle', activities: [{ name: 'customstatus', type: 4, state: '完全修復與大型渲染版' }] });
     
     setInterval(performSystemChecks, 60 * 1000);
     performSystemChecks();
@@ -309,6 +300,8 @@ client.once('ready', async () => {
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
     const msg = message.content.trim();
+    if (!msg) return;
+    
     const args = msg.split(/\s+/);
     const cmd = args[0].toLowerCase();
 
@@ -368,7 +361,7 @@ client.on('messageCreate', async (message) => {
         return message.reply({ embeds: [embed], components: [row] });
     }
 
-    // 🔥 🔥 🔥 【重大修復】把不小心吃掉的 !stages 指令核心接回來！！！ 🔥 🔥 🔥
+    // 🗺️ 關卡作戰核心判定功能
     if (cmd === '!stages') {
         const player = getPlayer(message.author.id);
         if (player.team.length === 0) return message.reply('⚠️ 主管，請先透過 `!pack` 編排作戰隊伍才能出擊！');
@@ -380,10 +373,10 @@ client.on('messageCreate', async (message) => {
 
         const row = new ActionRowBuilder().addComponents(
             new StringSelectMenuBuilder()
-                .setCustomId('stage_select')
+                .setCustomId(`stage_select_${message.author.id}`)
                 .setPlaceholder('選擇戰鬥難度...')
                 .addOptions([
-                    { label: '邊境後巷流浪漢 (判定要求低) ➔ 獎勵 50 Lunacy', value: '80_50' },
+                    { label: '邊境後巷流浪漢 (極易) ➔ 獎勵 50 Lunacy', value: '80_50' },
                     { label: '後巷在地幫派成員 (輕鬆) ➔ 獎勵 100 Lunacy', value: '250_100' },
                     { label: '收尾人協會成員 (中等) ➔ 獎勵 300 Lunacy', value: '500_300' },
                     { label: '危險級別異想體 (困難) ➔ 獎勵 600 Lunacy', value: '1000_600' },
@@ -415,12 +408,17 @@ client.on('messageCreate', async (message) => {
     }
 });
 
-// ==================== 🎛️ 全域互動處理核心 ====================
+// ==================== 🎛️ 全域互動處理核心 (全面防護未定義崩潰) ====================
 client.on('interactionCreate', async (interaction) => {
     try {
+        // 安全防護網：非按鈕與非下拉選單互動（例如斜線指令）直接跳過，防部署掛機崩潰
+        if (!interaction.isButton() && !interaction.isStringSelectMenu()) return;
+        const customId = interaction.customId;
+        if (!customId) return;
+
         // --- 🎒 檔案館導覽 ---
-        if (interaction.isButton() && interaction.customId.startsWith('pack_')) {
-            const parts = interaction.customId.split('_');
+        if (interaction.isButton() && customId.startsWith('pack_')) {
+            const parts = customId.split('_');
             const action = parts[1];
             const targetId = parts[2];
             const arg = parts[3];
@@ -448,8 +446,8 @@ client.on('interactionCreate', async (interaction) => {
             }
         }
 
-        if (interaction.isStringSelectMenu() && interaction.customId.startsWith('do_')) {
-            const parts = interaction.customId.split('_');
+        if (interaction.isStringSelectMenu() && customId.startsWith('do_')) {
+            const parts = customId.split('_');
             const action = parts[1];
             const targetId = parts[2];
             if (interaction.user.id !== targetId) return;
@@ -471,11 +469,16 @@ client.on('interactionCreate', async (interaction) => {
         }
 
         // --- 📈 List 翻頁 ---
-        if (interaction.isStringSelectMenu() && interaction.customId === 'list_select') return interaction.update(buildListEmbed(interaction.values[0], 0));
-        if (interaction.isButton() && interaction.customId.startsWith('list_nav_')) return interaction.update(buildListEmbed(interaction.customId.split('_')[2], parseInt(interaction.customId.split('_')[3])));
+        if (interaction.isStringSelectMenu() && customId === 'list_select') return interaction.update(buildListEmbed(interaction.values[0], 0));
+        if (interaction.isButton() && customId.startsWith('list_nav_')) return interaction.update(buildListEmbed(customId.split('_')[2], parseInt(customId.split('_')[3])));
 
         // --- ⚔️ 戰鬥系統結算處理 ---
-        if (interaction.isStringSelectMenu() && interaction.customId === 'stage_select') {
+        if (interaction.isStringSelectMenu() && customId.startsWith('stage_select_')) {
+            const expectedUserId = customId.split('_')[2];
+            if (interaction.user.id !== expectedUserId) {
+                return interaction.reply({ content: '❌ 這不是你的作戰面板！', ephemeral: true });
+            }
+
             const player = getPlayer(interaction.user.id);
             const [powerStr, rewardStr] = interaction.values[0].split('_');
             const eFinal = parseInt(powerStr) * (0.9 + Math.random() * 0.2);
@@ -496,8 +499,8 @@ client.on('interactionCreate', async (interaction) => {
         }
 
         // --- 🔄 交易系統 ---
-        if (interaction.customId.startsWith('trade_')) {
-            const parts = interaction.customId.split('_');
+        if (customId.startsWith('trade_')) {
+            const parts = customId.split('_');
             const act = parts[1];
             const tId = parts[2];
             const trade = activeTrades.get(tId);
@@ -581,7 +584,7 @@ client.on('interactionCreate', async (interaction) => {
         }
     } catch (e) {
         console.error('互動錯誤:', e);
-        if (!interaction.replied && !interaction.deferred) await interaction.reply({ content: '❌ 系統錯誤。', ephemeral: true }).catch(()=>{});
+        if (!interaction.replied && !interaction.deferred) await interaction.reply({ content: '❌ 系統內部異常。', ephemeral: true }).catch(()=>{});
     }
 });
 
