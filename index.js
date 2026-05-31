@@ -1,1597 +1,581 @@
-const fs = require('fs');
-const path = require('path');
-const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, ComponentType } = require('discord.js');
 const express = require('express');
+const fs = require('fs');
 
+// 動態載入 fetch
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
+const identitiesData = require('./identitiesData.js');
 
-const IDENTITIES_DATA_PATH = path.join(__dirname, 'identitiesData.js');
-const RATEUP_CACHE_PATH = path.join(__dirname, 'rateup_cache.json');
+// ==================== 💾 檔案館持久化資料庫系統 ====================
+const DB_FILE = './players.json';
+let playersDB = {};
 
-/* ==================== MEMORY ==================== */
-const memoryInventories = {};
-const uiSessions = new Map();
+function loadDatabase() {
+    if (fs.existsSync(DB_FILE)) {
+        try {
+            playersDB = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+            console.log('💾 檔案館 (players.json) 讀取成功！');
+        } catch (e) {
+            console.error('❌ 資料庫讀取失敗，已初始化全新檔案庫。', e);
+            playersDB = {};
+        }
+    } else {
+        console.log('⚠️ 找不到 players.json，已建立全新檔案館。');
+        saveDatabase();
+    }
+}
 
-let currentIdentitiesData = null;
-let lastRateUpState = null;
+function saveDatabase() {
+    fs.writeFileSync(DB_FILE, JSON.stringify(playersDB, null, 4), 'utf8');
+}
 
-/* ==================== EXPRESS ==================== */
+// 獲取玩家，若為新玩家則自動派發 0 星基礎人格
+function getPlayer(userId) {
+    if (!playersDB[userId]) {
+        playersDB[userId] = {
+            lunacy: 0,
+            inventory: {},   // 人格名稱: 數量
+            egos: {},        // EGO名稱: 數量
+            team: [],        // 最多 7 人
+            equipped: null,
+            level: 1,
+            exp: 0,
+            thread: 0,
+            stageProgress: 0
+        };
+        
+        // 自動發放基礎 0 星人格 (十二罪人)
+        const baseSinners = identitiesData.identities?.['0'] || identitiesData['0'] || [];
+        baseSinners.forEach(sinner => {
+            const name = typeof sinner === 'string' ? sinner : sinner.name;
+            if (name) playersDB[userId].inventory[name] = 1;
+        });
+        saveDatabase();
+    }
+    return playersDB[userId];
+}
+
+// ==================== 🌐 網頁伺服器設定 (Render 喚醒用) ====================
 const app = express();
 const PORT = process.env.PORT || 3000;
-
 const systemStartTime = new Date();
-let totalTweetsChecked = 0;
+let totalUpdatesChecked = 0;
 
-const TARGET_USER = {
-    username: 'LimbusCompany_B',
-    displayName: '邊獄公司 (Limbus Company) 官方最新公告'
-};
+app.get('/', (req, res) => res.sendStatus(200));
+app.listen(PORT, () => console.log(`網頁伺服器已在連接埠 ${PORT} 啟動`));
 
-const NITTER_NODES = [
-    'https://nitter.net',
-    'https://nitter.poast.org',
-    'https://nitter.cz'
-];
-
-let lastFetchedId = null;
-
+// ==================== 📡 系統常數與設定 ====================
 const NOTIFY_CHANNEL_ID = '1402282604165730348';
-const PING_ROLE_MENTION = '<@&1406984068725211177>';
 const RATEUP_ANNOUNCE_CHANNEL_ID = '1510153086281187330';
+const PING_ROLE_MENTION = '<@&1406984068725211177>';
 
-const PAGE_SIZE = 25;
-const RATE_UP_OVERRIDE_CHANCE = 0.25;
+const TARGET_USER = { username: 'LimbusCompany_B', displayName: '邊獄公司 (Limbus Company) 官方' };
+const NITTER_NODES = ['https://nitter.net', 'https://nitter.poast.org', 'https://nitter.cz'];
 
-const RARITY_ORDER = ['Color Fixer', 'Special', '0000', 'Egos', '000', '00', '0'];
+let lastTweetId = null;
+let lastSteamNewsId = null;
 
-const RARITY_BASE_CHANCE = {
-    'Color Fixer': 0.0000143,
+// ==================== 🎲 機率與抽卡核心 ====================
+const RARITY_RATES = {
     'Special': 0.0001,
-    '0000': 0.005,
-    'Egos': 0.013,
-    '000': 0.029,
-    '00': 0.15,
-    '0': 0.8028857
+    '0000': 0.0050,
+    'Egos': 0.0130,
+    '000': 0.0290,
+    '00': 0.1500,
+    '0': 0.8029
 };
 
-const RARITY_ALIASES = {
-    'Color Fixer': ['Color Fixer', 'ColorFixer', 'colorfixer', 'color_fixer', 'CF'],
-    'Special': ['Special', 'special'],
-    '0000': ['0000'],
-    'Egos': ['Egos', 'EGO', 'ego', 'egos'],
-    '000': ['000'],
-    '00': ['00'],
-    '0': ['0']
-};
+const rateUpSource = identitiesData.upTargets || identitiesData.rateUpIds || identitiesData.targetIdentities || {};
 
-const RARITY_META = {
-    'Color Fixer': { label: '🎨 Color Fixer', emoji: '🎨', sort: 7 },
-    'Special': { label: '⚠️ Special', emoji: '⚠️', sort: 6 },
-    '0000': { label: '👑 0000', emoji: '👑', sort: 5 },
-    'Egos': { label: '⚔️ E.G.O', emoji: '⚔️', sort: 4 },
-    '000': { label: '★★★ 000', emoji: '★★★', sort: 3 },
-    '00': { label: '★★ 00', emoji: '★★', sort: 2 },
-    '0': { label: '★ 0', emoji: '★', sort: 1 },
-    unknown: { label: '❓ unknown', emoji: '❓', sort: 0 }
-};
-
-const FALLBACK_EGO_POOL = [
-    {
-        name: '薄暮 (Twilight)',
-        grade: 'ALEPH',
-        desc: '調和所有矛盾與偏見的終極大劍。暗示個體拒絕接受單一標籤，試圖在黑白混沌的世界中強行抓住平衡。'
-    },
-    {
-        name: '失樂園 (Paradise Lost)',
-        grade: 'ALEPH',
-        desc: '純白羽翼覆蓋的禁忌法杖。象徵對「完美標籤」的病態追求，個體容易因為試圖符合他人的神聖期望而陷入更深沉的 Burnout。'
-    },
-    {
-        name: '擬態 (Mimicry)',
-        grade: 'ALEPH',
-        desc: '由血肉扭曲而成的巨大刀刃。這代表個體擅長在不同環境中偽裝、完美貼上符合群體需求的標籤。'
-    }
-];
-
-/* ==================== DATA LOADING ==================== */
-function loadIdentitiesDataSafe() {
-    try {
-        delete require.cache[require.resolve(IDENTITIES_DATA_PATH)];
-        return require(IDENTITIES_DATA_PATH);
-    } catch (err) {
-        console.error('❌ identitiesData.js 載入失敗：', err.message);
-        return currentIdentitiesData || { identities: {} };
-    }
-}
-
-function refreshIdentitiesData() {
-    const fresh = loadIdentitiesDataSafe();
-    if (fresh) currentIdentitiesData = fresh;
-    return currentIdentitiesData;
-}
-
-function readRateUpCacheFile() {
-    try {
-        if (!fs.existsSync(RATEUP_CACHE_PATH)) return null;
-        const raw = fs.readFileSync(RATEUP_CACHE_PATH, 'utf8');
-        const parsed = JSON.parse(raw);
-        return parsed?.state || null;
-    } catch {
-        return null;
-    }
-}
-
-function saveRateUpCacheState(state) {
-    try {
-        fs.writeFileSync(
-            RATEUP_CACHE_PATH,
-            JSON.stringify(
-                {
-                    updatedAt: new Date().toISOString(),
-                    state
-                },
-                null,
-                2
-            ),
-            'utf8'
-        );
-    } catch (err) {
-        console.error('❌ rateup_cache.json 寫入失敗：', err.message);
-    }
-}
-
-currentIdentitiesData = loadIdentitiesDataSafe();
-lastRateUpState = readRateUpCacheFile();
-
-/* ==================== HELPERS ==================== */
-function chunkLines(lines, maxLen = 1900) {
-    const chunks = [];
-    let current = '';
-
-    for (const line of lines) {
-        const candidate = current ? `${current}\n${line}` : line;
-        if (candidate.length > maxLen) {
-            if (current) chunks.push(current);
-            current = line;
-        } else {
-            current = candidate;
-        }
-    }
-
-    if (current) chunks.push(current);
-    return chunks;
-}
-
-async function sendChunkedLines(channel, lines) {
-    const chunks = chunkLines(lines);
-    for (const chunk of chunks) {
-        await channel.send(chunk);
-    }
-}
-
-function truncateText(text, max = 90) {
-    if (!text) return '';
-    if (text.length <= max) return text;
-    return `${text.slice(0, max - 1)}…`;
-}
-
-function raritySortWeight(rarity) {
-    return RARITY_META[rarity]?.sort ?? 0;
-}
-
-function rarityEmoji(rarity) {
-    return RARITY_META[rarity]?.emoji ?? '❓';
-}
-
-function rarityLabel(rarity) {
-    return RARITY_META[rarity]?.label ?? rarity;
-}
-
-function formatPercent(chance) {
-    return `${(chance * 100).toFixed(10)}%`;
-}
-
-function pickRandom(list) {
-    if (!Array.isArray(list) || list.length === 0) return null;
-    return list[Math.floor(Math.random() * list.length)];
-}
-
-function formatRateUpItem(item) {
-    if (item == null) return '';
-    if (typeof item === 'string') return item.trim();
-
-    if (typeof item === 'object') {
-        if (typeof item.name === 'string' && item.name.trim()) return item.name.trim();
-        if (typeof item.title === 'string' && item.title.trim()) return item.title.trim();
-        if (typeof item.zh === 'string' && item.zh.trim()) return item.zh.trim();
-        if (typeof item.en === 'string' && item.en.trim()) return item.en.trim();
-    }
-
-    return String(item).trim();
-}
-
-function findArrayByAliases(container, aliases) {
-    if (!container || typeof container !== 'object') return null;
-
-    for (const key of aliases) {
-        if (Array.isArray(container[key])) return container[key];
-    }
-
-    const lowerMap = new Map(
-        Object.entries(container).map(([k, v]) => [k.toLowerCase(), v])
-    );
-
-    for (const alias of aliases) {
-        const found = lowerMap.get(alias.toLowerCase());
-        if (Array.isArray(found)) return found;
-    }
-
-    return null;
-}
-
-function getCurrentRateUpSource(data = currentIdentitiesData) {
-    if (!data) return {};
-    if (data.upTargets && typeof data.upTargets === 'object') return data.upTargets;
-    if (data.rateUpIds && typeof data.rateUpIds === 'object') return data.rateUpIds;
-    if (data.targetIdentities && typeof data.targetIdentities === 'object') return data.targetIdentities;
-    return {};
-}
-
-function normalizeRateUpListBySource(source, rarity) {
-    if (!source) return [];
-
-    const aliases = RARITY_ALIASES[rarity] || [rarity];
-
-    for (const alias of aliases) {
-        const v = source[alias];
-        if (Array.isArray(v)) return v.map(formatRateUpItem).filter(Boolean);
-        if (typeof v === 'string') return [formatRateUpItem(v)].filter(Boolean);
-
-        if (v && typeof v === 'object') {
-            if (Array.isArray(v.names)) return v.names.map(formatRateUpItem).filter(Boolean);
-            if (Array.isArray(v.ids)) return v.ids.map(formatRateUpItem).filter(Boolean);
-            if (typeof v.name === 'string' && v.name.trim()) return [v.name.trim()];
-        }
-    }
-
-    const values = Object.values(source);
-    const matched = values
-        .filter(v => v && typeof v === 'object' && v.rarity === rarity && typeof v.name === 'string')
-        .map(v => v.name.trim())
-        .filter(Boolean);
-
-    return matched;
-}
-
-function normalizeRateUpList(rarity) {
-    return normalizeRateUpListBySource(getCurrentRateUpSource(), rarity);
-}
-
-function uniquePreserveOrder(items) {
-    const seen = new Set();
-    const out = [];
-
-    for (const item of items) {
-        const text = formatRateUpItem(item);
-        if (!text) continue;
-        if (seen.has(text)) continue;
-        seen.add(text);
-        out.push(text);
-    }
-
-    return out;
-}
-
-function getFallbackEgoPool() {
-    const data = currentIdentitiesData || {};
-    const direct =
-        data.egos ||
-        data.Egos ||
-        data.egoList ||
-        data.ego ||
-        null;
-
-    if (Array.isArray(direct) && direct.length > 0) {
-        return direct.map(formatRateUpItem).filter(Boolean);
-    }
-
-    return FALLBACK_EGO_POOL.map(x => x.name);
-}
-
-function getPoolForRarity(rarity, data = currentIdentitiesData) {
-    if (!data) return [];
-
-    const aliases = RARITY_ALIASES[rarity] || [rarity];
-
-    const identitiesBlock = data.identities && typeof data.identities === 'object'
-        ? data.identities
-        : data;
-
-    const fromIdentities = findArrayByAliases(identitiesBlock, aliases);
-    if (fromIdentities) return fromIdentities.map(formatRateUpItem).filter(Boolean);
-
-    if (rarity === 'Egos') {
-        return getFallbackEgoPool();
-    }
-
-    return [];
-}
-
-function getRarityChance(rarity) {
-    return RARITY_BASE_CHANCE[rarity] || 0;
-}
-
+// 單抽/前九抽隨機產生器
 function buildRarity() {
     const r = Math.random();
-    if (r < 0.0000143) return 'Color Fixer';
-    if (r < 0.0001143) return 'Special';
-    if (r < 0.0051143) return '0000';
-    if (r < 0.0181143) return 'Egos';
-    if (r < 0.0471143) return '000';
-    if (r < 0.1971143) return '00';
-    return '0';
+    if (r < 0.0001) return 'Special'; // 0.01%
+    if (r < 0.0051) return '0000';    // 0.5%
+    if (r < 0.0181) return 'Egos';    // 1.3%
+    if (r < 0.0471) return '000';     // 2.9%
+    if (r < 0.1971) return '00';      // 15%
+    return '0';                       // 80.29%
+}
+
+// 十抽保底產生器：移除 0 的機率，重新正規化 (總權重為 0.1971)
+function buildRarityGuaranteed() {
+    const totalWeight = 0.1971; 
+    const r = Math.random() * totalWeight;
+    
+    if (r < 0.0001) return 'Special';
+    if (r < 0.0051) return '0000';
+    if (r < 0.0181) return 'Egos';
+    if (r < 0.0471) return '000';
+    return '00'; 
 }
 
 function rarityToStars(rarity) {
-    if (rarity === 'Color Fixer') return '🎨 Color Fixer';
-    if (rarity === 'Special') return '⚠️ Special';
+    if (rarity === 'Special') return '⚠️ [👁️ 色彩收尾人 / 特殊]';
     if (rarity === '0000') return '👑 ★★★★';
-    if (rarity === 'Egos') return '⚔️ E.G.O';
+    if (rarity === 'Egos') return '⚔️ E.G.O 同步';
     if (rarity === '000') return '★★★';
     if (rarity === '00') return '★★';
     return '★';
 }
 
-function rarityDrawMode(rarity) {
-    const basePool = getPoolForRarity(rarity);
-    const ratePool = normalizeRateUpList(rarity);
-
-    if (basePool.length > 0 && ratePool.length > 0) {
-        return `混合池（基礎 ${Math.round((1 - RATE_UP_OVERRIDE_CHANCE) * 100)}% / RateUp ${Math.round(RATE_UP_OVERRIDE_CHANCE * 100)}%）`;
+function normalizeRateUpList(rarity) {
+    const value = rateUpSource[rarity];
+    if (!value) return [];
+    if (Array.isArray(value)) return value.filter(Boolean);
+    if (typeof value === 'string') return [value];
+    if (typeof value === 'object') {
+        if (Array.isArray(value.names)) return value.names.filter(Boolean);
+        if (typeof value.name === 'string' && value.name.trim()) return [value.name.trim()];
     }
-    if (basePool.length > 0) return '單一基礎池';
-    if (ratePool.length > 0) return '單一 RateUp 池';
-    return '無資料';
+    return [];
 }
 
-function drawFromRarity(rarity) {
-    const basePool = getPoolForRarity(rarity);
-    const ratePool = normalizeRateUpList(rarity);
-
-    if (!basePool.length && !ratePool.length) {
-        return {
-            name: `（未能在 identitiesData.js 中找到種類：${rarity} 的有效名單）`,
-            rarity,
-            source: 'missing',
-            isRateUp: false
-        };
-    }
-
-    if (!basePool.length) {
-        const picked = pickRandom(ratePool);
-        return {
-            name: picked,
-            rarity,
-            source: 'rateup-only',
-            isRateUp: true
-        };
-    }
-
-    if (!ratePool.length) {
-        const picked = pickRandom(basePool);
-        return {
-            name: picked,
-            rarity,
-            source: 'base-only',
-            isRateUp: false
-        };
-    }
-
-    if (Math.random() < RATE_UP_OVERRIDE_CHANCE) {
-        const picked = pickRandom(ratePool);
-        return {
-            name: picked,
-            rarity,
-            source: 'rateup',
-            isRateUp: true
-        };
-    }
-
-    const picked = pickRandom(basePool);
-    return {
-        name: picked,
-        rarity,
-        source: 'base',
-        isRateUp: false
-    };
+function pickRateUp(rarity) {
+    const list = normalizeRateUpList(rarity);
+    if (!list.length) return null;
+    return list[Math.floor(Math.random() * list.length)];
 }
 
-function getExactDrawProbability(rarity, itemName) {
-    const baseChance = getRarityChance(rarity);
-    const basePool = getPoolForRarity(rarity);
-    const rateUpPool = normalizeRateUpList(rarity);
-
-    const n = basePool.length;
-    const m = rateUpPool.length;
-
-    if (n === 0 && m === 0) return 0;
-
-    const baseCount = basePool.filter(x => x === itemName).length;
-    const upCount = rateUpPool.filter(x => x === itemName).length;
-
-    if (n > 0 && m > 0) {
-        const basePart = ((1 - RATE_UP_OVERRIDE_CHANCE) / n) * baseCount;
-        const upPart = (RATE_UP_OVERRIDE_CHANCE / m) * upCount;
-        return baseChance * (basePart + upPart);
+function getBaseIdentity(rarity) {
+    const pool = identitiesData.identities?.[rarity] || identitiesData[rarity] || [];
+    if (pool.length > 0) {
+        const item = pool[Math.floor(Math.random() * pool.length)];
+        return typeof item === 'string' ? item : (item.name || '未知實體');
     }
-
-    if (n > 0) return baseChance * (baseCount / n);
-    return baseChance * (upCount / m);
+    return `（種類 ${rarity} 資料庫缺失）`;
 }
 
-function getAllDrawableEntries(rarity) {
-    const basePool = getPoolForRarity(rarity);
-    const rateUpPool = normalizeRateUpList(rarity);
-    return uniquePreserveOrder([...basePool, ...rateUpPool]);
+// ==================== 📡 公告監聽系統 ====================
+function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    return fetch(url, { ...options, signal: controller.signal, headers: { 'User-Agent': 'Mozilla/5.0' } }).finally(() => clearTimeout(timeout));
 }
 
-function buildProbabilitySections() {
-    const sections = [];
+// Twitter (X) 監聽
+async function checkTwitterUpdates() {
+    for (const nodeUrl of NITTER_NODES) {
+        try {
+            const response = await fetchWithTimeout(`${nodeUrl}/${TARGET_USER.username}/rss`);
+            if (!response.ok) continue;
+            const text = await response.text();
+            
+            const linkMatch = text.match(/<link>(.*?)<\/link>/g)?.[1];
+            const guidMatch = text.match(/<guid[^>]*>(.*?)<\/guid>/);
+            
+            if (linkMatch && guidMatch) {
+                const link = linkMatch.replace('<link>', '').replace('</link>', '').replace('http://', 'https://');
+                const id = guidMatch[1];
+                
+                if (!lastTweetId) {
+                    lastTweetId = id; 
+                    break;
+                } else if (id !== lastTweetId) {
+                    lastTweetId = id;
+                    const channel = await client.channels.fetch(NOTIFY_CHANNEL_ID);
+                    if (channel) await channel.send(`🔔 ${PING_ROLE_MENTION} **[Twitter官方公告]**\n${link.replace('twitter.com', 'vxtwitter.com')}`);
+                }
+                break;
+            }
+        } catch (e) { /* 靜默錯誤，嘗試下一節點 */ }
+    }
+}
 
-    for (const rarity of RARITY_ORDER) {
-        const basePool = getPoolForRarity(rarity);
-        const rateUpPool = normalizeRateUpList(rarity);
-        const merged = getAllDrawableEntries(rarity);
-
-        if (!basePool.length && !rateUpPool.length) continue;
-
-        const lines = [];
-        lines.push(
-            `【${rarity}】 ${rarityLabel(rarity)}｜基礎機率：${formatPercent(getRarityChance(rarity))}｜` +
-            `基礎池：${basePool.length}｜RateUp：${rateUpPool.length}｜模式：${rarityDrawMode(rarity)}`
-        );
-        lines.push('');
-
-        const rateUpSet = new Set(rateUpPool);
-
-        for (const item of merged) {
-            const chance = getExactDrawProbability(rarity, item);
-            const mark = rateUpSet.has(item) ? ' [UP]' : '';
-            lines.push(`• ${item}${mark} — ${formatPercent(chance)}`);
+// Steam News 監聽
+async function checkSteamUpdates() {
+    try {
+        const response = await fetchWithTimeout('https://api.steampowered.com/ISteamNews/GetNewsForApp/v0002/?appid=1973530&count=1');
+        const data = await response.json();
+        const newsItem = data?.appnews?.newsitems?.[0];
+        
+        if (newsItem) {
+            if (!lastSteamNewsId) {
+                lastSteamNewsId = newsItem.gid;
+            } else if (newsItem.gid !== lastSteamNewsId) {
+                lastSteamNewsId = newsItem.gid;
+                const channel = await client.channels.fetch(NOTIFY_CHANNEL_ID);
+                if (channel) {
+                    const embed = new EmbedBuilder()
+                        .setTitle(`🚂 [Steam 官方新聞] ${newsItem.title}`)
+                        .setURL(newsItem.url)
+                        .setColor(0x00A8E8)
+                        .setDescription('偵測到 Limbus Company 在 Steam 發布了新公告/更新筆記。')
+                        .setFooter({ text: 'Project Moon 官方動態' })
+                        .setTimestamp();
+                    await channel.send({ content: `🔔 ${PING_ROLE_MENTION}`, embeds: [embed] });
+                }
+            }
         }
-
-        sections.push(lines);
-    }
-
-    return sections;
+    } catch (e) { /* 靜默錯誤 */ }
 }
 
-function buildRateUpOverviewSections() {
-    const state = buildNormalizedRateUpState();
-    const sections = [];
-
-    for (const rarity of RARITY_ORDER) {
-        const list = state[rarity] || [];
-        if (!list.length) continue;
-
-        const lines = [];
-        lines.push(`【${rarity}】 ${rarityLabel(rarity)}`);
-        lines.push('');
-        for (const item of list) {
-            lines.push(`• ${item}`);
-        }
-        sections.push(lines);
-    }
-
-    return sections;
+async function performSystemChecks() {
+    totalUpdatesChecked++;
+    await checkTwitterUpdates();
+    await checkSteamUpdates();
 }
 
-/* ==================== INVENTORY ==================== */
-function makeInventoryKey(rarity, name) {
-    return `${rarity}::${name}`;
-}
-
-function ensureUserState(userId) {
-    if (!memoryInventories[userId]) {
-        memoryInventories[userId] = {
-            items: {},
-            equipped: null
-        };
-    }
-
-    const raw = memoryInventories[userId];
-
-    if (Array.isArray(raw)) {
-        const converted = { items: {}, equipped: null };
-        for (const value of raw) {
-            const name = formatRateUpItem(value);
-            if (!name) continue;
-            const key = makeInventoryKey('unknown', name);
-            converted.items[key] = {
-                key,
-                name,
-                rarity: 'unknown',
-                count: (converted.items[key]?.count || 0) + 1
-            };
-        }
-        memoryInventories[userId] = converted;
-        return converted;
-    }
-
-    if (!raw.items || typeof raw.items !== 'object') raw.items = {};
-    if (!Object.prototype.hasOwnProperty.call(raw, 'equipped')) raw.equipped = null;
-
-    return raw;
-}
-
-function getInventoryEntries(userId) {
-    const state = ensureUserState(userId);
-    return Object.values(state.items)
-        .filter(item => item && item.count > 0)
-        .sort((a, b) => {
-            const diff = raritySortWeight(b.rarity) - raritySortWeight(a.rarity);
-            if (diff !== 0) return diff;
-            const countDiff = b.count - a.count;
-            if (countDiff !== 0) return countDiff;
-            return a.name.localeCompare(b.name, 'zh-Hant');
-        });
-}
-
-function addToInventory(userId, item) {
-    if (!item || !item.name || !item.rarity) return;
-    if (String(item.name).startsWith('（未能在 identitiesData.js 中找到種類：')) return;
-
-    const state = ensureUserState(userId);
-    const key = makeInventoryKey(item.rarity, item.name);
-
-    if (!state.items[key]) {
-        state.items[key] = {
-            key,
-            name: item.name,
-            rarity: item.rarity,
-            count: 0
-        };
-    }
-
-    state.items[key].count += 1;
-}
-
-function removeFromInventory(userId, key, amount = 1) {
-    const state = ensureUserState(userId);
-    const item = state.items[key];
-    if (!item) return false;
-
-    item.count -= amount;
-
-    if (item.count <= 0) {
-        if (state.equipped && state.equipped.key === key) {
-            state.equipped = null;
-        }
-        delete state.items[key];
-    }
-
-    return true;
-}
-
-function equipItem(userId, key) {
-    const state = ensureUserState(userId);
-    const item = state.items[key];
-    if (!item || item.count <= 0) return null;
-
-    state.equipped = {
-        key: item.key,
-        name: item.name,
-        rarity: item.rarity
-    };
-
-    return state.equipped;
-}
-
-function transferItem(fromUserId, toUserId, key) {
-    const fromState = ensureUserState(fromUserId);
-    const item = fromState.items[key];
-    if (!item || item.count <= 0) return null;
-
-    const transferItemData = {
-        key,
-        name: item.name,
-        rarity: item.rarity
-    };
-
-    removeFromInventory(fromUserId, key, 1);
-    addToInventory(toUserId, transferItemData);
-
-    return transferItemData;
-}
-
-function buildPackLines(userId, username) {
-    const state = ensureUserState(userId);
-    const entries = getInventoryEntries(userId);
-    const totalOwned = entries.reduce((sum, item) => sum + item.count, 0);
-
-    const lines = [];
-    lines.push(`📦 **${username} 的人格背包**`);
-    lines.push(`總持有數：${totalOwned}｜種類：${entries.length}`);
-    lines.push('');
-
-    if (state.equipped) {
-        lines.push(`🛡️ **裝備中：** ${state.equipped.name} [${state.equipped.rarity}]`);
-        lines.push('');
-    } else {
-        lines.push('🛡️ **裝備中：**（無）');
-        lines.push('');
-    }
-
-    if (!entries.length) {
-        lines.push('目前空空如也。');
-        return lines;
-    }
-
-    for (const item of entries) {
-        const eqMark = state.equipped && state.equipped.key === item.key ? ' [EQUIPPED]' : '';
-        lines.push(`${rarityEmoji(item.rarity)} [${item.rarity}] ${item.name} ×${item.count}${eqMark}`);
-    }
-
-    return lines;
-}
-
-function buildCheckEmbed(targetUser, state) {
-    const equipped = state.equipped
-        ? `${state.equipped.name} [${state.equipped.rarity}]`
-        : '（無）';
-
-    const entries = getInventoryEntries(targetUser.id);
-    const totalOwned = entries.reduce((sum, item) => sum + item.count, 0);
-
-    return new EmbedBuilder()
-        .setTitle(`🧾 ${targetUser.username} 的狀態`)
-        .setColor(0x5a189a)
-        .addFields(
-            { name: '📌 裝備', value: equipped, inline: false },
-            { name: '📦 持有總數', value: `${totalOwned}`, inline: true },
-            { name: '📚 種類數', value: `${entries.length}`, inline: true }
-        )
-        .setTimestamp();
-}
-
-/* ==================== UI / TRADE ==================== */
-function createUiSession(mode, ownerId, targetId = null) {
-    const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
-    const session = {
-        id,
-        mode,
-        stage: 'select',
-        ownerId,
-        targetId,
-        items: getInventoryEntries(ownerId),
-        page: 0,
-        selectedItem: null,
-        expiresAt: Date.now() + 15 * 60 * 1000
-    };
-
-    uiSessions.set(id, session);
-
-    setTimeout(() => {
-        uiSessions.delete(id);
-    }, 15 * 60 * 1000).unref?.();
-
-    return session;
-}
-
-function buildSelectorView(session) {
-    const totalPages = Math.max(1, Math.ceil(session.items.length / PAGE_SIZE));
-    session.page = Math.min(Math.max(session.page, 0), totalPages - 1);
-
-    const start = session.page * PAGE_SIZE;
-    const currentItems = session.items.slice(start, start + PAGE_SIZE);
-
-    const title = session.mode === 'equip'
-        ? '🛡️ 裝備選擇器'
-        : '📨 交易選擇器';
-
-    const desc = session.mode === 'equip'
-        ? '選擇一個要裝備的項目。你一次最多只能裝備一個。'
-        : `選擇一個要交易給 <@${session.targetId}> 的項目。`;
-
-    const embed = new EmbedBuilder()
-        .setTitle(title)
-        .setColor(session.mode === 'equip' ? 0x4cc9f0 : 0xffd166)
-        .setDescription(desc)
-        .addFields(
-            { name: '📄 頁數', value: `${session.page + 1} / ${totalPages}`, inline: true },
-            { name: '📦 可選項目', value: `${session.items.length}`, inline: true }
-        )
-        .setFooter({ text: '使用下方選單選擇項目' });
-
-    if (session.mode === 'trade' && session.targetId) {
-        embed.addFields({ name: '🎯 目標', value: `<@${session.targetId}>`, inline: true });
-    }
-
-    const options = currentItems.map(item => ({
-        label: truncateText(item.name, 90),
-        description: `${rarityEmoji(item.rarity)} ${item.rarity}｜擁有 x${item.count}`,
-        value: item.key
-    }));
-
-    const rows = [];
-
-    if (options.length > 0) {
-        const selectMenu = new StringSelectMenuBuilder()
-            .setCustomId(`ui:select:${session.id}`)
-            .setPlaceholder(session.mode === 'equip' ? '選擇要裝備的人格 / E.G.O' : '選擇要交易的項目')
-            .addOptions(options);
-
-        rows.push(new ActionRowBuilder().addComponents(selectMenu));
-    }
-
-    const buttons = [];
-
-    if (session.page > 0) {
-        buttons.push(
-            new ButtonBuilder()
-                .setCustomId(`ui:prev:${session.id}`)
-                .setLabel('上一頁')
-                .setStyle(ButtonStyle.Secondary)
-        );
-    }
-
-    if (session.page < totalPages - 1) {
-        buttons.push(
-            new ButtonBuilder()
-                .setCustomId(`ui:next:${session.id}`)
-                .setLabel('下一頁')
-                .setStyle(ButtonStyle.Secondary)
-        );
-    }
-
-    buttons.push(
-        new ButtonBuilder()
-            .setCustomId(`ui:cancel:${session.id}`)
-            .setLabel('取消')
-            .setStyle(ButtonStyle.Danger)
-    );
-
-    rows.push(new ActionRowBuilder().addComponents(buttons));
-
-    return { embeds: [embed], components: rows };
-}
-
-function buildTradeOfferView(session) {
-    const item = session.selectedItem;
-
-    const embed = new EmbedBuilder()
-        .setTitle('🤝 交易請求')
-        .setColor(0xf72585)
-        .setDescription(`**<@${session.ownerId}>** 想將以下項目交易給 **<@${session.targetId}>**。`)
-        .addFields(
-            { name: '📦 項目', value: `${item.name}`, inline: false },
-            { name: '🏷️ 稀有度', value: `${item.rarity}`, inline: true },
-            { name: '🔢 數量', value: '1', inline: true }
-        )
-        .setFooter({ text: '只有目標可以接受 / 拒絕；發起者可以取消' })
-        .setTimestamp();
-
-    const rows = [
-        new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setCustomId(`trade:accept:${session.id}`)
-                .setLabel('接受')
-                .setStyle(ButtonStyle.Success),
-            new ButtonBuilder()
-                .setCustomId(`trade:decline:${session.id}`)
-                .setLabel('拒絕')
-                .setStyle(ButtonStyle.Danger),
-            new ButtonBuilder()
-                .setCustomId(`trade:cancel:${session.id}`)
-                .setLabel('取消')
-                .setStyle(ButtonStyle.Secondary)
-        )
-    ];
-
-    return { embeds: [embed], components: rows };
-}
-
-/* ==================== RATE UP ANNOUNCE ==================== */
-function buildNormalizedRateUpState(data = currentIdentitiesData) {
-    const source = getCurrentRateUpSource(data);
-    const state = {};
-
-    for (const rarity of RARITY_ORDER) {
-        state[rarity] = normalizeRateUpListBySource(source, rarity)
-            .slice()
-            .sort((a, b) => a.localeCompare(b, 'zh-Hant'));
-    }
-
-    return state;
-}
-
-async function announceRateUpState(state, oldState = null) {
+async function announceCurrentRateUps() {
     try {
         const channel = await client.channels.fetch(RATEUP_ANNOUNCE_CHANNEL_ID);
         if (!channel) return;
 
-        const lines = [];
+        const sections = [];
+        ['Special', '0000', 'Egos', '000', '00', '0'].forEach(rarity => {
+            const list = normalizeRateUpList(rarity);
+            if (list.length) sections.push(`### ${rarity}\n${list.map(v => `• ${v}`).join('\n')}`);
+        });
 
-        if (!oldState) {
-            lines.push('📢 **Rate Up 人格 / E.G.O 已載入**');
-            lines.push('資料來源：`identitiesData.js`');
-            lines.push('');
-        } else {
-            lines.push('📢 **identitiesData.js 已更新**');
-            lines.push('以下是變更與目前的 Rate Up 名單：');
-            lines.push('');
-        }
-
-        let changed = false;
-
-        for (const rarity of RARITY_ORDER) {
-            const list = state[rarity] || [];
-            const oldList = oldState?.[rarity] || [];
-
-            if (!oldState) {
-                if (!list.length) continue;
-                lines.push(`【${rarity}】 ${rarityLabel(rarity)}`);
-                for (const item of list) {
-                    lines.push(`• ${item}`);
-                }
-                lines.push('');
-                continue;
-            }
-
-            const added = list.filter(x => !oldList.includes(x));
-            const removed = oldList.filter(x => !list.includes(x));
-
-            if (!added.length && !removed.length) continue;
-
-            changed = true;
-            lines.push(`【${rarity}】 ${rarityLabel(rarity)}`);
-
-            if (added.length) {
-                lines.push('新增：');
-                for (const item of added) lines.push(`+ ${item}`);
-            }
-
-            if (removed.length) {
-                lines.push('移除：');
-                for (const item of removed) lines.push(`- ${item}`);
-            }
-
-            lines.push('目前：');
-            if (list.length) {
-                for (const item of list) lines.push(`• ${item}`);
-            } else {
-                lines.push('（無）');
-            }
-
-            lines.push('');
-        }
-
-        if (!oldState) {
-            const hasAny = Object.values(state).some(list => Array.isArray(list) && list.length > 0);
-            if (!hasAny) lines.push('目前沒有設定任何 Rate Up 人格 / E.G.O。');
-        } else if (!changed) {
-            lines.push('目前沒有偵測到 Rate Up 內容變動。');
-        }
-
-        await sendChunkedLines(channel, lines);
-    } catch (err) {
-        console.error('Rate Up 公告失敗：', err.message);
-    }
+        await channel.send({
+            embeds: [
+                new EmbedBuilder()
+                    .setColor(0xffd166)
+                    .setTitle('📢 當期 Rate Up 卡池資料更新')
+                    .setDescription(sections.length ? sections.join('\n\n') : '目前沒有設定任何 Rate Up。')
+                    .setFooter({ text: '系統資料庫同步完畢' })
+                    .setTimestamp()
+            ]
+        });
+    } catch (err) { console.error('Rate Up 公告失敗:', err); }
 }
 
-async function syncRateUpStateAndAnnounce() {
-    const freshData = refreshIdentitiesData();
-    const newState = buildNormalizedRateUpState(freshData);
-
-    if (!lastRateUpState) {
-        lastRateUpState = newState;
-        saveRateUpCacheState(newState);
-        await announceRateUpState(newState, null);
-        return;
-    }
-
-    const oldSnapshot = JSON.stringify(lastRateUpState);
-    const newSnapshot = JSON.stringify(newState);
-
-    if (oldSnapshot === newSnapshot) return;
-
-    await announceRateUpState(newState, lastRateUpState);
-    lastRateUpState = newState;
-    saveRateUpCacheState(newState);
-}
-
-/* ==================== TWITTER / NITTER ==================== */
-function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
-
-    return fetch(url, {
-        ...options,
-        signal: controller.signal,
-        headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            ...(options.headers || {})
-        }
-    }).finally(() => clearTimeout(timeout));
-}
-
-function parseLatestItem(xml) {
-    const itemMatch = xml.match(/<item>[\s\S]*?<\/item>/);
-    if (!itemMatch) return null;
-
-    const item = itemMatch[0];
-    const link = item.match(/<link>(.*?)<\/link>/)?.[1];
-    const guid = item.match(/<guid[^>]*>(.*?)<\/guid>/)?.[1];
-
-    if (!link || !guid) return null;
-
-    return {
-        link: link.trim().replace('http://', 'https://'),
-        id: guid.trim()
-    };
-}
-
-async function fetchLatestTweetFromNode(nodeUrl) {
-    const url = `${nodeUrl}/${TARGET_USER.username}/rss`;
-    const response = await fetchWithTimeout(url, {}, 8000);
-
-    if (!response.ok) {
-        throw new Error(`HTTP 錯誤! 狀態碼: ${response.status}`);
-    }
-
-    const text = await response.text();
-    const data = parseLatestItem(text);
-
-    if (!data) {
-        throw new Error('RSS 解析失敗');
-    }
-
-    const cleanLink = data.link.split('#')[0];
-    const vxTweetLink = cleanLink.replace(/^https:\/\/[^/]+/, 'https://vxtwitter.com');
-
-    return {
-        id: data.id,
-        link: vxTweetLink
-    };
-}
-
-async function checkTwitterUpdates() {
-    console.log(`⏳ Angela 正在發射高速觀測脈衝，檢查官方 @${TARGET_USER.username} 的動態...`);
-    totalTweetsChecked++;
-
-    for (const nodeUrl of NITTER_NODES) {
-        try {
-            const data = await fetchLatestTweetFromNode(nodeUrl);
-
-            if (!lastFetchedId) {
-                lastFetchedId = data.id;
-                console.log(`📦 [${nodeUrl}] 成功建立 @${TARGET_USER.username} 的初始推文快取：${data.id}`);
-                break;
-            }
-
-            if (data.id !== lastFetchedId) {
-                lastFetchedId = data.id;
-                const channel = await client.channels.fetch(NOTIFY_CHANNEL_ID);
-                if (channel) {
-                    await channel.send({
-                        content: `🔔 ${PING_ROLE_MENTION} **偵測到脈衝，已收到 Project Moon 的最新訊息：**\n${data.link}`
-                    });
-                }
-            }
-
-            break;
-        } catch (error) {
-            console.warn(`⚠️ 節點 [${nodeUrl}] 擷取異常 (${error.message})，嘗試下一個備援空間...`);
-        }
-    }
-}
-
-/* ==================== EXPRESS ==================== */
-app.get('/', (req, res) => {
-    res.send('Angela 系統運作正常。歡迎來到腦葉公司核心控制室。');
-});
-
-app.listen(PORT, () => {
-    console.log(`網頁伺服器已在連接埠 ${PORT} 啟動`);
-});
-
-/* ==================== DISCORD CLIENT ==================== */
+// ==================== 🤖 Discord Bot 核心事件 ====================
 const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildMembers
-    ]
+    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers]
 });
 
 client.once('ready', async () => {
-    console.log(`🤖 遵從您的指示，Angela 已成功登入為：${client.user.tag}`);
-    console.log('✨ [核心運作] 擴充型記憶體卡池系統已完成對齊！');
-
-    client.user.setPresence({
-        status: 'idle',
-        activities: [{
-            name: 'customstatus',
-            type: 4,
-            state: 'Sles被我吃掉了'
-        }]
-    });
-
-    try {
-        const channel = await client.channels.fetch(NOTIFY_CHANNEL_ID);
-        if (channel) {
-            const loginEmbed = new EmbedBuilder()
-                .setTitle('🟢 系統連線：AI 助理 Angela 已重新上線')
-                .setColor(0x00b4d8)
-                .setDescription('「主管，精神脈衝已重新對齊。廣播模組已調整完畢，隨時準備播報 Project Moon 的最新動態。」')
-                .addFields(
-                    { name: '📡 觀測目標', value: `@${TARGET_USER.username}`, inline: true },
-                    { name: '⏱️ 監聽頻率', value: '每 1 分鐘 / 1 次', inline: true }
-                )
-                .setFooter({ text: '腦葉公司行政中心 - 核心AI系統' })
-                .setTimestamp();
-
-            await channel.send({ embeds: [loginEmbed] });
-        }
-    } catch (err) {
-        console.error('❌ 啟動發送訊息失敗：', err.message);
-    }
-
-    await syncRateUpStateAndAnnounce();
-
-    setInterval(checkTwitterUpdates, 60 * 1000);
-    setInterval(syncRateUpStateAndAnnounce, 60 * 1000);
-
-    checkTwitterUpdates();
+    console.log(`🤖 Angela 已成功登入：${client.user.tag}`);
+    loadDatabase();
+    
+    client.user.setPresence({ status: 'idle', activities: [{ name: 'customstatus', type: 4, state: '守護光之種' }] });
+    
+    await announceCurrentRateUps();
+    setInterval(performSystemChecks, 60 * 1000);
+    performSystemChecks();
 });
 
-/* ==================== COMMANDS ==================== */
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
 
     const msg = message.content.trim();
+    const args = msg.split(/\s+/);
+    const cmd = args[0].toLowerCase();
 
-    if (msg === '!ping') return message.reply('pong！');
-
-    if (msg === '管理員' || msg === '主管') {
-        return message.reply('主管，您好。我是您的 AI 助理 Angela。請下達您的指示，今天也請為了擴張「光之種」而努力。');
+    // ---------------- 🗣️ 舊有純文字對話與系統查詢 ----------------
+    if (cmd === '!ping') return message.reply('pong！');
+    if (msg === '管理員' || msg === '主管') return message.reply('主管，您好。我是您的 AI 助理 Angela。請下達您的指示，今天也請為了擴張「光之種」而努力。');
+    if (msg.toLowerCase() === 'lc' || msg === '腦葉公司') return message.reply('「直面恐懼，創造未來。」請時刻注意收容單位的逆流計數器，主管。');
+    if (msg === '!逆流') {
+        return message.reply({ embeds: [new EmbedBuilder().setTitle('⚠️ [WARNING] 腦葉公司緊急通告').setColor(0xff0000).setDescription('警告：當前頻道內觀測到嚴重的「心理逆流」現象！').addFields({ name: '🚨 逆流狀態', value: '第 3 階能障逆流 (Qliphoth Meltdown)', inline: false }).setImage('https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1000&auto=format&fit=crop')] });
     }
-
-    if (msg.toLowerCase() === 'lc' || msg === '腦葉公司') {
-        return message.reply('「直面恐懼，創造未來。」請時刻注意收容單位的逆流計數器，主管。');
+    if (cmd === '!limbusonline' || cmd === '!邊獄人數') {
+        try {
+            const res = await fetchWithTimeout('https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/?appid=1973530');
+            const data = await res.json();
+            if (data?.response?.result === 1) return message.reply(`📊 **[Steam 即時數據]** 目前共有 **${data.response.player_count.toLocaleString()}** 位罪人正在《Limbus Company》中。`);
+            return message.reply('❌ 無法從 Steam API 取得正確的數據。');
+        } catch (error) { return message.reply('❌ 連線至 Steam 伺服器時發生內部錯誤。'); }
     }
-
-    if (msg === '!測試官方推文' || msg === '!testtweet') {
-        await message.channel.sendTyping();
-        console.log('🎯 主管手動觸發官方推文測試擷取...');
-
-        let fetchSuccess = false;
-
-        for (const nodeUrl of NITTER_NODES) {
-            try {
-                const data = await fetchLatestTweetFromNode(nodeUrl);
-
-                await message.reply({
-                    content: `🔔 ${PING_ROLE_MENTION} **偵測到脈衝，已收到 Project Moon 的最新訊息：**\n${data.link}`
-                });
-
-                fetchSuccess = true;
-                break;
-            } catch (error) {
-                console.warn(`⚠️ 測試時節點 [${nodeUrl}] 異常: ${error.message}`);
-            }
-        }
-
-        if (!fetchSuccess) {
-            return message.reply('❌ **報告主管，當前所有備援節點暫時連線超時，無法完成手動擷取。**');
-        }
+    if (cmd === '!status' || cmd === '!狀態') {
+        const uptimeHours = ((new Date() - systemStartTime) / (1000 * 60 * 60)).toFixed(1);
+        return message.reply({ embeds: [new EmbedBuilder().setTitle('🧠 系統狀態報告').setColor(0x5a189a).addFields(
+            { name: '🏷️ 當前標籤', value: '「被觀測者」', inline: true },
+            { name: '⏳ 核心運作時間', value: `${uptimeHours} 小時`, inline: true },
+            { name: '📈 檢查公告次數', value: `${totalUpdatesChecked}`, inline: true }
+        )]});
+    }
+    if (cmd === '!ego') {
+        const egos = [{n:'薄暮 (Twilight)', g:'ALEPH'}, {n:'失樂園 (Paradise Lost)', g:'ALEPH'}, {n:'擬態 (Mimicry)', g:'ALEPH'}];
+        const e = egos[Math.floor(Math.random() * egos.length)];
+        return message.reply({ embeds: [new EmbedBuilder().setTitle('⚔️ E.G.O 同步觀測').setColor(0xd90429).setDescription(`主管 **${message.author.username}**，同步率最高：\n**${e.n}** (\`${e.g}\`)`)] });
+    }
+    if (cmd === '!testtweet') {
+        message.reply('⏳ 測試中，手動觸發公告擷取...');
+        await checkTwitterUpdates(); await checkSteamUpdates();
         return;
     }
+    if (cmd === '!findbot' || cmd === '!尋找機器人') {
+        if (args.length < 2) return message.reply('❌ 請輸入要尋找的機器人名稱！');
+        const term = args.slice(1).join(' ').toLowerCase();
+        const bots = (await message.guild.members.fetch()).filter(m => m.user.bot && m.user.username.toLowerCase().includes(term));
+        if (bots.size === 0) return message.reply('🔍 找不到該機器人。');
+        return message.reply(`📌 **找到相關機器人：**\n` + bots.map(b => `🤖 **${b.user.username}** (<@${b.id}>)`).join('\n'));
+    }
+    if (cmd === '!help' || cmd === '!cmds') {
+        return message.reply('🧠 **Angela 系統指令總覽**\n`!pull` / `!10pulls` - 提取人格 (130/1300 Lunacy)\n`!pack` / `!check [@user]` - 查看檔案館\n`!equip <人格>` - 裝備人格\n`!team <人格>` / `!team clear` - 編排戰鬥隊伍(最高7人)\n`!stages` - 選擇戰區進行作戰\n`!list` - 查看機率表\n`!trade` - 交易系統\n`!checkrateupids` - 檢視UP池\n`!givelunacy @user <數量>` - 主管發薪用');
+    }
 
-    if (msg === '!邊獄人數' || msg === '!limbusonline') {
-        try {
-            const response = await fetchWithTimeout(
-                'https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/?appid=1973530'
-            );
-            const data = await response.json();
+    // 初始化/取得玩家資料 (觸發基礎送禮)
+    const player = getPlayer(message.author.id);
 
-            if (data?.response?.result === 1) {
-                return message.reply(`📊 **[Steam 即時數據]** 目前共有 **${data.response.player_count.toLocaleString()}** 位罪人正在《Limbus Company》中進行探索。`);
-            }
-
-            return message.reply('❌ 無法從 Steam API 取得正確的數據。');
-        } catch (error) {
-            return message.reply('❌ 連線至 Steam 伺服器時發生內部錯誤。');
+    // ---------------- 💰 主管發薪系統 ----------------
+    if (cmd === '!givelunacy') {
+        if (message.author.username !== 'sles_forever') {
+            return message.reply('❌ 權限不足。僅有主管 (`@sles_forever`) 具備 Lunacy 發行權限。');
         }
+        const target = message.mentions.users.first();
+        const amount = parseInt(args[2]);
+        if (!target || isNaN(amount)) return message.reply('📝 格式錯誤。請使用：`!givelunacy @user 數量`');
+        
+        const targetPlayer = getPlayer(target.id);
+        targetPlayer.lunacy += amount;
+        saveDatabase();
+        return message.reply(`✅ 已成功向 **${target.username}** 發放 ${amount} Lunacy。目前餘額：${targetPlayer.lunacy}`);
     }
 
-    if (msg === '!狀態' || msg === '!status') {
-        const uptimeMs = new Date() - systemStartTime;
-        const uptimeHours = (uptimeMs / (1000 * 60 * 60)).toFixed(1);
-
-        const embed = new EmbedBuilder()
-            .setTitle('🧠 認知心理學 - 情感共鳴與系統狀態報告')
-            .setColor(0x5a189a)
-            .setDescription('在當前社會標籤與認知扭曲下，個體的情感投影與核心控制室運行紀錄：')
-            .addFields(
-                { name: '🏷️ 當前標籤 (Label)', value: '「被觀測者」', inline: true },
-                { name: '📊 心理狀態 (State)', value: '🛑 精神枯竭 (Burnout)', inline: true },
-                { name: '⏳ 核心運作時間 (Uptime)', value: `${uptimeHours} 小時`, inline: true },
-                { name: '📡 監聽機制', value: '1分鐘極速輪詢 (極簡優化版)', inline: true },
-                { name: '📈 檢查次數', value: `${totalTweetsChecked}`, inline: true }
-            )
-            .setFooter({ text: 'Angela 心理與系統觀測核心' })
-            .setTimestamp();
-
-        return message.reply({ embeds: [embed] });
-    }
-
-    if (msg === '!ego') {
-        const egoPool = getFallbackEgoPool();
-        const pickedName = pickRandom(egoPool);
-        const ego = FALLBACK_EGO_POOL.find(x => x.name === pickedName) || pickRandom(FALLBACK_EGO_POOL);
-
-        const egoEmbed = new EmbedBuilder()
-            .setTitle('⚔️ 核心共鳴：E.G.O 同步觀測報告')
-            .setColor(0xd90429)
-            .setDescription(`**${message.author.username}** 主管，提取出以下同步率最高的 E.G.O 武裝：`)
-            .addFields(
-                { name: '✨ 裝備名稱', value: `**${ego.name}**`, inline: true },
-                { name: '🔱 危險等級', value: `\`${ego.grade}\``, inline: true },
-                { name: '🧠 標籤與認知心理學解析', value: ego.desc, inline: false }
-            )
-            .setFooter({ text: 'Angela 心理提取模組' })
-            .setTimestamp();
-
-        return message.reply({ embeds: [egoEmbed] });
-    }
-
-    if (msg === '!逆流') {
-        const alarmEmbed = new EmbedBuilder()
-            .setTitle('⚠️ [WARNING] 腦葉公司核心控制室緊急通告')
-            .setColor(0xff0000)
-            .setDescription('警告：當前頻道內觀測到嚴重的「心理逆流」現象！')
-            .addFields(
-                { name: '🚨 逆流狀態', value: '第 3 階能障逆流 (Qliphoth Meltdown)', inline: false }
-            )
-            .setImage('https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1000&auto=format&fit=crop')
-            .setFooter({ text: '腦葉公司最高行政控制中心' })
-            .setTimestamp();
-
-        return message.reply({ embeds: [alarmEmbed] });
-    }
-
-    if (msg === '!pull' || msg === '!10pulls') {
-        refreshIdentitiesData();
-
-        const userId = message.author.id;
-        const count = msg === '!10pulls' ? 10 : 1;
+    // ---------------- 🎲 抽卡與保底系統 (!pull / !10pulls) ----------------
+    if (cmd === '!pull' || cmd === '!10pulls') {
+        const isTen = (cmd === '!10pulls');
+        const cost = isTen ? 1300 : 130;
+        
+        if (player.lunacy < cost) {
+            return message.reply(`❌ **Lunacy 不足**\n當前餘額: ${player.lunacy} / 需要: ${cost}`);
+        }
+        
+        player.lunacy -= cost;
         const results = [];
+        const count = isTen ? 10 : 1;
 
         for (let i = 0; i < count; i++) {
-            const rarity = buildRarity();
-            const result = drawFromRarity(rarity);
+            // 第10抽保底 (必定 00 以上，重新正規化)
+            const rarity = (isTen && i === 9) ? buildRarityGuaranteed() : buildRarity();
+            const rateUpName = pickRateUp(rarity);
 
-            if (!String(result.name).startsWith('（未能在 identitiesData.js 中找到種類：')) {
-                addToInventory(userId, result);
+            let baseName = getBaseIdentity(rarity);
+            let finalName = baseName;
+            let display = baseName;
+
+            if (rateUpName && Math.random() < 0.25) {
+                finalName = rateUpName;
+                display = `✨ **[PICK-UP!]** ${rateUpName}`;
             }
 
-            const display = result.isRateUp ? `✨ **[PICK-UP!]** ${result.name}` : result.name;
+            if (rarity === 'Egos') {
+                player.egos[finalName] = (player.egos[finalName] || 0) + 1;
+            } else {
+                player.inventory[finalName] = (player.inventory[finalName] || 0) + 1;
+            }
             results.push(`${display} (${rarityToStars(rarity)})`);
         }
+        saveDatabase();
 
         return message.reply(
-            count === 10
-                ? `✨ **十連抽結果：**\n${results.join('\n')}\n*(📊 檔案館數據已完成即時同步)*`
-                : `🎯 **單抽結果：**\n${results[0]}\n*(📊 檔案館數據已完成即時同步)*`
+            isTen 
+            ? `✨ **十連提取結果 (剩餘 ${player.lunacy} Lunacy)：**\n${results.join('\n')}` 
+            : `🎯 **單抽結果 (剩餘 ${player.lunacy} Lunacy)：**\n${results[0]}`
         );
     }
 
-    if (msg === '!list') {
-        refreshIdentitiesData();
-        await message.channel.sendTyping();
-
-        const sections = buildProbabilitySections();
-
-        if (!sections.length) {
-            return message.reply('📭 目前沒有可抽取的資料。');
-        }
-
-        await message.reply('📜 **目前可抽取人格 / E.G.O 機率總表**');
-        for (const section of sections) {
-            await sendChunkedLines(message.channel, section);
-        }
-        return;
-    }
-
-    if (msg === '!pack') {
-        const lines = buildPackLines(message.author.id, message.author.username);
-        await sendChunkedLines(message.channel, lines);
-        return;
-    }
-
-    if (msg === '!checkrateupids') {
-        refreshIdentitiesData();
-        const sections = buildRateUpOverviewSections();
-
-        if (!sections.length) {
-            return message.reply('📭 目前沒有設定任何機率提升中的人格或 E.G.O。');
-        }
-
-        await message.reply('📈 **目前機率提升人格 / E.G.O**');
-        for (const section of sections) {
-            await sendChunkedLines(message.channel, section);
-        }
-        return;
-    }
-
-    if (msg === '!cmds' || msg === '!help') {
-        const embed = new EmbedBuilder()
-            .setTitle('📚 Angela 指令總表')
-            .setColor(0x00b4d8)
-            .setDescription('你可以直接在 Discord 輸入以下指令：')
-            .addFields(
-                {
-                    name: '基本',
-                    value: [
-                        '`!ping`',
-                        '`主管` / `管理員`',
-                        '`lc` / `腦葉公司`'
-                    ].join('\n'),
-                    inline: false
-                },
-                {
-                    name: '抽卡 / 卡池',
-                    value: [
-                        '`!pull`',
-                        '`!10pulls`',
-                        '`!list`',
-                        '`!pack`',
-                        '`!checkrateupids`'
-                    ].join('\n'),
-                    inline: false
-                },
-                {
-                    name: '裝備 / 交易',
-                    value: [
-                        '`!equip`',
-                        '`!trade @username`',
-                        '`!check @username`'
-                    ].join('\n'),
-                    inline: false
-                },
-                {
-                    name: '觀測 / 系統',
-                    value: [
-                        '`!測試官方推文` / `!testtweet`',
-                        '`!邊獄人數` / `!limbusonline`',
-                        '`!狀態` / `!status`',
-                        '`!ego`',
-                        '`!逆流`'
-                    ].join('\n'),
-                    inline: false
-                },
-                {
-                    name: '搜尋',
-                    value: [
-                        '`!尋找機器人 名稱`',
-                        '`!findbot 名稱`'
-                    ].join('\n'),
-                    inline: false
-                }
-            )
-            .setFooter({ text: 'Angela 指令查閱模組' })
-            .setTimestamp();
-
-        return message.reply({ embeds: [embed] });
-    }
-
-    if (msg === '!equip') {
-        const items = getInventoryEntries(message.author.id);
-
-        if (!items.length) {
-            return message.reply('📭 你目前沒有任何可裝備的人格 / E.G.O。先用 `!pull` 抽一些吧。');
-        }
-
-        const session = createUiSession('equip', message.author.id);
-        const view = buildSelectorView(session);
-
-        return message.reply({
-            content: '🛡️ **選擇要裝備的項目**',
-            ...view
-        });
-    }
-
-    if (msg.startsWith('!trade')) {
-        if (!message.guild) return message.reply('❌ 只能在伺服器內使用 `!trade`。');
-
-        const targetUser = message.mentions.users.first();
-        if (!targetUser) return message.reply('❌ 請用 `!trade @username` 指定要交易的對象。');
-        if (targetUser.id === message.author.id) return message.reply('❌ 不能跟自己交易。');
-        if (targetUser.bot) return message.reply('❌ 目前不支援跟機器人交易。');
-
-        const items = getInventoryEntries(message.author.id);
-        if (!items.length) {
-            return message.reply('📭 你目前沒有任何可交易的項目。先用 `!pull` 抽一些吧。');
-        }
-
-        const session = createUiSession('trade', message.author.id, targetUser.id);
-        const view = buildSelectorView(session);
-
-        return message.reply({
-            content: `📨 **交易對象：** ${targetUser}\n請先選擇你要交易出去的項目。`,
-            ...view
-        });
-    }
-
-    if (msg === '!check') {
+    // ---------------- 🎒 檔案館與裝備 (!pack / !check / !equip) ----------------
+    if (cmd === '!pack' || cmd === '!check') {
         const targetUser = message.mentions.users.first() || message.author;
-        const state = ensureUserState(targetUser.id);
-        const embed = buildCheckEmbed(targetUser, state);
-        return message.reply({ embeds: [embed] });
-    }
-
-    if (msg.startsWith('!尋找機器人') || msg.startsWith('!findbot')) {
-        const args = msg.split(' ');
-        if (args.length < 2) return message.reply('❌ 請輸入要尋找的機器人名稱！');
-
-        const searchTerm = args.slice(1).join(' ').toLowerCase();
-
-        try {
-            if (!message.guild) return message.reply('❌ 只能在伺服器內使用此指令。');
-
-            const members = await message.guild.members.fetch();
-            const foundBots = members.filter(member =>
-                member.user.bot && member.user.username.toLowerCase().includes(searchTerm)
+        const pData = getPlayer(targetUser.id);
+        
+        const embed = new EmbedBuilder()
+            .setTitle(`🎒 ${targetUser.username} 的檔案館`)
+            .setColor(0xE63946)
+            .addFields(
+                { name: '💎 Lunacy', value: `${pData.lunacy}`, inline: true },
+                { name: '🎖️ 裝備中人格', value: pData.equipped || '無', inline: true },
+                { name: '👥 隊伍人數', value: `${pData.team.length}/7 人`, inline: true }
             );
 
-            if (foundBots.size === 0) return message.reply('🔍 找不到機器人。');
+        let invLines = Object.entries(pData.inventory).map(([k, v]) => `• ${k} x${v}`);
+        let egoLines = Object.entries(pData.egos).map(([k, v]) => `• ${k} x${v}`);
+        
+        let invStr = invLines.length > 0 ? invLines.join('\n') : '無';
+        let egoStr = egoLines.length > 0 ? egoLines.join('\n') : '無';
+        
+        if (invStr.length > 1024) invStr = invStr.substring(0, 1000) + '... (資料過多省略)';
+        if (egoStr.length > 1024) egoStr = egoStr.substring(0, 1000) + '... (資料過多省略)';
 
-            let responseList = '📌 **找到相關機器人：**\n';
-            foundBots.forEach(bot => {
-                responseList += `🤖 **${bot.user.username}** (<@${bot.id}>)\n`;
+        embed.addFields(
+            { name: '📚 持有人格', value: invStr },
+            { name: '⚔️ 持有 E.G.O', value: egoStr }
+        );
+        
+        return message.reply({ embeds: [embed] });
+    }
+
+    if (cmd === '!equip') {
+        const idName = args.slice(1).join(' ');
+        if (!idName) return message.reply('📝 請輸入要裝備的人格名稱！');
+        if (!player.inventory[idName]) return message.reply('❌ 您的檔案館中尚未提取此人格。');
+        
+        player.equipped = idName;
+        saveDatabase();
+        return message.reply(`✅ 成功裝備：**${idName}**`);
+    }
+
+    // ---------------- 👥 隊伍系統 (!team) ----------------
+    if (cmd === '!team') {
+        if (args[1] === 'clear') {
+            player.team = [];
+            saveDatabase();
+            return message.reply('🧹 隊伍已全數清空。');
+        }
+        const member = args.slice(1).join(' ');
+        if (!member) return message.reply('📝 用法: `!team <持有人格名稱>` 或是 `!team clear`');
+        if (!player.inventory[member]) return message.reply('❌ 招募失敗：您並未持有該人格。');
+        if (player.team.length >= 7) return message.reply('❌ 招募失敗：隊伍已達 7 人上限。');
+        if (player.team.includes(member)) return message.reply('❌ 該成員已經在隊伍中。');
+
+        player.team.push(member);
+        saveDatabase();
+        return message.reply(`✅ **${member}** 已編入作戰小隊。當前人數：${player.team.length}/7`);
+    }
+
+    // ---------------- 🔄 交易系統 (!trade) (UI 翻頁保留) ----------------
+    if (cmd === '!trade') {
+        const pages = [
+            new EmbedBuilder().setTitle('🔄 交易終端 - 第 1 頁').setDescription('目前沒有可用的交易提案。').setColor(0xF4A261),
+            new EmbedBuilder().setTitle('🔄 交易終端 - 第 2 頁').setDescription('黑市模組維護中，等待財團授權。').setColor(0xF4A261)
+        ];
+        let currentPage = 0;
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('trade_prev').setLabel('◀').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('trade_next').setLabel('▶').setStyle(ButtonStyle.Secondary)
+        );
+
+        const msg = await message.reply({ embeds: [pages[0]], components: [row] });
+        const collector = msg.createMessageComponentCollector({ componentType: ComponentType.Button, time: 60000 });
+
+        collector.on('collect', async i => {
+            if (i.user.id !== message.author.id) return i.reply({ content: '❌ 無權限操作', ephemeral: true });
+            if (i.customId === 'trade_prev') currentPage = currentPage > 0 ? currentPage - 1 : pages.length - 1;
+            if (i.customId === 'trade_next') currentPage = currentPage < pages.length - 1 ? currentPage + 1 : 0;
+            await i.update({ embeds: [pages[currentPage]], components: [row] });
+        });
+        return;
+    }
+
+    // ---------------- 📈 UI 化機率列表 (!list) ----------------
+    if (cmd === '!list') {
+        const pages = [];
+        for (const [rarity, baseRate] of Object.entries(RARITY_RATES)) {
+            const upList = normalizeRateUpList(rarity);
+            const allPool = (identitiesData.identities?.[rarity] || identitiesData[rarity] || []).map(x => typeof x === 'string' ? x : x.name);
+            const stdPool = allPool.filter(id => !upList.includes(id));
+
+            let desc = `**總基礎機率：** ${(baseRate * 100).toFixed(2)}%\n\n`;
+            if (upList.length > 0) desc += `✨ **[Rate Up]** (每隻 ${((baseRate * 0.25) / upList.length * 100).toFixed(4)}%):\n${upList.map(i => `• ${i}`).join('\n')}\n\n`;
+            if (stdPool.length > 0) desc += `🔹 **[普通]** (每隻 ${((baseRate * 0.75) / stdPool.length * 100).toFixed(4)}%):\n${stdPool.map(i => `• ${i}`).join('\n')}\n`;
+
+            pages.push(new EmbedBuilder().setTitle(`📈 提取機率分析 - ${rarityToStars(rarity)}`).setColor(0x457B9D).setDescription(desc));
+        }
+
+        let currentPage = 0;
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('list_prev').setLabel('◀').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('list_next').setLabel('▶').setStyle(ButtonStyle.Primary)
+        );
+
+        const msg = await message.reply({ embeds: [pages[0]], components: [row] });
+        const collector = msg.createMessageComponentCollector({ componentType: ComponentType.Button, time: 60000 });
+
+        collector.on('collect', async i => {
+            if (i.user.id !== message.author.id) return i.reply({ content: '❌ 這不是您的面板。', ephemeral: true });
+            if (i.customId === 'list_prev') currentPage = currentPage > 0 ? currentPage - 1 : pages.length - 1;
+            if (i.customId === 'list_next') currentPage = currentPage < pages.length - 1 ? currentPage + 1 : 0;
+            await i.update({ embeds: [pages[currentPage]], components: [row] });
+        });
+        return;
+    }
+
+    if (cmd === '!checkrateupids') {
+        const lines = [];
+        ['Special', '0000', 'Egos', '000', '00', '0'].forEach(r => {
+            const list = normalizeRateUpList(r);
+            if(list.length > 0) lines.push(`**${r}**\n${list.map(v => `• ${v}`).join('\n')}`);
+        });
+        if (lines.length === 0) return message.reply('📭 目前沒有設定任何機率提升。');
+        return message.reply(`📈 **目前機率提升項目總覽**\n\n${lines.join('\n\n')}`);
+    }
+
+    // ---------------- ⚔️ Discord UI 戰鬥系統 (!stages) ----------------
+    if (cmd === '!stages') {
+        if (player.team.length === 0) {
+            return message.reply('⚠️ 主管，請先使用 `!team <人格名稱>` 編排隊伍。戰鬥需要人員。');
+        }
+
+        const embed = new EmbedBuilder()
+            .setTitle('🗺️ 選擇作戰難度')
+            .setDescription(`**當前出戰小隊 (${player.team.length}/7)：**\n${player.team.map(t=>`• ${t}`).join('\n')}\n\n*系統將綜合計算隊伍的 Speed, Coin, Clash Power 與 Sanity 決定勝負。*`)
+            .setColor(0x1D3557);
+
+        const row = new ActionRowBuilder().addComponents(
+            new StringSelectMenuBuilder()
+                .setCustomId('diff_select')
+                .setPlaceholder('選擇戰鬥難度...')
+                .addOptions([
+                    { label: '沒難度', description: '敵方: 後巷流浪漢 (無威脅)', value: 'diff_1' },
+                    { label: '輕鬆', description: '敵方: 後巷幫派', value: 'diff_2' },
+                    { label: '中等', description: '敵方: 協會成員', value: 'diff_3' },
+                    { label: '難', description: '敵方: 異想體', value: 'diff_4' },
+                    { label: '地獄', description: '敵方: 高階收尾人', value: 'diff_5' }
+                ])
+        );
+
+        const msg = await message.reply({ embeds: [embed], components: [row] });
+        const collector = msg.createMessageComponentCollector({ componentType: ComponentType.StringSelect, time: 60000 });
+
+        collector.on('collect', async i => {
+            if (i.user.id !== message.author.id) return i.reply({ content: '❌ 無權限操作', ephemeral: true });
+            
+            const diffMap = {
+                'diff_1': { name: '後巷流浪漢', power: 80, reward: 50 },
+                'diff_2': { name: '後巷幫派', power: 250, reward: 100 },
+                'diff_3': { name: '協會成員', power: 500, reward: 300 },
+                'diff_4': { name: '異想體', power: 1000, reward: 600 },
+                'diff_5': { name: '高階收尾人', power: 2000, reward: 1500 }
+            };
+
+            const targetDiff = diffMap[i.values[0]];
+            
+            // 系統核心：基於完整屬性的 Clash 計算
+            let playerClashPower = 0;
+            const allIdentities = Object.values(identitiesData.identities || identitiesData).flat();
+
+            player.team.forEach(member => {
+                const info = allIdentities.find(id => typeof id === 'object' && id.name === member) || {};
+                // 若屬性尚未實裝，則給予隨機基礎值防呆
+                const speed = info.speed || Math.floor(Math.random()*5 + 3);
+                const coin = info.coinPower || Math.floor(Math.random()*3 + 1);
+                const clash = info.clashPower || Math.floor(Math.random()*15 + 10);
+                const sanity = (Math.random() > 0.5 ? 45 : 0); 
+                
+                // 綜合計算威力
+                playerClashPower += (speed * 1.5) + (clash * coin) + (sanity * 0.5);
             });
 
-            return message.reply(responseList);
-        } catch (error) {
-            return message.reply('❌ 內部錯誤。');
-        }
+            // 引入波動亂數模擬擲硬幣
+            const playerFinal = playerClashPower * (0.8 + (Math.random() * 0.4));
+            const enemyFinal = targetDiff.power * (0.9 + (Math.random() * 0.2));
+            const isWin = playerFinal >= enemyFinal;
+
+            const battleEmbed = new EmbedBuilder()
+                .setTitle(`⚔️ 戰鬥結算 VS ${targetDiff.name}`)
+                .addFields(
+                    { name: '🔹 小隊 Clash 總判定', value: `${Math.floor(playerFinal)}`, inline: true },
+                    { name: '🔸 敵方 Clash 總判定', value: `${Math.floor(enemyFinal)}`, inline: true },
+                    { name: '🏆 戰鬥結果', value: isWin ? '✅ 鎮壓成功' : '❌ 隊伍全滅 (精神崩潰)', inline: false }
+                )
+                .setColor(isWin ? 0x2A9D8F : 0xE63946);
+
+            if (isWin) {
+                player.lunacy += targetDiff.reward;
+                saveDatabase();
+                battleEmbed.setDescription(`恭喜通關！結算獲取 **${targetDiff.reward} Lunacy**。\n目前餘額: ${player.lunacy}`);
+            } else {
+                battleEmbed.setDescription(`任務失敗。請檢視陣容屬性與理智值配置。`);
+            }
+
+            await i.update({ embeds: [battleEmbed], components: [] });
+        });
     }
 });
 
-/* ==================== INTERACTIONS ==================== */
-client.on('interactionCreate', async (interaction) => {
-    try {
-        if (interaction.isStringSelectMenu()) {
-            const parts = interaction.customId.split(':');
-            if (parts.length !== 3 || parts[0] !== 'ui' || parts[1] !== 'select') return;
-
-            const sessionId = parts[2];
-            const session = uiSessions.get(sessionId);
-
-            if (!session) {
-                return interaction.reply({ content: '❌ 這個選單已逾時。', ephemeral: true });
-            }
-
-            if (interaction.user.id !== session.ownerId) {
-                return interaction.reply({ content: '❌ 只有發起者可以操作這個選單。', ephemeral: true });
-            }
-
-            const selectedKey = interaction.values[0];
-            const state = ensureUserState(session.ownerId);
-            const item = state.items[selectedKey];
-
-            if (!item) {
-                return interaction.reply({ content: '❌ 找不到這個項目，可能已被移除。', ephemeral: true });
-            }
-
-            if (session.mode === 'equip') {
-                equipItem(session.ownerId, selectedKey);
-
-                const successEmbed = new EmbedBuilder()
-                    .setTitle('🛡️ 裝備完成')
-                    .setColor(0x4caf50)
-                    .setDescription(`你已裝備：**${item.name}**`)
-                    .addFields(
-                        { name: '🏷️ 稀有度', value: item.rarity, inline: true },
-                        { name: '📦 持有數', value: `${item.count}`, inline: true }
-                    )
-                    .setTimestamp();
-
-                uiSessions.delete(sessionId);
-
-                return interaction.update({
-                    content: '✅ **裝備設定完成**',
-                    embeds: [successEmbed],
-                    components: []
-                });
-            }
-
-            if (session.mode === 'trade') {
-                session.selectedItem = {
-                    key: selectedKey,
-                    name: item.name,
-                    rarity: item.rarity
-                };
-                session.stage = 'confirm';
-
-                const confirmEmbed = new EmbedBuilder()
-                    .setTitle('📨 交易已選定')
-                    .setColor(0xffd166)
-                    .setDescription(`你選擇要交易：**${item.name}**`)
-                    .addFields(
-                        { name: '🎯 對象', value: `<@${session.targetId}>`, inline: true },
-                        { name: '🏷️ 稀有度', value: item.rarity, inline: true }
-                    )
-                    .setFooter({ text: '請等待對方接受 / 拒絕' })
-                    .setTimestamp();
-
-                await interaction.update({
-                    content: '✅ 已選擇交易項目，正在送出交易請求...',
-                    embeds: [confirmEmbed],
-                    components: []
-                });
-
-                const offerView = buildTradeOfferView(session);
-
-                await interaction.followUp({
-                    content: `<@${session.targetId}>，有人向你發起交易。`,
-                    allowedMentions: { users: [session.targetId] },
-                    ...offerView
-                });
-
-                return;
-            }
-        }
-
-        if (interaction.isButton()) {
-            const parts = interaction.customId.split(':');
-            if (parts.length !== 3) return;
-
-            const prefix = parts[0];
-            const action = parts[1];
-            const sessionId = parts[2];
-            const session = uiSessions.get(sessionId);
-
-            if (!session) {
-                return interaction.reply({ content: '❌ 這個互動已逾時。', ephemeral: true });
-            }
-
-            if (prefix === 'ui') {
-                if (interaction.user.id !== session.ownerId) {
-                    return interaction.reply({ content: '❌ 只有發起者可以操作這個選單。', ephemeral: true });
-                }
-
-                if (action === 'cancel') {
-                    uiSessions.delete(sessionId);
-                    return interaction.update({
-                        content: '❌ 已取消。',
-                        embeds: [
-                            new EmbedBuilder()
-                                .setTitle('已取消')
-                                .setColor(0x808080)
-                                .setDescription('這次操作已被取消。')
-                        ],
-                        components: []
-                    });
-                }
-
-                if (action === 'prev' || action === 'next') {
-                    const totalPages = Math.max(1, Math.ceil(session.items.length / PAGE_SIZE));
-                    if (action === 'prev') session.page = Math.max(0, session.page - 1);
-                    if (action === 'next') session.page = Math.min(totalPages - 1, session.page + 1);
-
-                    const view = buildSelectorView(session);
-                    return interaction.update({
-                        content: session.mode === 'equip'
-                            ? '🛡️ **選擇要裝備的項目**'
-                            : `📨 **交易對象：** <@${session.targetId}>\n請先選擇你要交易出去的項目。`,
-                        ...view
-                    });
-                }
-            }
-
-            if (prefix === 'trade') {
-                if (session.stage !== 'confirm') {
-                    return interaction.reply({ content: '❌ 這個交易請求尚未準備好。', ephemeral: true });
-                }
-
-                const targetId = session.targetId;
-                const ownerId = session.ownerId;
-                const item = session.selectedItem;
-
-                if (action === 'cancel') {
-                    if (interaction.user.id !== ownerId) {
-                        return interaction.reply({ content: '❌ 只有發起者可以取消交易。', ephemeral: true });
-                    }
-
-                    uiSessions.delete(sessionId);
-                    return interaction.update({
-                        embeds: [
-                            new EmbedBuilder()
-                                .setTitle('❌ 交易已取消')
-                                .setColor(0x808080)
-                                .setDescription(`這筆交易已由發起者取消。\n\n項目：**${item.name}**`)
-                                .setTimestamp()
-                        ],
-                        components: []
-                    });
-                }
-
-                if (action === 'decline') {
-                    if (interaction.user.id !== targetId) {
-                        return interaction.reply({ content: '❌ 只有交易對象可以拒絕。', ephemeral: true });
-                    }
-
-                    uiSessions.delete(sessionId);
-                    return interaction.update({
-                        embeds: [
-                            new EmbedBuilder()
-                                .setTitle('❌ 交易已拒絕')
-                                .setColor(0xff0000)
-                                .setDescription(`**<@${targetId}>** 拒絕了這筆交易。\n\n項目：**${item.name}**`)
-                                .setTimestamp()
-                        ],
-                        components: []
-                    });
-                }
-
-                if (action === 'accept') {
-                    if (interaction.user.id !== targetId) {
-                        return interaction.reply({ content: '❌ 只有交易對象可以接受。', ephemeral: true });
-                    }
-
-                    const fromState = ensureUserState(ownerId);
-                    ensureUserState(targetId);
-
-                    if (!fromState.items[item.key] || fromState.items[item.key].count <= 0) {
-                        uiSessions.delete(sessionId);
-                        return interaction.update({
-                            embeds: [
-                                new EmbedBuilder()
-                                    .setTitle('⚠️ 交易失敗')
-                                    .setColor(0xffb703)
-                                    .setDescription('發起者的該項目已不存在，交易無法完成。')
-                                    .setTimestamp()
-                            ],
-                            components: []
-                        });
-                    }
-
-                    transferItem(ownerId, targetId, item.key);
-
-                    uiSessions.delete(sessionId);
-
-                    return interaction.update({
-                        embeds: [
-                            new EmbedBuilder()
-                                .setTitle('✅ 交易完成')
-                                .setColor(0x2ecc71)
-                                .setDescription(`**<@${ownerId}>** 已將 **${item.name}** 交易給 **<@${targetId}>**。`)
-                                .addFields(
-                                    { name: '🏷️ 稀有度', value: item.rarity, inline: true },
-                                    { name: '📦 數量', value: '1', inline: true }
-                                )
-                                .setTimestamp()
-                        ],
-                        components: []
-                    });
-                }
-            }
-        }
-    } catch (err) {
-        console.error('interaction error:', err);
-        if (!interaction.replied && !interaction.deferred) {
-            try {
-                await interaction.reply({ content: '❌ 互動處理失敗。', ephemeral: true });
-            } catch {}
-        }
-    }
-});
-
-/* ==================== LOGIN ==================== */
 const TOKEN = process.env.DISCORD_TOKEN;
-client.login(TOKEN).catch(err => {
-    console.error('❌ 機器人登入失敗：', err);
-});
+client.login(TOKEN).catch(err => console.error('❌ 登入失敗：', err));
