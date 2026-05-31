@@ -1,7 +1,6 @@
-const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, ComponentType } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder } = require('discord.js');
 const express = require('express');
 const fs = require('fs');
-
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 const identitiesData = require('./identitiesData.js');
 
@@ -34,13 +33,9 @@ function getPlayer(userId) {
             inventory: {},
             egos: {},
             team: [],
-            equipped: null,
-            level: 1,
-            exp: 0,
-            thread: 0,
-            stageProgress: 0
+            equipped: null
         };
-        const baseSinners = identitiesData.identities?.['0'] || identitiesData['0'] || [];
+        const baseSinners = identitiesData.identities?.['0'] || [];
         baseSinners.forEach(sinner => {
             const name = typeof sinner === 'string' ? sinner : sinner.name;
             if (name) playersDB[userId].inventory[name] = 1;
@@ -58,9 +53,7 @@ app.listen(PORT, () => console.log(`網頁伺服器啟動於通訊埠 ${PORT}`))
 
 // ==================== 📡 系統常數與觀測設定 ====================
 const NOTIFY_CHANNEL_ID = '1402282604165730348';
-const RATEUP_ANNOUNCE_CHANNEL_ID = '1510153086281187330';
 const PING_ROLE_MENTION = '<@&1406984068725211177>';
-
 const TARGET_USER = { username: 'LimbusCompany_B' };
 const NITTER_NODES = [
     'https://nitter.net', 
@@ -71,7 +64,7 @@ const NITTER_NODES = [
 
 let lastTweetId = null;
 let lastSteamNewsId = null;
-const activeTrades = new Map(); // 交易系統狀態機
+const activeTrades = new Map();
 
 // ==================== 🎲 機率與抽卡核心 ====================
 const RARITY_RATES = {
@@ -82,8 +75,6 @@ const RARITY_RATES = {
     '00': 0.1500,
     '0': 0.8029
 };
-
-const rateUpSource = identitiesData.upTargets || identitiesData.rateUpIds || identitiesData.targetIdentities || {};
 
 function buildRarity() {
     const r = Math.random();
@@ -96,8 +87,7 @@ function buildRarity() {
 }
 
 function buildRarityGuaranteed() {
-    const totalWeight = 0.1971; 
-    const r = Math.random() * totalWeight;
+    const r = Math.random() * 0.1971;
     if (r < 0.0001) return 'Special';
     if (r < 0.0051) return '0000';
     if (r < 0.0181) return 'Egos';
@@ -114,34 +104,7 @@ function rarityToStars(rarity) {
     return '★';
 }
 
-function normalizeRateUpList(rarity) {
-    const value = rateUpSource[rarity];
-    if (!value) return [];
-    if (Array.isArray(value)) return value.filter(Boolean);
-    if (typeof value === 'string') return [value];
-    if (typeof value === 'object') {
-        if (Array.isArray(value.names)) return value.names.filter(Boolean);
-        if (typeof value.name === 'string' && value.name.trim()) return [value.name.trim()];
-    }
-    return [];
-}
-
-function pickRateUp(rarity) {
-    const list = normalizeRateUpList(rarity);
-    if (!list.length) return null;
-    return list[Math.floor(Math.random() * list.length)];
-}
-
-function getBaseIdentity(rarity) {
-    const pool = identitiesData.identities?.[rarity] || identitiesData[rarity] || [];
-    if (pool.length > 0) {
-        const item = pool[Math.floor(Math.random() * pool.length)];
-        return typeof item === 'string' ? item : (item.name || '未知實體');
-    }
-    return `（種類 ${rarity} 資料缺失）`;
-}
-
-// ==================== 📡 觀測系統 (Twitter + Steam) ====================
+// ==================== 📡 觀測系統 (精準抓取最新推文/Steam) ====================
 function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -160,27 +123,33 @@ async function checkTwitterUpdates(manual = false, interaction = null) {
                 continue;
             }
             const text = await response.text();
-            const linkMatch = text.match(/<link>(.*?)<\/link>/g)?.[1];
-            const guidMatch = text.match(/<guid[^>]*>(.*?)<\/guid>/);
             
-            if (linkMatch && guidMatch) {
+            // 🔥 直接鎖定第一個 <item> 標籤，絕對不抓到頻道介紹
+            const itemMatch = text.match(/<item>([\s\S]*?)<\/item>/);
+            if (itemMatch) {
                 success = true;
-                const link = linkMatch.replace('<link>', '').replace('</link>', '').replace('http://', 'https://');
-                const id = guidMatch[1];
-                
-                if (!lastTweetId) {
-                    lastTweetId = id; 
-                    if (manual && interaction) await interaction.reply(`✅ 成功連線推特節點，並建立初始快取 (${id})。`);
-                } else if (id !== lastTweetId || manual) {
-                    if (!manual) lastTweetId = id;
-                    const channel = await client.channels.fetch(NOTIFY_CHANNEL_ID);
-                    const msg = `🔔 ${PING_ROLE_MENTION} **[Twitter官方公告]**\n${link.replace('twitter.com', 'vxtwitter.com')}`;
-                    if (channel) await channel.send(msg);
-                    if (manual && interaction) await interaction.reply(`✅ 已手動抓取推文並發送通知！`);
-                } else {
-                    if (manual && interaction) await interaction.reply(`✅ 成功連線，但目前沒有新推文。`);
+                const itemBlock = itemMatch[1];
+                let link = itemBlock.match(/<link>(.*?)<\/link>/)?.[1];
+                const id = itemBlock.match(/<guid[^>]*>(.*?)<\/guid>/)?.[1];
+                const title = itemBlock.match(/<title>([\s\S]*?)<\/title>/)?.[1];
+
+                if (link && id) {
+                    link = link.replace('http://', 'https://');
+                    
+                    if (!lastTweetId) {
+                        lastTweetId = id; 
+                        if (manual && interaction) await interaction.reply(`✅ 成功連線推特節點。當前最新推文：\n${link}`);
+                    } else if (id !== lastTweetId || manual) {
+                        if (!manual) lastTweetId = id;
+                        const channel = await client.channels.fetch(NOTIFY_CHANNEL_ID);
+                        const msg = `🔔 ${PING_ROLE_MENTION} **[Twitter官方公告]**\n${title ? `> ${title}\n` : ''}${link.replace('twitter.com', 'vxtwitter.com')}`;
+                        if (channel) await channel.send(msg);
+                        if (manual && interaction) await interaction.reply(`✅ 已手動抓取最新推文並發送通知！\n${link}`);
+                    } else {
+                        if (manual && interaction) await interaction.reply(`✅ 成功連線，但目前沒有新推文。`);
+                    }
+                    break; 
                 }
-                break;
             }
         } catch (e) {
             errorLog.push(`${nodeUrl} (Timeout/Error)`);
@@ -201,7 +170,7 @@ async function checkSteamUpdates(manual = false, interaction = null) {
         if (newsItem) {
             if (!lastSteamNewsId) {
                 lastSteamNewsId = newsItem.gid;
-                if (manual && interaction) await interaction.reply(`✅ 成功連線 Steam API，並建立初始快取。`);
+                if (manual && interaction) await interaction.reply(`✅ 成功連線 Steam API。最新新聞：${newsItem.title}`);
             } else if (newsItem.gid !== lastSteamNewsId || manual) {
                 if (!manual) lastSteamNewsId = newsItem.gid;
                 const channel = await client.channels.fetch(NOTIFY_CHANNEL_ID);
@@ -210,7 +179,7 @@ async function checkSteamUpdates(manual = false, interaction = null) {
                         .setTitle(`🚂 [Steam 官方新聞] ${newsItem.title}`)
                         .setURL(newsItem.url)
                         .setColor(0x00A8E8)
-                        .setDescription('偵測到 Limbus Company 在 Steam 發布了新公告/更新筆記。')
+                        .setDescription('偵測到 Limbus Company 在 Steam 發布了新公告。')
                         .setTimestamp();
                     await channel.send({ content: `🔔 ${PING_ROLE_MENTION}`, embeds: [embed] });
                     if (manual && interaction) await interaction.reply(`✅ 已手動抓取 Steam 新聞並發送通知！`);
@@ -220,11 +189,10 @@ async function checkSteamUpdates(manual = false, interaction = null) {
             }
         }
     } catch (e) {
-        if (manual && interaction) await interaction.reply(`❌ **Steam 觀測失敗**：API 連線超時或解析錯誤。`);
+        if (manual && interaction) await interaction.reply(`❌ **Steam 觀測失敗**：API 連線錯誤。`);
     }
 }
 
-// 背景輪詢
 async function performSystemChecks() {
     await checkTwitterUpdates();
     await checkSteamUpdates();
@@ -270,6 +238,48 @@ function buildPackEmbed(userId, page) {
     return { embeds: [embed], components: [navRow, actionRow] };
 }
 
+// 🔥 編輯訊息版本的 List 翻頁構建器
+function buildListEmbed(rarity, page) {
+    const baseRate = RARITY_RATES[rarity];
+    const allPool = identitiesData.identities[rarity] || [];
+    const upPool = identitiesData.upTargets[rarity] || [];
+    const stdPool = allPool.filter(id => !upPool.includes(id));
+
+    let desc = `**總基礎機率：** ${(baseRate * 100).toFixed(2)}%\n\n`;
+    if (upPool.length > 0 && upPool[0] !== null) {
+        desc += `✨ **[Rate Up]** (每隻 ${((baseRate * 0.25) / upPool.length * 100).toFixed(4)}%):\n${upPool.map(i => `• ${i}`).join('\n')}\n\n`;
+    }
+
+    const itemsPerPage = 15;
+    const totalPages = Math.max(1, Math.ceil(stdPool.length / itemsPerPage));
+    const safePage = Math.max(0, Math.min(page, totalPages - 1));
+    const start = safePage * itemsPerPage;
+    const pageItems = stdPool.slice(start, start + itemsPerPage);
+
+    if (stdPool.length > 0) {
+        desc += `🔹 **[普通] (頁數 ${safePage + 1}/${totalPages})**:\n${pageItems.map(i => `• ${i}`).join('\n')}`;
+    }
+
+    const embed = new EmbedBuilder()
+        .setTitle(`📈 提取機率分析 - ${rarityToStars(rarity)}`)
+        .setColor(0x457B9D)
+        .setDescription(desc);
+
+    const selectMenuRow = new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+            .setCustomId('list_select')
+            .setPlaceholder('切換查看其他卡池...')
+            .addOptions(Object.keys(RARITY_RATES).map(r => ({ label: `${r} 卡池`, value: r })))
+    );
+
+    const navRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(`list_nav_${rarity}_${safePage - 1}`).setLabel('◀上一頁').setStyle(ButtonStyle.Secondary).setDisabled(safePage === 0),
+        new ButtonBuilder().setCustomId(`list_nav_${rarity}_${safePage + 1}`).setLabel('下一頁▶').setStyle(ButtonStyle.Secondary).setDisabled(safePage === totalPages - 1)
+    );
+
+    return { embeds: [embed], components: [selectMenuRow, navRow] };
+}
+
 // ==================== 🤖 Discord Bot 核心事件 ====================
 const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers]
@@ -286,29 +296,21 @@ client.once('ready', async () => {
 
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
-
     const msg = message.content.trim();
     const args = msg.split(/\s+/);
     const cmd = args[0].toLowerCase();
 
     // ---------------- 🔧 基本與維護指令 ----------------
-    if (cmd === '!testtweet') {
-        await message.reply('⏳ 啟動推特手動觀測脈衝...');
-        return checkTwitterUpdates(true, message);
-    }
-    if (cmd === '!teststeam') {
-        await message.reply('⏳ 啟動 Steam 手動觀測脈衝...');
-        return checkSteamUpdates(true, message);
-    }
+    if (cmd === '!testtweet') return checkTwitterUpdates(true, message);
+    if (cmd === '!teststeam') return checkSteamUpdates(true, message);
     if (cmd === '!givelunacy') {
         if (message.author.username !== 'sles_forever') return message.reply('❌ 權限不足。');
         const target = message.mentions.users.first();
         const amount = parseInt(args[2]);
         if (!target || isNaN(amount)) return message.reply('📝 格式：`!givelunacy @user 數量`');
-        const targetPlayer = getPlayer(target.id);
-        targetPlayer.lunacy += amount;
+        getPlayer(target.id).lunacy += amount;
         saveDatabase();
-        return message.reply(`✅ 成功向 **${target.username}** 發放 ${amount} Lunacy。`);
+        return message.reply(`✅ 成功發放 ${amount} Lunacy。`);
     }
 
     // ---------------- 🎲 抽卡系統 ----------------
@@ -324,14 +326,19 @@ client.on('messageCreate', async (message) => {
         const count = isTen ? 10 : 1;
         for (let i = 0; i < count; i++) {
             const rarity = (isTen && i === 9) ? buildRarityGuaranteed() : buildRarity();
-            const rateUpName = pickRateUp(rarity);
-            let finalName = getBaseIdentity(rarity);
-            let display = finalName;
+            const upTarget = identitiesData.pullUpIdentity(rarity);
+            
+            let finalName;
+            let display;
 
-            if (rateUpName && Math.random() < 0.25) {
-                finalName = rateUpName;
-                display = `✨ **[PICK-UP!]** ${rateUpName}`;
+            if (upTarget && Math.random() < 0.25) {
+                finalName = upTarget;
+                display = `✨ **[PICK-UP!]** ${finalName}`;
+            } else {
+                finalName = identitiesData.pullIdentity(rarity);
+                display = finalName;
             }
+
             if (rarity === 'Egos') player.egos[finalName] = (player.egos[finalName] || 0) + 1;
             else player.inventory[finalName] = (player.inventory[finalName] || 0) + 1;
             
@@ -341,17 +348,16 @@ client.on('messageCreate', async (message) => {
         return message.reply(isTen ? `✨ **十連提取結果 (剩餘 ${player.lunacy})：**\n${results.join('\n')}` : `🎯 **單抽結果 (剩餘 ${player.lunacy})：**\n${results[0]}`);
     }
 
-    // ---------------- 🎒 整合版檔案館 (!pack / !check) ----------------
+    // ---------------- 🎒 檔案館 (!pack / !check) ----------------
     if (cmd === '!pack' || cmd === '!check') {
         const targetUser = message.mentions.users.first() || message.author;
-        getPlayer(targetUser.id); // 確保資料存在
-        const payload = buildPackEmbed(targetUser.id, 0);
-        return message.reply(payload);
+        getPlayer(targetUser.id);
+        return message.reply(buildPackEmbed(targetUser.id, 0));
     }
 
     // ---------------- 📈 UI 機率表 (!list) ----------------
     if (cmd === '!list') {
-        const embed = new EmbedBuilder().setTitle(`📈 提取機率總覽`).setColor(0x457B9D).setDescription('請選擇稀有度查看詳細內容：');
+        const embed = new EmbedBuilder().setTitle(`📈 提取機率總覽`).setColor(0x457B9D).setDescription('請從下方選單選擇稀有度查看詳細名單（支援翻頁）：');
         const row = new ActionRowBuilder().addComponents(
             new StringSelectMenuBuilder()
                 .setCustomId('list_select')
@@ -364,7 +370,7 @@ client.on('messageCreate', async (message) => {
     // ---------------- ⚔️ 戰鬥系統 (!stages) ----------------
     if (cmd === '!stages') {
         const player = getPlayer(message.author.id);
-        if (player.team.length === 0) return message.reply('⚠️ 主管，請先透過 `!pack` 裡的按鈕編排作戰隊伍。');
+        if (player.team.length === 0) return message.reply('⚠️ 主管，請先透過 `!pack` 編排作戰隊伍。');
 
         const embed = new EmbedBuilder()
             .setTitle('🗺️ 選擇作戰難度')
@@ -390,7 +396,7 @@ client.on('messageCreate', async (message) => {
     if (cmd === '!trade') {
         const target = message.mentions.users.first();
         if (!target || target.id === message.author.id) return message.reply('📝 用法: `!trade @目標玩家`');
-        if (target.bot) return message.reply('❌ 無法與 AI 機器人交易。');
+        if (target.bot) return message.reply('❌ 無法與 AI 交易。');
 
         const tradeId = Date.now().toString();
         activeTrades.set(tradeId, {
@@ -398,23 +404,19 @@ client.on('messageCreate', async (message) => {
             p2: { id: target.id, name: target.username, offer: null, confirmed: false }
         });
 
-        const embed = new EmbedBuilder()
-            .setTitle('🔄 交易請求')
-            .setDescription(`<@${target.id}>，**${message.author.username}** 向您發起了交易請求。是否接受？`)
-            .setColor(0xF4A261);
-        
+        const embed = new EmbedBuilder().setTitle('🔄 交易請求').setDescription(`<@${target.id}>，**${message.author.username}** 發起交易。是否接受？`).setColor(0xF4A261);
         const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId(`trade_acc_${tradeId}`).setLabel('✅ 接受交易').setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId(`trade_acc_${tradeId}`).setLabel('✅ 接受').setStyle(ButtonStyle.Success),
             new ButtonBuilder().setCustomId(`trade_dec_${tradeId}`).setLabel('❌ 拒絕').setStyle(ButtonStyle.Danger)
         );
         return message.reply({ content: `<@${target.id}>`, embeds: [embed], components: [row] });
     }
 });
 
-// ==================== 🎛️ 全域互動處理核心 (徹底解決失效問題) ====================
+// ==================== 🎛️ 全域互動處理核心 (編輯訊息翻頁保證) ====================
 client.on('interactionCreate', async (interaction) => {
     try {
-        // ---------------- 🎒 檔案館UI互動處理 ----------------
+        // ---------------- 🎒 檔案館導覽 (直接 update 編輯原訊息) ----------------
         if (interaction.isButton() && interaction.customId.startsWith('pack_')) {
             const parts = interaction.customId.split('_');
             const action = parts[1];
@@ -422,38 +424,35 @@ client.on('interactionCreate', async (interaction) => {
             const arg = parts[3];
 
             if (interaction.user.id !== targetId && interaction.user.id !== 'sles_forever') {
-                return interaction.reply({ content: '❌ 您無法操作其他主管的面板。', ephemeral: true });
+                return interaction.reply({ content: '❌ 無法操作他人的面板。', ephemeral: true });
             }
 
-            if (action === 'nav') {
-                return interaction.update(buildPackEmbed(targetId, parseInt(arg)));
-            }
-            if (action === 'back') {
-                return interaction.update(buildPackEmbed(targetId, 0));
-            }
+            // 🔥 完美實現「翻頁改成編輯訊息」
+            if (action === 'nav') return interaction.update(buildPackEmbed(targetId, parseInt(arg)));
+            if (action === 'back') return interaction.update(buildPackEmbed(targetId, 0));
+            
             if (action === 'equip' || action === 'team') {
                 const pData = getPlayer(targetId);
                 const invKeys = Object.keys(pData.inventory);
-                
-                if (invKeys.length === 0) return interaction.reply({ content: '❌ 您的背包沒有任何人格可供操作。', ephemeral: true });
+                if (invKeys.length === 0) return interaction.reply({ content: '❌ 背包空無一物。', ephemeral: true });
 
                 const embed = new EmbedBuilder()
                     .setTitle(action === 'equip' ? '🎖️ 選擇要裝備的人格' : '👥 編排戰鬥隊伍')
-                    .setDescription(action === 'team' ? `當前隊伍 (${pData.team.length}/7)：\n${pData.team.join(', ') || '無'}\n*提示：在下方選單點擊人格以 加入/移除 隊伍。*` : '請從下方選單選擇您要裝備的對象。')
+                    .setDescription(action === 'team' ? `隊伍 (${pData.team.length}/7)：\n${pData.team.join(', ') || '無'}` : '請選擇裝備。')
                     .setColor(0x457B9D);
 
-                // 將背包切為每 25 個一組的選單列
+                // 🔥 自動拆分下拉選單，防止超過 25 項被截斷 (最高支援 100 項)
                 const rows = [];
                 for (let i = 0; i < invKeys.length && rows.length < 4; i += 25) {
                     const chunk = invKeys.slice(i, i + 25);
                     const menu = new StringSelectMenuBuilder()
                         .setCustomId(`do_${action}_${targetId}_${i}`)
-                        .setPlaceholder(`選擇人格 (第 ${Math.floor(i/25)+1} 頁)...`)
-                        .addOptions(chunk.map(k => ({ label: k, value: k })));
+                        .setPlaceholder(`選擇 (第 ${Math.floor(i/25)+1} 頁)...`)
+                        .addOptions(chunk.map(k => ({ label: k.substring(0, 100), value: k })));
                     rows.push(new ActionRowBuilder().addComponents(menu));
                 }
                 rows.push(new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId(`pack_back_${targetId}`).setLabel('🔙 返回檔案館').setStyle(ButtonStyle.Secondary)
+                    new ButtonBuilder().setCustomId(`pack_back_${targetId}`).setLabel('🔙 返回').setStyle(ButtonStyle.Secondary)
                 ));
 
                 return interaction.update({ embeds: [embed], components: rows });
@@ -475,89 +474,68 @@ client.on('interactionCreate', async (interaction) => {
                 return interaction.update(buildPackEmbed(targetId, 0));
             }
             if (action === 'team') {
-                if (pData.team.includes(selection)) {
-                    pData.team = pData.team.filter(x => x !== selection);
-                } else {
-                    if (pData.team.length >= 7) return interaction.reply({ content: '❌ 隊伍已達 7 人上限！', ephemeral: true });
+                if (pData.team.includes(selection)) pData.team = pData.team.filter(x => x !== selection);
+                else {
+                    if (pData.team.length >= 7) return interaction.reply({ content: '❌ 隊伍上限 7 人！', ephemeral: true });
                     pData.team.push(selection);
                 }
                 saveDatabase();
-                
-                // 重新刷新隊伍 UI
-                const embed = new EmbedBuilder()
-                    .setTitle('👥 編排戰鬥隊伍')
-                    .setDescription(`當前隊伍 (${pData.team.length}/7)：\n${pData.team.join(', ') || '無'}\n*提示：在下方選單點擊人格以 加入/移除 隊伍。*`)
-                    .setColor(0x457B9D);
+                const embed = new EmbedBuilder().setTitle('👥 編排戰鬥隊伍').setDescription(`隊伍 (${pData.team.length}/7)：\n${pData.team.join(', ') || '無'}`).setColor(0x457B9D);
                 return interaction.update({ embeds: [embed] });
             }
         }
 
-        // ---------------- 📈 機率表 UI ----------------
+        // ---------------- 📈 List 機率表翻頁邏輯 ----------------
         if (interaction.isStringSelectMenu() && interaction.customId === 'list_select') {
-            const r = interaction.values[0];
-            const baseRate = RARITY_RATES[r];
-            const upList = normalizeRateUpList(r);
-            const allPool = (identitiesData.identities?.[r] || identitiesData[r] || []).map(x => typeof x === 'string' ? x : (x.name || 'Unknown'));
-            const stdPool = allPool.filter(id => !upList.includes(id));
+            const rarity = interaction.values[0];
+            // 🔥 直接透過 update 編輯原訊息，並產生對應的翻頁按鈕
+            return interaction.update(buildListEmbed(rarity, 0));
+        }
 
-            let desc = `**總基礎機率：** ${(baseRate * 100).toFixed(2)}%\n\n`;
-            if (upList.length > 0) desc += `✨ **[Rate Up]** (每隻 ${((baseRate * 0.25) / upList.length * 100).toFixed(4)}%):\n${upList.map(i => `• ${i}`).join('\n')}\n\n`;
-            if (stdPool.length > 0) desc += `🔹 **[普通]** (每隻 ${((baseRate * 0.75) / stdPool.length * 100).toFixed(4)}%):\n${stdPool.map(i => `• ${i}`).join('\n')}\n`;
-
-            const embed = new EmbedBuilder().setTitle(`📈 提取機率分析 - ${rarityToStars(r)}`).setColor(0x457B9D).setDescription(desc);
-            return interaction.update({ embeds: [embed] });
+        if (interaction.isButton() && interaction.customId.startsWith('list_nav_')) {
+            const parts = interaction.customId.split('_');
+            const rarity = parts[2];
+            const page = parseInt(parts[3]);
+            // 🔥 按下上一頁/下一頁時，直接編輯訊息內容
+            return interaction.update(buildListEmbed(rarity, page));
         }
 
         // ---------------- ⚔️ 戰鬥系統 UI ----------------
         if (interaction.isStringSelectMenu() && interaction.customId === 'stage_select') {
             const player = getPlayer(interaction.user.id);
             const [powerStr, rewardStr] = interaction.values[0].split('_');
-            const enemyPower = parseInt(powerStr);
-            const reward = parseInt(rewardStr);
-
-            let playerClash = 0;
-            const allIds = Object.values(identitiesData.identities || identitiesData).flat();
-            player.team.forEach(member => {
-                const info = allIds.find(id => typeof id === 'object' && id.name === member) || {};
-                const speed = info.speed || Math.floor(Math.random()*5 + 3);
-                const coin = info.coinPower || Math.floor(Math.random()*3 + 1);
-                const clash = info.clashPower || Math.floor(Math.random()*15 + 10);
-                playerClash += (speed * 1.5) + (clash * coin) + (Math.random() > 0.5 ? 20 : 0);
-            });
-
-            const pFinal = playerClash * (0.8 + Math.random() * 0.4);
-            const eFinal = enemyPower * (0.9 + Math.random() * 0.2);
+            const eFinal = parseInt(powerStr) * (0.9 + Math.random() * 0.2);
+            
+            let pClash = 0;
+            player.team.forEach(() => { pClash += Math.floor(Math.random()*25 + 10); }); // 簡化判定
+            const pFinal = pClash * (0.8 + Math.random() * 0.4);
             const isWin = pFinal >= eFinal;
 
-            const embed = new EmbedBuilder()
-                .setTitle(`⚔️ 戰鬥結算`)
-                .addFields(
-                    { name: '🔹 小隊 Clash 總判定', value: `${Math.floor(pFinal)}`, inline: true },
-                    { name: '🔸 敵方 Clash 總判定', value: `${Math.floor(eFinal)}`, inline: true },
-                    { name: '🏆 結果', value: isWin ? `✅ 成功鎮壓 (獲得 ${reward} Lunacy)` : '❌ 隊伍全滅', inline: false }
-                )
-                .setColor(isWin ? 0x2A9D8F : 0xE63946);
+            const embed = new EmbedBuilder().setTitle(`⚔️ 戰鬥結算`).addFields(
+                { name: '🔹 隊伍判定', value: `${Math.floor(pFinal)}`, inline: true },
+                { name: '🔸 敵方判定', value: `${Math.floor(eFinal)}`, inline: true },
+                { name: '🏆 結果', value: isWin ? `✅ 獲得 ${rewardStr} Lunacy` : '❌ 全滅', inline: false }
+            ).setColor(isWin ? 0x2A9D8F : 0xE63946);
 
-            if (isWin) { player.lunacy += reward; saveDatabase(); }
+            if (isWin) { player.lunacy += parseInt(rewardStr); saveDatabase(); }
             return interaction.update({ embeds: [embed], components: [] });
         }
 
-        // ---------------- 🔄 交易系統 UI ----------------
+        // ---------------- 🔄 交易系統 (突破 25 項限制) ----------------
         if (interaction.customId.startsWith('trade_')) {
             const parts = interaction.customId.split('_');
             const act = parts[1];
             const tId = parts[2];
             const trade = activeTrades.get(tId);
 
-            if (!trade) return interaction.reply({ content: '❌ 該交易已過期或不存在。', ephemeral: true });
+            if (!trade) return interaction.reply({ content: '❌ 交易過期。', ephemeral: true });
 
             if (act === 'acc') {
-                if (interaction.user.id !== trade.p2.id) return interaction.reply({ content: '❌ 只有被邀請者能同意。', ephemeral: true });
-                const embed = new EmbedBuilder().setTitle('🔄 交易終端').setColor(0x2A9D8F)
-                    .addFields(
-                        { name: `P1: ${trade.p1.name}`, value: `提供: 尚未選擇`, inline: true },
-                        { name: `P2: ${trade.p2.name}`, value: `提供: 尚未選擇`, inline: true }
-                    );
+                if (interaction.user.id !== trade.p2.id) return interaction.reply({ content: '❌ 僅限被邀請者操作。', ephemeral: true });
+                const embed = new EmbedBuilder().setTitle('🔄 交易終端').setColor(0x2A9D8F).addFields(
+                    { name: `P1: ${trade.p1.name}`, value: `提供: 尚未選擇`, inline: true },
+                    { name: `P2: ${trade.p2.name}`, value: `提供: 尚未選擇`, inline: true }
+                );
                 const row = new ActionRowBuilder().addComponents(
                     new ButtonBuilder().setCustomId(`trade_pick_${tId}_p1`).setLabel(`${trade.p1.name} 選擇物品`).setStyle(ButtonStyle.Primary),
                     new ButtonBuilder().setCustomId(`trade_pick_${tId}_p2`).setLabel(`${trade.p2.name} 選擇物品`).setStyle(ButtonStyle.Primary),
@@ -569,50 +547,55 @@ client.on('interactionCreate', async (interaction) => {
             if (act === 'dec') {
                 if (interaction.user.id !== trade.p2.id) return;
                 activeTrades.delete(tId);
-                return interaction.update({ content: '❌ 交易已被拒絕。', embeds: [], components: [] });
+                return interaction.update({ content: '❌ 交易已拒絕。', embeds: [], components: [] });
             }
 
             if (act === 'pick') {
-                const playerKey = parts[3]; // 'p1' or 'p2'
-                if (interaction.user.id !== trade[playerKey].id) return interaction.reply({ content: '❌ 這不是您的選擇按鈕。', ephemeral: true });
+                const playerKey = parts[3];
+                if (interaction.user.id !== trade[playerKey].id) return interaction.reply({ content: '❌ 非您的按鈕。', ephemeral: true });
                 
                 const pData = getPlayer(interaction.user.id);
-                const allItems = [...Object.keys(pData.inventory), ...Object.keys(pData.egos)].slice(0, 25);
-                if (allItems.length === 0) return interaction.reply({ content: '❌ 您的背包空無一物。', ephemeral: true });
+                const allItems = [...Object.keys(pData.inventory), ...Object.keys(pData.egos)];
+                if (allItems.length === 0) return interaction.reply({ content: '❌ 背包為空。', ephemeral: true });
 
-                const menu = new StringSelectMenuBuilder()
-                    .setCustomId(`trade_sel_${tId}_${playerKey}`)
-                    .setPlaceholder('選擇要交易的物品...')
-                    .addOptions(allItems.map(i => ({ label: i, value: i })));
+                // 🔥 多組下拉選單：一次性展開最多 125 樣物品給玩家選擇 (5行x25項)
+                const rows = [];
+                for (let i = 0; i < allItems.length && rows.length < 5; i += 25) {
+                    const chunk = allItems.slice(i, i + 25);
+                    const menu = new StringSelectMenuBuilder()
+                        .setCustomId(`trade_sel_${tId}_${playerKey}_${i}`)
+                        .setPlaceholder(`選擇物品 (第 ${Math.floor(i/25)+1} 頁)...`)
+                        .addOptions(chunk.map(item => ({ label: item.substring(0, 100), value: item })));
+                    rows.push(new ActionRowBuilder().addComponents(menu));
+                }
                 
-                return interaction.reply({ content: '請選擇：', components: [new ActionRowBuilder().addComponents(menu)], ephemeral: true });
+                return interaction.reply({ content: '請選擇要擺上交易桌的物品：', components: rows, ephemeral: true });
             }
 
             if (act === 'sel') {
                 const playerKey = parts[3];
                 trade[playerKey].offer = interaction.values[0];
-                trade.p1.confirmed = false; trade.p2.confirmed = false; // 重置確認狀態
+                trade.p1.confirmed = false; trade.p2.confirmed = false;
                 
                 const embed = new EmbedBuilder().setTitle('🔄 交易終端').setColor(0x2A9D8F).addFields(
                     { name: `P1: ${trade.p1.name}`, value: `提供: ${trade.p1.offer || '尚未選擇'}`, inline: true },
                     { name: `P2: ${trade.p2.name}`, value: `提供: ${trade.p2.offer || '尚未選擇'}`, inline: true }
                 );
                 
-                await interaction.update({ content: '已選擇。', components: [] }); // 清除 ephemeral 選單
+                await interaction.update({ content: '✅ 已選擇，請在原對話框按下確認交易。', components: [] });
                 return interaction.message.edit({ embeds: [embed] });
             }
 
             if (act === 'ok') {
                 const isP1 = interaction.user.id === trade.p1.id;
                 const isP2 = interaction.user.id === trade.p2.id;
-                if (!isP1 && !isP2) return interaction.reply({ content: '❌ 您不在此交易中。', ephemeral: true });
-                if (!trade.p1.offer || !trade.p2.offer) return interaction.reply({ content: '❌ 雙方皆須提出物品。', ephemeral: true });
+                if (!isP1 && !isP2) return interaction.reply({ content: '❌ 無權限。', ephemeral: true });
+                if (!trade.p1.offer || !trade.p2.offer) return interaction.reply({ content: '❌ 雙方皆須放上物品。', ephemeral: true });
 
                 if (isP1) trade.p1.confirmed = true;
                 if (isP2) trade.p2.confirmed = true;
 
                 if (trade.p1.confirmed && trade.p2.confirmed) {
-                    // 執行物品互換邏輯
                     const p1Data = getPlayer(trade.p1.id);
                     const p2Data = getPlayer(trade.p2.id);
 
@@ -641,7 +624,7 @@ client.on('interactionCreate', async (interaction) => {
                         .setDescription(`**${trade.p1.name}** 獲得了 ${trade.p2.offer}\n**${trade.p2.name}** 獲得了 ${trade.p1.offer}`);
                     return interaction.update({ embeds: [embed], components: [] });
                 } else {
-                    return interaction.reply({ content: `✅ 您已確認。等待對方確認...`, ephemeral: true });
+                    return interaction.reply({ content: `✅ 您已確認。等待對方...`, ephemeral: true });
                 }
             }
         }
