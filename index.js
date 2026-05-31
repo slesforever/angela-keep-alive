@@ -1,11 +1,17 @@
+const fs = require('fs');
+const path = require('path');
 const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 const express = require('express');
 
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
-const identitiesData = require('./identitiesData.js');
 
-// ==================== 🧠 純記憶體（In-Memory）本地資料庫 ===================
-const memoryInventories = {}; 
+const IDENTITIES_DATA_PATH = path.join(__dirname, 'identitiesData.js');
+const RATEUP_CACHE_PATH = path.join(__dirname, 'rateup_cache.json');
+
+let currentIdentitiesData = loadIdentitiesDataSafe();
+let lastRateUpState = loadRateUpCacheState();
+
+const memoryInventories = {};
 
 // ==================== 網頁伺服器設定 (Render 喚醒用) ====================
 const app = express();
@@ -29,32 +35,179 @@ let lastFetchedId = null;
 
 const NOTIFY_CHANNEL_ID = '1402282604165730348';
 const PING_ROLE_MENTION = '<@&1406984068725211177>';
-
 const RATEUP_ANNOUNCE_CHANNEL_ID = '1510153086281187330';
 
-let lastRateUpSnapshot = JSON.stringify(
-    identitiesData.upTargets ||
-    identitiesData.rateUpIds ||
-    identitiesData.targetIdentities ||
-    {}
-);
+const RARITY_ORDER = ['Special', '0000', 'Egos', '000', '00', '0'];
+const RARITY_BASE_CHANCE = {
+    Special: 0.0001,
+    '0000': 0.005,
+    Egos: 0.013,
+    '000': 0.029,
+    '00': 0.15,
+    '0': 0.8029
+};
+const RATE_UP_OVERRIDE_CHANCE = 0.25;
 
-/* ---------------- RATE UP DATA & EXTRACTION ---------------- */
-const rateUpSource =
-    identitiesData.upTargets ||
-    identitiesData.rateUpIds ||
-    identitiesData.targetIdentities ||
-    {};
+/* ---------------- LOAD / CACHE ---------------- */
+function loadIdentitiesDataSafe() {
+    try {
+        delete require.cache[require.resolve(IDENTITIES_DATA_PATH)];
+        return require(IDENTITIES_DATA_PATH);
+    } catch (err) {
+        console.error('❌ identitiesData.js 載入失敗：', err.message);
+        return currentIdentitiesData || { identities: {} };
+    }
+}
 
-// 核心隨機權重生成器（精準匹配主管設定的機率）
+function refreshIdentitiesData() {
+    const fresh = loadIdentitiesDataSafe();
+    if (fresh) currentIdentitiesData = fresh;
+    return currentIdentitiesData;
+}
+
+function readRateUpCacheFile() {
+    try {
+        if (!fs.existsSync(RATEUP_CACHE_PATH)) return null;
+        const raw = fs.readFileSync(RATEUP_CACHE_PATH, 'utf8');
+        const parsed = JSON.parse(raw);
+        return parsed?.state || null;
+    } catch {
+        return null;
+    }
+}
+
+function loadRateUpCacheState() {
+    return readRateUpCacheFile();
+}
+
+function saveRateUpCacheState(state) {
+    try {
+        fs.writeFileSync(
+            RATEUP_CACHE_PATH,
+            JSON.stringify(
+                {
+                    updatedAt: new Date().toISOString(),
+                    state
+                },
+                null,
+                2
+            ),
+            'utf8'
+        );
+    } catch (err) {
+        console.error('❌ rateup_cache.json 寫入失敗：', err.message);
+    }
+}
+
+/* ---------------- RATE UP / PROBABILITY ---------------- */
+function getCurrentRateUpSource(data = currentIdentitiesData) {
+    if (!data) return {};
+    return data.upTargets || data.rateUpIds || data.targetIdentities || {};
+}
+
+function formatRateUpItem(item) {
+    if (item == null) return '';
+    if (typeof item === 'string') return item.trim();
+
+    if (typeof item === 'object') {
+        if (typeof item.name === 'string' && item.name.trim()) return item.name.trim();
+        if (typeof item.title === 'string' && item.title.trim()) return item.title.trim();
+        if (typeof item.zh === 'string' && item.zh.trim()) return item.zh.trim();
+        if (typeof item.en === 'string' && item.en.trim()) return item.en.trim();
+    }
+
+    return String(item).trim();
+}
+
+function normalizeRateUpListBySource(source, rarity) {
+    if (!source) return [];
+
+    const direct = source[rarity];
+
+    if (Array.isArray(direct)) {
+        return direct.map(formatRateUpItem).filter(Boolean);
+    }
+
+    if (typeof direct === 'string') {
+        return [formatRateUpItem(direct)].filter(Boolean);
+    }
+
+    if (direct && typeof direct === 'object') {
+        if (Array.isArray(direct.names)) return direct.names.map(formatRateUpItem).filter(Boolean);
+        if (Array.isArray(direct.ids)) return direct.ids.map(formatRateUpItem).filter(Boolean);
+        if (typeof direct.name === 'string' && direct.name.trim()) return [direct.name.trim()];
+    }
+
+    // 舊格式 targetIdentities: { userId: { rarity, name } }
+    if (source && typeof source === 'object') {
+        const values = Object.values(source);
+        const matched = values
+            .filter(v => v && typeof v === 'object' && v.rarity === rarity && typeof v.name === 'string')
+            .map(v => v.name.trim())
+            .filter(Boolean);
+
+        if (matched.length) return matched;
+    }
+
+    return [];
+}
+
+function normalizeRateUpList(rarity) {
+    return normalizeRateUpListBySource(getCurrentRateUpSource(), rarity);
+}
+
+function uniquePreserveOrder(items) {
+    const seen = new Set();
+    const out = [];
+
+    for (const item of items) {
+        const text = formatRateUpItem(item);
+        if (!text) continue;
+        if (seen.has(text)) continue;
+        seen.add(text);
+        out.push(text);
+    }
+
+    return out;
+}
+
+function getPoolForRarity(rarity, data = currentIdentitiesData) {
+    if (!data) return [];
+
+    const fromIdentities = data.identities?.[rarity];
+    if (Array.isArray(fromIdentities)) return fromIdentities.map(formatRateUpItem).filter(Boolean);
+
+    const direct = data[rarity];
+    if (Array.isArray(direct)) return direct.map(formatRateUpItem).filter(Boolean);
+
+    return [];
+}
+
+function buildNormalizedRateUpState(data = currentIdentitiesData) {
+    const source = getCurrentRateUpSource(data);
+    const state = {};
+
+    for (const rarity of RARITY_ORDER) {
+        state[rarity] = normalizeRateUpListBySource(source, rarity)
+            .slice()
+            .sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+    }
+
+    return state;
+}
+
+function getRarityChance(rarity) {
+    return RARITY_BASE_CHANCE[rarity] || 0;
+}
+
 function buildRarity() {
     const r = Math.random();
-    if (r < 0.0001) return 'Special'; // 0.01% 機率
-    if (r < 0.0051) return '0000';    // 0.5% 機率
-    if (r < 0.0181) return 'Egos';    // 1.3% 機率
-    if (r < 0.0471) return '000';     // 2.9% 機率
-    if (r < 0.1971) return '00';      // 15% 機率
-    return '0';                       // 剩餘機率為基本人格
+    if (r < 0.0001) return 'Special'; // 0.01%
+    if (r < 0.0051) return '0000';    // 0.5%
+    if (r < 0.0181) return 'Egos';     // 1.3%
+    if (r < 0.0471) return '000';      // 2.9%
+    if (r < 0.1971) return '00';       // 15%
+    return '0';                        // 其餘
 }
 
 function rarityToStars(rarity) {
@@ -66,17 +219,42 @@ function rarityToStars(rarity) {
     return '★';
 }
 
-function normalizeRateUpList(rarity) {
-    const value = rateUpSource[rarity];
-    if (!value) return [];
-    if (Array.isArray(value)) return value.filter(Boolean);
-    if (typeof value === 'string') return [value];
-    if (typeof value === 'object') {
-        if (Array.isArray(value.names)) return value.names.filter(Boolean);
-        if (Array.isArray(value.ids)) return value.ids.filter(Boolean);
-        if (typeof value.name === 'string' && value.name.trim()) return [value.name.trim()];
+function formatPercent(chance) {
+    return `${(chance * 100).toFixed(8)}%`;
+}
+
+function getAllDrawableEntries(rarity) {
+    const basePool = getPoolForRarity(rarity);
+    const rateUpPool = normalizeRateUpList(rarity);
+    return uniquePreserveOrder([...basePool, ...rateUpPool]);
+}
+
+function getExactDrawProbability(rarity, itemName) {
+    const baseChance = getRarityChance(rarity);
+    const basePool = getPoolForRarity(rarity);
+    const rateUpPool = normalizeRateUpList(rarity);
+
+    const n = basePool.length;
+    const m = rateUpPool.length;
+
+    if (n === 0 && m === 0) return 0;
+
+    const baseCount = basePool.filter(x => x === itemName).length;
+    const upCount = rateUpPool.filter(x => x === itemName).length;
+
+    let chance = 0;
+
+    if (n > 0 && baseCount > 0) {
+        const baseBranch = m > 0 ? (1 - RATE_UP_OVERRIDE_CHANCE) / n : 1 / n;
+        chance += baseChance * baseBranch * baseCount;
     }
-    return [];
+
+    if (m > 0 && upCount > 0) {
+        const upBranch = RATE_UP_OVERRIDE_CHANCE / m;
+        chance += baseChance * upBranch * upCount;
+    }
+
+    return chance;
 }
 
 function pickRateUp(rarity) {
@@ -85,16 +263,17 @@ function pickRateUp(rarity) {
     return list[Math.floor(Math.random() * list.length)];
 }
 
-// 動態從外部資料庫或是主管的名單中抽取基本角色（防呆不卡死）
 function getBaseIdentity(rarity) {
-    const pool = identitiesData.identities?.[rarity] || identitiesData[rarity];
+    const pool = getPoolForRarity(rarity);
+
     if (Array.isArray(pool) && pool.length > 0) {
         return pool[Math.floor(Math.random() * pool.length)];
     }
-    // 兼容可能存在的舊 pullIdentity 函式
-    if (typeof identitiesData.pullIdentity === 'function') {
-        return identitiesData.pullIdentity(rarity);
+
+    if (typeof currentIdentitiesData?.pullIdentity === 'function') {
+        return currentIdentitiesData.pullIdentity(rarity);
     }
+
     return `（未能在 identitiesData.js 中找到種類：${rarity} 的有效名單）`;
 }
 
@@ -152,14 +331,227 @@ async function fetchLatestTweetFromNode(nodeUrl) {
     };
 }
 
+/* ---------------- MESSAGE LIST / PACK HELPERS ---------------- */
+function chunkLines(lines, maxLen = 1900) {
+    const chunks = [];
+    let current = '';
+
+    for (const line of lines) {
+        const candidate = current ? `${current}\n${line}` : line;
+
+        if (candidate.length > maxLen) {
+            if (current) chunks.push(current);
+            current = line;
+        } else {
+            current = candidate;
+        }
+    }
+
+    if (current) chunks.push(current);
+    return chunks;
+}
+
+async function sendChunkedLines(channel, lines) {
+    const chunks = chunkLines(lines);
+
+    for (const chunk of chunks) {
+        await channel.send(chunk);
+    }
+}
+
+function buildProbabilitySections() {
+    const sections = [];
+
+    for (const rarity of RARITY_ORDER) {
+        const basePool = getPoolForRarity(rarity);
+        const rateUpPool = normalizeRateUpList(rarity);
+        const merged = getAllDrawableEntries(rarity);
+
+        if (!basePool.length && !rateUpPool.length) continue;
+
+        const lines = [];
+        lines.push(
+            `【${rarity}】 基礎機率：${formatPercent(getRarityChance(rarity))}｜` +
+            `基礎池：${basePool.length}｜RateUp：${rateUpPool.length}` +
+            (rateUpPool.length ? `｜UP覆寫：${formatPercent(RATE_UP_OVERRIDE_CHANCE)}` : '')
+        );
+        lines.push('');
+
+        for (const item of merged) {
+            const chance = getExactDrawProbability(rarity, item);
+            const mark = rateUpPool.includes(item) ? ' [UP]' : '';
+            lines.push(`• ${item}${mark} — ${formatPercent(chance)}`);
+        }
+
+        sections.push(lines);
+    }
+
+    return sections;
+}
+
+function buildRateUpOverviewSections() {
+    const state = buildNormalizedRateUpState();
+    const sections = [];
+
+    for (const rarity of RARITY_ORDER) {
+        const list = state[rarity] || [];
+        if (!list.length) continue;
+
+        const lines = [];
+        lines.push(`【${rarity}】 目前 Rate Up 人格 / E.G.O`);
+        lines.push('');
+        for (const item of list) {
+            lines.push(`• ${item}`);
+        }
+
+        sections.push(lines);
+    }
+
+    return sections;
+}
+
+function buildPackLines(userId, username) {
+    const bag = memoryInventories[userId] || {};
+    const entries = Object.entries(bag).sort((a, b) => {
+        if (b[1] !== a[1]) return b[1] - a[1];
+        return a[0].localeCompare(b[0], 'zh-Hant');
+    });
+
+    const totalOwned = entries.reduce((sum, [, count]) => sum + count, 0);
+
+    if (!entries.length) {
+        return [
+            `📭 **${username} 的檔案館**`,
+            '目前空空如也。',
+            '先使用 `!pull` 開始抽取吧。'
+        ];
+    }
+
+    const lines = [];
+    lines.push(`📦 **${username} 的檔案館**`);
+    lines.push(`總抽取：${totalOwned}｜種類：${entries.length}`);
+    lines.push('');
+
+    for (const [name, count] of entries) {
+        lines.push(`• x${count} ${name}`);
+    }
+
+    return lines;
+}
+
+function addToInventory(userId, identityName) {
+    if (!memoryInventories[userId]) memoryInventories[userId] = {};
+    memoryInventories[userId][identityName] = (memoryInventories[userId][identityName] || 0) + 1;
+}
+
+/* ---------------- RATE UP ANNOUNCEMENT ---------------- */
+async function announceRateUpState(state, oldState = null) {
+    try {
+        const channel = await client.channels.fetch(RATEUP_ANNOUNCE_CHANNEL_ID);
+        if (!channel) return;
+
+        const lines = [];
+
+        if (!oldState) {
+            lines.push('📢 **Rate Up 人格資料已載入**');
+            lines.push('資料來源：`identitiesData.js`');
+            lines.push('');
+
+            for (const rarity of RARITY_ORDER) {
+                const list = state[rarity] || [];
+                if (!list.length) continue;
+
+                lines.push(`【${rarity}】`);
+                for (const item of list) {
+                    lines.push(`• ${item}`);
+                }
+                lines.push('');
+            }
+
+            if (lines.length <= 3) {
+                lines.push('目前沒有設定任何 Rate Up 人格。');
+            }
+        } else {
+            lines.push('📢 **identitiesData.js 已更新**');
+            lines.push('以下是變更與目前的 Rate Up 名單：');
+            lines.push('');
+
+            let changed = false;
+
+            for (const rarity of RARITY_ORDER) {
+                const oldList = oldState[rarity] || [];
+                const newList = state[rarity] || [];
+
+                const added = newList.filter(x => !oldList.includes(x));
+                const removed = oldList.filter(x => !newList.includes(x));
+
+                if (!added.length && !removed.length) continue;
+
+                changed = true;
+                lines.push(`【${rarity}】`);
+
+                if (added.length) {
+                    lines.push('新增：');
+                    for (const item of added) lines.push(`+ ${item}`);
+                }
+
+                if (removed.length) {
+                    lines.push('移除：');
+                    for (const item of removed) lines.push(`- ${item}`);
+                }
+
+                lines.push('目前：');
+                if (newList.length) {
+                    for (const item of newList) lines.push(`• ${item}`);
+                } else {
+                    lines.push('（無）');
+                }
+
+                lines.push('');
+            }
+
+            if (!changed) {
+                lines.push('目前沒有偵測到 Rate Up 內容變動。');
+            }
+        }
+
+        await sendChunkedLines(channel, lines);
+    } catch (err) {
+        console.error('Rate Up 公告失敗：', err.message);
+    }
+}
+
+async function syncRateUpStateAndAnnounce() {
+    const freshData = refreshIdentitiesData();
+    const newState = buildNormalizedRateUpState(freshData);
+
+    if (!lastRateUpState) {
+        lastRateUpState = newState;
+        saveRateUpCacheState(newState);
+        await announceRateUpState(newState, null);
+        return;
+    }
+
+    const oldSnapshot = JSON.stringify(lastRateUpState);
+    const newSnapshot = JSON.stringify(newState);
+
+    if (oldSnapshot === newSnapshot) return;
+
+    await announceRateUpState(newState, lastRateUpState);
+    lastRateUpState = newState;
+    saveRateUpCacheState(newState);
+}
+
+/* ---------------- EXPRESS ---------------- */
 app.get('/', (req, res) => {
-    res.sendStatus(200); 
+    res.send('Angela 系統運作正常。歡迎來到腦葉公司核心控制室。');
 });
 
 app.listen(PORT, () => {
     console.log(`網頁伺服器已在連接埠 ${PORT} 啟動`);
 });
 
+/* ---------------- DISCORD CLIENT ---------------- */
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -199,48 +591,16 @@ client.once('ready', async () => {
             await channel.send({ embeds: [loginEmbed] });
         }
     } catch (err) {
-        console.error('❌ 啟動發送訊息失敗:', err.message);
+        console.error('❌ 啟動發送訊息失敗：', err.message);
     }
 
-    await announceCurrentRateUps();
+    await syncRateUpStateAndAnnounce();
+
     setInterval(checkTwitterUpdates, 60 * 1000);
+    setInterval(syncRateUpStateAndAnnounce, 60 * 1000);
+
     checkTwitterUpdates();
 });
-
-async function announceCurrentRateUps() {
-    try {
-        const channel = await client.channels.fetch(RATEUP_ANNOUNCE_CHANNEL_ID);
-        if (!channel) return;
-
-        const rSpecial = normalizeRateUpList('Special');
-        const r0000 = normalizeRateUpList('0000');
-        const rEgos = normalizeRateUpList('Egos');
-        const r000 = normalizeRateUpList('000');
-        const r00 = normalizeRateUpList('00');
-        const r0 = normalizeRateUpList('0');
-        const sections = [];
-
-        if (rSpecial.length) sections.push(`### Special\n${rSpecial.map(v => `• ${v}`).join('\n')}`);
-        if (r0000.length) sections.push(`### 0000\n${r0000.map(v => `• ${v}`).join('\n')}`);
-        if (rEgos.length) sections.push(`### Egos\n${rEgos.map(v => `• ${v}`).join('\n')}`);
-        if (r000.length) sections.push(`### 000\n${r000.map(v => `• ${v}`).join('\n')}`);
-        if (r00.length) sections.push(`### 00\n${r00.map(v => `• ${v}`).join('\n')}`);
-        if (r0.length) sections.push(`### 0\n${r0.map(v => `• ${v}`).join('\n')}`);
-
-        await channel.send({
-            embeds: [
-                new EmbedBuilder()
-                    .setColor(0xffd166)
-                    .setTitle('📢 Rate Up 人格資料已載入')
-                    .setDescription(sections.length ? sections.join('\n\n') : '目前沒有設定任何 Rate Up 人格。')
-                    .setFooter({ text: '資料來源：identitiesData.js' })
-                    .setTimestamp()
-            ]
-        });
-    } catch (err) {
-        console.error('Rate Up 公告失敗:', err);
-    }
-}
 
 async function checkTwitterUpdates() {
     console.log(`⏳ Angela 正在發射高速觀測脈衝，檢查官方 @${TARGET_USER.username} 的動態...`);
@@ -265,6 +625,7 @@ async function checkTwitterUpdates() {
                     });
                 }
             }
+
             break;
         } catch (error) {
             console.warn(`⚠️ 節點 [${nodeUrl}] 擷取異常 (${error.message})，嘗試下一個備援空間...`);
@@ -324,6 +685,7 @@ client.on('messageCreate', async (message) => {
             if (data?.response?.result === 1) {
                 return message.reply(`📊 **[Steam 即時數據]** 目前共有 **${data.response.player_count.toLocaleString()}** 位罪人正在《Limbus Company》中進行探索。`);
             }
+
             return message.reply('❌ 無法從 Steam API 取得正確的數據。');
         } catch (error) {
             return message.reply('❌ 連線至 Steam 伺服器時發生內部錯誤。');
@@ -356,7 +718,7 @@ client.on('messageCreate', async (message) => {
             {
                 name: '薄暮 (Twilight)',
                 grade: 'ALEPH',
-                desc: '調和所有矛盾與偏見的終極大劍。暗示個體拒減接受單一標籤，試圖在黑白混沌的世界中強行抓住平衡。'
+                desc: '調和所有矛盾與偏見的終極大劍。暗示個體拒絕接受單一標籤，試圖在黑白混沌的世界中強行抓住平衡。'
             },
             {
                 name: '失樂園 (Paradise Lost)',
@@ -401,12 +763,12 @@ client.on('messageCreate', async (message) => {
         return message.reply({ embeds: [alarmEmbed] });
     }
 
-    // ---------------- 🎯 抽卡邏輯系統 (!pull / !10pulls) ----------------
     if (msg === '!pull' || msg === '!10pulls') {
+        refreshIdentitiesData();
+
         const userId = message.author.id;
         const count = msg === '!10pulls' ? 10 : 1;
         const results = [];
-        const identitiesToSave = [];
 
         for (let i = 0; i < count; i++) {
             const rarity = buildRarity();
@@ -415,27 +777,15 @@ client.on('messageCreate', async (message) => {
             let baseIdentityName = getBaseIdentity(rarity);
             let displayResult = baseIdentityName;
 
-            // 25% 判定是否成功觸發 Rate Up 目標
-            if (rateUpName && Math.random() < 0.25) {
+            if (rateUpName && Math.random() < RATE_UP_OVERRIDE_CHANCE) {
                 displayResult = `✨ **[PICK-UP!]** ${rateUpName}`;
                 baseIdentityName = rateUpName;
             }
 
-            identitiesToSave.push(baseIdentityName);
+            addToInventory(userId, baseIdentityName);
             results.push(`${displayResult} (${rarityToStars(rarity)})`);
         }
 
-        // 🧠 即時同步機制：不再延遲，本地物件直接進行不重複集合保存 ($addToSet 模擬)
-        if (!memoryInventories[userId]) {
-            memoryInventories[userId] = [];
-        }
-        identitiesToSave.forEach(id => {
-            if (!memoryInventories[userId].includes(id)) {
-                memoryInventories[userId].push(id);
-            }
-        });
-
-        // 拋棄冗長的動畫加載提示，直接同步印出
         return message.reply(
             count === 10
                 ? `✨ **十連抽結果：**\n${results.join('\n')}\n*(📊 檔案館數據已完成即時同步)*`
@@ -443,44 +793,46 @@ client.on('messageCreate', async (message) => {
         );
     }
 
-    if (msg === '!checkrateupids') {
-        const rSpecial = normalizeRateUpList('Special');
-        const r0000 = normalizeRateUpList('0000');
-        const rEgos = normalizeRateUpList('Egos');
-        const r000 = normalizeRateUpList('000');
-        const r00 = normalizeRateUpList('00');
-        const r0 = normalizeRateUpList('0');
+    if (msg === '!list') {
+        refreshIdentitiesData();
+        await message.channel.sendTyping();
 
-        if (![rSpecial, r0000, rEgos, r000, r00, r0].some(list => list.length > 0)) {
+        const sections = buildProbabilitySections();
+
+        if (!sections.length) {
+            return message.reply('📭 目前沒有可抽取的資料。');
+        }
+
+        await message.reply('📜 **目前可抽取人格 / E.G.O 機率總表**');
+
+        for (const section of sections) {
+            await sendChunkedLines(message.channel, section);
+        }
+
+        return;
+    }
+
+    if (msg === '!pack') {
+        const lines = buildPackLines(message.author.id, message.author.username);
+        await message.reply(lines.join('\n'));
+        return;
+    }
+
+    if (msg === '!checkrateupids') {
+        refreshIdentitiesData();
+        const sections = buildRateUpOverviewSections();
+
+        if (!sections.length) {
             return message.reply('📭 目前沒有設定任何機率提升中的人格或 E.G.O。');
         }
 
-        const lines = [];
-        if (rSpecial.length > 0) lines.push(`**Special**\n${rSpecial.map(v => `• ${v}`).join('\n')}`);
-        if (r0000.length > 0) lines.push(`**0000**\n${r0000.map(v => `• ${v}`).join('\n')}`);
-        if (rEgos.length > 0) lines.push(`**Egos**\n${rEgos.map(v => `• ${v}`).join('\n')}`);
-        if (r000.length > 0) lines.push(`**000**\n${r000.map(v => `• ${v}`).join('\n')}`);
-        if (r00.length > 0) lines.push(`**00**\n${r00.map(v => `• ${v}`).join('\n')}`);
-        if (r0.length > 0) lines.push(`**0**\n${r0.map(v => `• ${v}`).join('\n')}`);
+        await message.reply('📈 **目前機率提升人格 / E.G.O**');
 
-        return message.reply(`📈 **目前機率提升項目總覽**\n\n${lines.join('\n\n')}`);
-    }
-
-    // ---------------- 📚 檔案館查詢系統 (!圖鑑 / !collection) ----------------
-    if (msg === '!圖鑑' || msg === '!collection') {
-        const userId = message.author.id;
-        const userBag = memoryInventories[userId] || [];
-
-        if (userBag.length === 0) {
-            return message.reply('📭 您的檔案館目前空空如也呢。請使用 `!pull` 抽取人格進行記錄吧。');
+        for (const section of sections) {
+            await sendChunkedLines(message.channel, section);
         }
 
-        const totalOwned = userBag.length;
-        return message.reply(
-            `📚 **主管 ${message.author.username} 的個人提取圖鑑 (已解鎖 ${totalOwned} 筆紀錄)：**\n` +
-            `${userBag.map(id => `• ${id}`).join('\n')}\n\n` +
-            `*⚠️ 提示：資料目前儲存於核心暫存記憶體中，每次系統重啟時皆會自動歸零重新整理。*`
-        );
+        return;
     }
 
     if (msg.startsWith('!尋找機器人') || msg.startsWith('!findbot')) {
