@@ -827,63 +827,61 @@ async function announceRateUpState(state, oldState = null) {
             lines.push('📢 **Rate Up 人格 / E.G.O 已載入**');
             lines.push('資料來源：`identitiesData.js`');
             lines.push('');
+        } else {
+            lines.push('📢 **identitiesData.js 已更新**');
+            lines.push('以下是變更與目前的 Rate Up 名單：');
+            lines.push('');
+        }
 
-            for (const rarity of RARITY_ORDER) {
-                const list = state[rarity] || [];
+        let changed = false;
+
+        for (const rarity of RARITY_ORDER) {
+            const list = state[rarity] || [];
+            const oldList = oldState?.[rarity] || [];
+
+            if (!oldState) {
                 if (!list.length) continue;
-
                 lines.push(`【${rarity}】 ${rarityLabel(rarity)}`);
                 for (const item of list) {
                     lines.push(`• ${item}`);
                 }
                 lines.push('');
+                continue;
             }
 
-            if (lines.length <= 3) {
-                lines.push('目前沒有設定任何 Rate Up 人格 / E.G.O。');
+            const added = list.filter(x => !oldList.includes(x));
+            const removed = oldList.filter(x => !list.includes(x));
+
+            if (!added.length && !removed.length) continue;
+
+            changed = true;
+            lines.push(`【${rarity}】 ${rarityLabel(rarity)}`);
+
+            if (added.length) {
+                lines.push('新增：');
+                for (const item of added) lines.push(`+ ${item}`);
             }
-        } else {
-            lines.push('📢 **identitiesData.js 已更新**');
-            lines.push('以下是變更與目前的 Rate Up 名單：');
+
+            if (removed.length) {
+                lines.push('移除：');
+                for (const item of removed) lines.push(`- ${item}`);
+            }
+
+            lines.push('目前：');
+            if (list.length) {
+                for (const item of list) lines.push(`• ${item}`);
+            } else {
+                lines.push('（無）');
+            }
+
             lines.push('');
+        }
 
-            let changed = false;
-
-            for (const rarity of RARITY_ORDER) {
-                const oldList = oldState[rarity] || [];
-                const newList = state[rarity] || [];
-
-                const added = newList.filter(x => !oldList.includes(x));
-                const removed = oldList.filter(x => !newList.includes(x));
-
-                if (!added.length && !removed.length) continue;
-
-                changed = true;
-                lines.push(`【${rarity}】 ${rarityLabel(rarity)}`);
-
-                if (added.length) {
-                    lines.push('新增：');
-                    for (const item of added) lines.push(`+ ${item}`);
-                }
-
-                if (removed.length) {
-                    lines.push('移除：');
-                    for (const item of removed) lines.push(`- ${item}`);
-                }
-
-                lines.push('目前：');
-                if (newList.length) {
-                    for (const item of newList) lines.push(`• ${item}`);
-                } else {
-                    lines.push('（無）');
-                }
-
-                lines.push('');
-            }
-
-            if (!changed) {
-                lines.push('目前沒有偵測到 Rate Up 內容變動。');
-            }
+        if (!oldState) {
+            const hasAny = Object.values(state).some(list => Array.isArray(list) && list.length > 0);
+            if (!hasAny) lines.push('目前沒有設定任何 Rate Up 人格 / E.G.O。');
+        } else if (!changed) {
+            lines.push('目前沒有偵測到 Rate Up 內容變動。');
         }
 
         await sendChunkedLines(channel, lines);
@@ -899,6 +897,7 @@ async function syncRateUpStateAndAnnounce() {
     if (!lastRateUpState) {
         lastRateUpState = newState;
         saveRateUpCacheState(newState);
+        await announceRateUpState(newState, null);
         return;
     }
 
