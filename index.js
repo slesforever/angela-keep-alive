@@ -78,13 +78,11 @@ const NOTIFY_CHANNEL_ID = '1402282604165730348';
 const PING_ROLE_MENTION = '<@&1406984068725211177>';
 const TARGET_USER = { username: 'LimbusCompany_B' };
 
-// 更新的高可用性 Nitter 節點
-const NITTER_NODES = [
-    'https://nitter.poast.org',
-    'https://nitter.privacydev.net',
-    'https://nitter.lucabased.xyz',
-    'https://nitter.so',
-    'https://nitter.moomoo.me'
+// RSSHub 節點 (取代失效的 Nitter)
+const TWITTER_RSS_NODES = [
+    'https://rsshub.app/twitter/user',
+    'https://rsshub.rssforever.com/twitter/user',
+    'https://rsshub.feedox.com/twitter/user'
 ];
 
 let lastTweetId = null;
@@ -147,14 +145,13 @@ async function checkTwitterUpdates(manual = false, interaction = null) {
     let success = false;
     let errorLog = [];
 
-    for (const nodeUrl of NITTER_NODES) {
+    for (const nodeUrl of TWITTER_RSS_NODES) {
         try {
-            // 放寬超時至 10 秒
-            const response = await fetchWithTimeout(`${nodeUrl}/${TARGET_USER.username}/rss`, {}, 10000);
+            const response = await fetchWithTimeout(`${nodeUrl}/${TARGET_USER.username}`, {}, 10000);
             
             if (!response.ok) {
-                errorLog.push(`${nodeUrl} (${response.status})`);
-                continue;
+                errorLog.push(`${nodeUrl} (HTTP ${response.status})`);
+                continue; 
             }
 
             const text = await response.text();
@@ -168,7 +165,6 @@ async function checkTwitterUpdates(manual = false, interaction = null) {
                 const rawGuid = itemBlock.match(/<guid[^>]*>(.*?)<\/guid>/)?.[1] || '';
                 const title = itemBlock.match(/<title>([\s\S]*?)<\/title>/)?.[1];
 
-                // 核心修復：精準抓取 ID 並整合 vxtwitter 達到直接播放影片效果
                 const statusIdMatch = link?.match(/status\/(\d+)/) || rawGuid?.match(/status\/(\d+)/) || rawGuid?.match(/\d+/);
                 
                 if (statusIdMatch) {
@@ -178,7 +174,7 @@ async function checkTwitterUpdates(manual = false, interaction = null) {
                     if (lastTweetId === null) {
                         lastTweetId = finalStatusId;
                         if (!manual) {
-                            console.log(`📡 [觀測系統] Twitter 初始基線鎖定成功，當前最新 ID: ${finalStatusId}`);
+                            console.log(`📡 [觀測系統] Twitter (RSSHub) 初始基線鎖定成功，最新 ID: ${finalStatusId}`);
                             break;
                         }
                     }
@@ -186,7 +182,8 @@ async function checkTwitterUpdates(manual = false, interaction = null) {
                     if (finalStatusId !== lastTweetId || manual) {
                         if (!manual) lastTweetId = finalStatusId;
                         
-                        const msgContent = `🔔 ${PING_ROLE_MENTION} **[Twitter官方公告]**\n> ${title || '最新動態'}\n${embedLink}`;
+                        const cleanTitle = title ? title.replace(/<[^>]*>?/gm, '').substring(0, 100) : '最新動態';
+                        const msgContent = `🔔 ${PING_ROLE_MENTION} **[Twitter官方公告]**\n> ${cleanTitle}...\n${embedLink}`;
                         
                         if (manual && interaction) {
                             await interaction.reply({ content: msgContent }).catch(()=>{});
@@ -197,7 +194,7 @@ async function checkTwitterUpdates(manual = false, interaction = null) {
                     } else {
                         if (manual && interaction) await interaction.reply('✅ 成功連線，目前無新推文。').catch(()=>{});
                     }
-                    break;
+                    break; 
                 }
             }
         } catch (e) {
@@ -206,7 +203,7 @@ async function checkTwitterUpdates(manual = false, interaction = null) {
     }
 
     if (manual && !success && interaction) {
-        await interaction.reply(`❌ **觀測失敗 (所有節點無法連線)**\n${errorLog.join('\n')}\n*註：Twitter API 封鎖極為嚴格，403 代表節點暫時被官方阻擋，請稍後再試。*`).catch(()=>{});
+        await interaction.reply(`❌ **觀測失敗 (RSSHub 全數陣亡)**\n${errorLog.join('\n')}\n*註：Twitter 官方的反爬蟲機制極度嚴格，免費節點很容易暫時失效。*`).catch(()=>{});
     }
 }
 
@@ -425,11 +422,13 @@ client.on('messageCreate', async (message) => {
         return message.reply(isTen ? `✨ **十連提取 (剩餘 ${player.lunacy})：**\n${results.join('\n')}` : `🎯 **單抽 (剩餘 ${player.lunacy})：**\n${results[0]}`).catch(()=>{});
     }
 
+    // 修復確保 !pack 指令有反應
     if (cmd === '!pack' || cmd === '!check') {
         const targetUser = message.mentions.users.first() || message.author;
         return message.reply(buildPackEmbed(targetUser.id, 0)).catch(()=>{});
     }
 
+    // 修復確保 !list 指令有反應
     if (cmd === '!list') {
         const embed = new EmbedBuilder().setTitle('📈 提取機率總覽').setColor(0x457B9D).setDescription('選擇稀有度查看：');
         const row = new ActionRowBuilder().addComponents(
