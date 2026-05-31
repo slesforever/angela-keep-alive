@@ -4,8 +4,7 @@ const express = require('express');
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 const identitiesData = require('./identitiesData.js');
 
-// ==================== 🧠 純記憶體（In-Memory）本地資料庫 ===================
-// 取代原本的 Mongoose，改用 RAM 暫存。重啟時會自動刷新歸零。
+// ==================== 🧠 純記憶體（In-Memory）本地資料庫 ====================
 const memoryInventories = {}; 
 
 // ==================== 網頁伺服器設定 (Render 喚醒用) ====================
@@ -40,26 +39,28 @@ let lastRateUpSnapshot = JSON.stringify(
     {}
 );
 
-/* ---------------- RATE UP DATA ---------------- */
+/* ---------------- RATE UP DATA & EXTRACTION ---------------- */
 const rateUpSource =
     identitiesData.upTargets ||
     identitiesData.rateUpIds ||
     identitiesData.targetIdentities ||
     {};
 
-const pullIdentity =
-    typeof identitiesData.pullIdentity === 'function'
-        ? identitiesData.pullIdentity
-        : (rarity) => `（缺少 pullIdentity：${rarity}）`;
-
+// 核心隨機權重生成器（精準匹配主管設定的機率）
 function buildRarity() {
     const r = Math.random();
-    if (r < 0.029) return '000';
-    if (r < 0.157) return '00';
-    return '0';
+    if (r < 0.0001) return 'Special'; // 0.01% 機率
+    if (r < 0.0051) return '0000';    // 0.5% 機率
+    if (r < 0.0181) return 'Egos';    // 1.3% 機率
+    if (r < 0.0471) return '000';     // 2.9% 機率
+    if (r < 0.1971) return '00';      // 15% 機率
+    return '0';                       // 剩餘機率為基本人格
 }
 
 function rarityToStars(rarity) {
+    if (rarity === 'Special') return '⚠️ [👁️ 特殊標籤認知扭曲]';
+    if (rarity === '0000') return '👑 ★★★★';
+    if (rarity === 'Egos') return '⚔️ E.G.O 同步';
     if (rarity === '000') return '★★★';
     if (rarity === '00') return '★★';
     return '★';
@@ -82,6 +83,19 @@ function pickRateUp(rarity) {
     const list = normalizeRateUpList(rarity);
     if (!list.length) return null;
     return list[Math.floor(Math.random() * list.length)];
+}
+
+// 動態從外部資料庫或是主管的名單中抽取基本角色（防呆不卡死）
+function getBaseIdentity(rarity) {
+    const pool = identitiesData.identities?.[rarity] || identitiesData[rarity];
+    if (Array.isArray(pool) && pool.length > 0) {
+        return pool[Math.floor(Math.random() * pool.length)];
+    }
+    // 兼容可能存在的舊 pullIdentity 函式
+    if (typeof identitiesData.pullIdentity === 'function') {
+        return identitiesData.pullIdentity(rarity);
+    }
+    return `（未能在 identitiesData.js 中找到種類：${rarity} 的有效名單）`;
 }
 
 function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
@@ -157,7 +171,7 @@ const client = new Client({
 
 client.once('ready', async () => {
     console.log(`🤖 遵從您的指示，Angela 已成功登入為：${client.user.tag}`);
-    console.log('✨ [系統訊息] 記憶體卡池紀錄模組已就緒！');
+    console.log('✨ [核心運作] 擴充型記憶體卡池系統已完成對齊！');
 
     client.user.setPresence({
         status: 'idle',
@@ -198,11 +212,17 @@ async function announceCurrentRateUps() {
         const channel = await client.channels.fetch(RATEUP_ANNOUNCE_CHANNEL_ID);
         if (!channel) return;
 
+        const rSpecial = normalizeRateUpList('Special');
+        const r0000 = normalizeRateUpList('0000');
+        const rEgos = normalizeRateUpList('Egos');
         const r000 = normalizeRateUpList('000');
         const r00 = normalizeRateUpList('00');
         const r0 = normalizeRateUpList('0');
         const sections = [];
 
+        if (rSpecial.length) sections.push(`### Special\n${rSpecial.map(v => `• ${v}`).join('\n')}`);
+        if (r0000.length) sections.push(`### 0000\n${r0000.map(v => `• ${v}`).join('\n')}`);
+        if (rEgos.length) sections.push(`### Egos\n${rEgos.map(v => `• ${v}`).join('\n')}`);
         if (r000.length) sections.push(`### 000\n${r000.map(v => `• ${v}`).join('\n')}`);
         if (r00.length) sections.push(`### 00\n${r00.map(v => `• ${v}`).join('\n')}`);
         if (r0.length) sections.push(`### 0\n${r0.map(v => `• ${v}`).join('\n')}`);
@@ -392,9 +412,10 @@ client.on('messageCreate', async (message) => {
             const rarity = buildRarity();
             const rateUpName = pickRateUp(rarity);
 
-            let baseIdentityName = pullIdentity(rarity);
+            let baseIdentityName = getBaseIdentity(rarity);
             let displayResult = baseIdentityName;
 
+            // 25% 判定是否成功觸發 Rate Up 目標
             if (rateUpName && Math.random() < 0.25) {
                 displayResult = `✨ **[PICK-UP!]** ${rateUpName}`;
                 baseIdentityName = rateUpName;
@@ -404,7 +425,7 @@ client.on('messageCreate', async (message) => {
             results.push(`${displayResult} (${rarityToStars(rarity)})`);
         }
 
-        // 🧠 純記憶體處理：完全模擬原本 MongoDB $addToSet 的重複檢查機制
+        // 🧠 即時同步機制：不再延遲，本地物件直接進行不重複集合保存 ($addToSet 模擬)
         if (!memoryInventories[userId]) {
             memoryInventories[userId] = [];
         }
@@ -414,28 +435,35 @@ client.on('messageCreate', async (message) => {
             }
         });
 
+        // 拋棄冗長的動畫加載提示，直接同步印出
         return message.reply(
             count === 10
-                ? `✨ **十連抽結果：**\n${results.join('\n')}\n*(檔案館記憶體同步中...)*`
-                : `🎯 **單抽結果：**\n${results[0]}\n*(檔案館記憶體同步中...)*`
+                ? `✨ **十連抽結果：**\n${results.join('\n')}\n*(📊 檔案館數據已完成即時同步)*`
+                : `🎯 **單抽結果：**\n${results[0]}\n*(📊 檔案館數據已完成即時同步)*`
         );
     }
 
     if (msg === '!checkrateupids') {
+        const rSpecial = normalizeRateUpList('Special');
+        const r0000 = normalizeRateUpList('0000');
+        const rEgos = normalizeRateUpList('Egos');
         const r000 = normalizeRateUpList('000');
         const r00 = normalizeRateUpList('00');
         const r0 = normalizeRateUpList('0');
 
-        if (r000.length === 0 && r00.length === 0 && r0.length === 0) {
-            return message.reply('📭 目前沒有設定任何機率提升中的人格。');
+        if (![rSpecial, r0000, rEgos, r000, r00, r0].some(list => list.length > 0)) {
+            return message.reply('📭 目前沒有設定任何機率提升中的人格或 E.G.O。');
         }
 
         const lines = [];
+        if (rSpecial.length > 0) lines.push(`**Special**\n${rSpecial.map(v => `• ${v}`).join('\n')}`);
+        if (r0000.length > 0) lines.push(`**0000**\n${r0000.map(v => `• ${v}`).join('\n')}`);
+        if (rEgos.length > 0) lines.push(`**Egos**\n${rEgos.map(v => `• ${v}`).join('\n')}`);
         if (r000.length > 0) lines.push(`**000**\n${r000.map(v => `• ${v}`).join('\n')}`);
         if (r00.length > 0) lines.push(`**00**\n${r00.map(v => `• ${v}`).join('\n')}`);
         if (r0.length > 0) lines.push(`**0**\n${r0.map(v => `• ${v}`).join('\n')}`);
 
-        return message.reply(`📈 **目前機率提升人格**\n\n${lines.join('\n\n')}`);
+        return message.reply(`📈 **目前機率提升項目總覽**\n\n${lines.join('\n\n')}`);
     }
 
     // ---------------- 📚 檔案館查詢系統 (!圖鑑 / !collection) ----------------
