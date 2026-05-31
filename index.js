@@ -471,31 +471,66 @@ client.on('messageCreate', async (message) => {
         }
     }
 
-    // ----------------- !list：概率觀測站 (一行一條，最右端對齊機率) -----------------
+    // ----------------- !list：機率觀測站 (智慧動態分頁，徹底解決排不下問題) -----------------
     if (msg === '!list') {
         const rarities = Object.keys(BASE_RATES);
-        let currentPage = 0;
+        const ITEMS_PER_PAGE = 12; // 每頁固定容納的人格數量，防爆防擠
+        const listPages = [];
 
-        const makeListEmbed = (page) => {
-            const rarity = rarities[page];
+        // 預先對所有稀有度進行動態分割
+        rarities.forEach(rarity => {
             const pool = identitiesData.identities[rarity] || [];
             const poolSize = pool.length;
             const basePercent = (BASE_RATES[rarity] * 100).toFixed(4);
             const upList = normalizeRateUpList(rarity);
             
-            let desc = '';
             if (poolSize === 0) {
-                desc = `\`* 池內暫無可抽到的人格\``;
+                listPages.push({
+                    rarity,
+                    basePercent,
+                    poolSize,
+                    chunk: [],
+                    chunkIndex: 0,
+                    totalChunks: 1,
+                    upList,
+                    totalWeight: 0
+                });
             } else {
                 let totalWeight = 0;
                 pool.forEach(name => {
                     totalWeight += upList.includes(name) ? RATE_UP_WEIGHT_MULTIPLIER : 1;
                 });
 
-                const displayLines = pool.map(name => {
-                    const isUp = upList.includes(name);
+                const totalChunks = Math.ceil(poolSize / ITEMS_PER_PAGE);
+                for (let i = 0; i < totalChunks; i++) {
+                    const chunk = pool.slice(i * ITEMS_PER_PAGE, (i + 1) * ITEMS_PER_PAGE);
+                    listPages.push({
+                        rarity,
+                        basePercent,
+                        poolSize,
+                        chunk,
+                        chunkIndex: i,
+                        totalChunks,
+                        upList,
+                        totalWeight
+                    });
+                }
+            }
+        });
+
+        let currentPage = 0;
+
+        const makeListEmbed = (pageIdx) => {
+            const pageData = listPages[pageIdx];
+            let desc = '';
+            
+            if (pageData.poolSize === 0) {
+                desc = `\`* 池內暫無可抽到的人格\``;
+            } else {
+                const displayLines = pageData.chunk.map(name => {
+                    const isUp = pageData.upList.includes(name);
                     const weight = isUp ? RATE_UP_WEIGHT_MULTIPLIER : 1;
-                    const individualPercent = ((BASE_RATES[rarity] * (weight / totalWeight)) * 100).toFixed(4);
+                    const individualPercent = ((BASE_RATES[pageData.rarity] * (weight / pageData.totalWeight)) * 100).toFixed(4);
                     
                     const prefix = isUp ? `🔼 [UP] ${name}` : `• ${name}`;
                     const currentWidth = getVisualWidth(prefix);
@@ -507,20 +542,20 @@ client.on('messageCreate', async (message) => {
                     return `\`${prefix} ${dots} [${individualPercent}%]\``;
                 });
 
-                desc = `• 階級總獲取概率: \`${basePercent}%\`\n• 總計容納實體數: \`${poolSize}\` 名\n\n${displayLines.join('\n')}`;
+                desc = `• 階級總獲取概率: \`${pageData.basePercent}%\`\n• 該階級總計實體: \`${pageData.poolSize}\` 名\n\n${displayLines.join('\n')}`;
             }
 
             return new EmbedBuilder()
                 .setTitle('🗂️ 核心控制室 — 扭蛋池機率清單')
                 .setColor(0x3a0ca3)
-                .setDescription(`### ${rarityToStars(rarity)}\n${desc}`)
-                .setFooter({ text: `分頁: ${page + 1} / ${rarities.length} | 使用下方按鈕切換稀有度` });
+                .setDescription(`### ${rarityToStars(pageData.rarity)} (第 ${pageData.chunkIndex + 1}/${pageData.totalChunks} 頁)\n${desc}`)
+                .setFooter({ text: `總分頁: ${pageIdx + 1} / ${listPages.length} | 使用下方按鈕切換觀測頁面` });
         };
 
-        const makeListComponents = (page) => {
+        const makeListComponents = (pageIdx) => {
             return [new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId('list_prev').setLabel('◀ 上個階級').setStyle(ButtonStyle.Primary).setDisabled(page === 0),
-                new ButtonBuilder().setCustomId('list_next').setLabel('下個階級 ▶').setStyle(ButtonStyle.Primary).setDisabled(page === rarities.length - 1)
+                new ButtonBuilder().setCustomId('list_prev').setLabel('◀ 上一頁').setStyle(ButtonStyle.Primary).setDisabled(pageIdx === 0),
+                new ButtonBuilder().setCustomId('list_next').setLabel('下一頁 ▶').setStyle(ButtonStyle.Primary).setDisabled(pageIdx === listPages.length - 1)
             )];
         };
 
