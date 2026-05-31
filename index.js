@@ -4,7 +4,7 @@ const express = require('express');
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 const identitiesData = require('./identitiesData.js');
 
-// ==================== 🧠 純記憶體（In-Memory）本地資料庫 ====================
+// ==================== 🧠 純記憶體（In-Memory）本地資料庫 ===================
 // 取代原本的 Mongoose，改用 RAM 暫存。重啟時會自動刷新歸零。
 const memoryInventories = {}; 
 
