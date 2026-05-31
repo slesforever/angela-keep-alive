@@ -179,15 +179,17 @@ const identities = {
     "［邊獄公司 罪人］辛克萊 / LCB Sinner Sinclair",
     "［邊獄公司 罪人］奧提斯 / LCB Sinner Outis",
     "［邊獄公司 罪人］格里高爾 / LCB Sinner Gregor"
+  ],
+  
+  'Egos': [
+    "[ZAYIN] 緋色眼睛 / Scarlet Eyes - 羅秀",
+    "[HE] 表皮 / Shrewd Skinny - 奧提斯",
+    "[WAW] 盲目 / Blind Obsession - 石墨",
+    "[ALEPH] 失樂園 / Paradise Lost - 白夜"
   ]
 };
 
-egos: [
-        "[ZAYIN] 緋色眼睛 / Scarlet Eyes - 羅秀",
-        "[HE] 表皮 / Shrewd Skinny - 奧提斯",
-        "[WAW] 盲目 / Blind Obsession - 石墨",
-        "[ALEPH] 失樂園 / Paradise Lost - 白夜"
-        // 👈 主管之後直接在下方像這樣加一條一條的引號字串即可！
+
     ]
 };
 
