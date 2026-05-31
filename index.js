@@ -48,6 +48,17 @@ let lastFetchedId = null;
 let totalTweetsChecked = 0;
 let lastRateUpSnapshot = JSON.stringify(identitiesData?.upTargets || identitiesData?.rateUpIds || identitiesData?.targetIdentities || {});
 const activeTrades = new Map();
+const DAILY_BASE_REWARD = 130;
+const DAILY_STREAK_BONUS = 1;
+
+function getTaipeiDateKey(date = new Date()) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Taipei',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+}
 
 function scheduleSave() {
   clearTimeout(saveTimer);
@@ -79,6 +90,8 @@ function ensurePlayer(userId) {
   if (!p.egos || typeof p.egos !== 'object' || Array.isArray(p.egos)) { p.egos = {}; scheduleSave(); }
   if (!Array.isArray(p.team)) { p.team = []; scheduleSave(); }
   if (p.equipped === undefined) { p.equipped = null; scheduleSave(); }
+  if (typeof p.dailyStreak !== 'number') { p.dailyStreak = 0; scheduleSave(); }
+  if (typeof p.lastDailyClaimDate !== 'string') { p.lastDailyClaimDate = ''; scheduleSave(); }
   if (typeof p.starterGranted !== 'boolean') { p.starterGranted = true; scheduleSave(); }
   return p;
 }
@@ -845,6 +858,70 @@ client.on('messageCreate', async (message) => {
     const cmd = args[0].toLowerCase();
 
     if (cmd === '!ping') return message.reply('pong！').catch(() => {});
+
+    if (cmd === '!cmds') {
+      const embed = new EmbedBuilder()
+        .setTitle('📜 Angela 指令總覽')
+        .setColor(0x457B9D)
+        .setDescription([
+          '**觀測 / 狀態**',
+          '`!status` `!ping` `!testtweet` `!teststeam` `!邊獄人數` `!limbusonline`',
+          '',
+          '**簽到 / 發放**',
+          '`!claimdaily` `!givelunacy @user 數量` `!updaterewards 數量`',
+          '',
+          '**抽卡 / 檔案館 / 戰鬥**',
+          '`!pull` `!10pulls` `!pack` `!check` `!list` `!stages`',
+          '',
+          '**交易**',
+          '`!trade @user`',
+          '',
+          '**其他**',
+          '`!ego` `!逆流` `!尋找機器人` `!findbot` `!checkrateupids`',
+        ].join('
+'))
+        .setFooter({ text: 'Angela 指令中心' })
+        .setTimestamp();
+      return message.reply({ embeds: [embed] }).catch(() => {});
+    }
+
+    if (cmd === '!claimdaily' || cmd === '!daily') {
+      const player = getPlayer(message.author.id);
+      const todayKey = getTaipeiDateKey();
+
+      if (player.lastDailyClaimDate === todayKey) {
+        return message.reply(`❌ 你今天已經領過了。
+下一次請等明天再來。`).catch(() => {});
+      }
+
+      if (player.lastDailyClaimDate) {
+        const prev = new Date(`${player.lastDailyClaimDate}T00:00:00+08:00`);
+        const now = new Date(`${todayKey}T00:00:00+08:00`);
+        const diffDays = Math.round((now - prev) / 86400000);
+        if (diffDays === 1) player.dailyStreak += 1;
+        else player.dailyStreak = 1;
+      } else {
+        player.dailyStreak = 1;
+      }
+
+      const reward = DAILY_BASE_REWARD + (player.dailyStreak - 1) * DAILY_STREAK_BONUS;
+      player.lunacy += reward;
+      player.lastDailyClaimDate = todayKey;
+      scheduleSave();
+
+      const embed = new EmbedBuilder()
+        .setTitle('🎁 每日簽到完成')
+        .setColor(0x2A9D8F)
+        .addFields(
+          { name: '💎 本日獎勵', value: `${reward} Lunacy`, inline: true },
+          { name: '🔥 連續簽到', value: `${player.dailyStreak} 天`, inline: true },
+          { name: '📅 今日日期', value: todayKey, inline: true },
+        )
+        .setDescription(player.dailyStreak >= 2 ? `連續簽到第 ${player.dailyStreak} 天，獎勵已提升。` : '今天是你的第一天簽到。')
+        .setTimestamp();
+
+      return message.reply({ embeds: [embed] }).catch(() => {});
+    }
 
     if (msg === '管理員' || msg === '主管') {
       return message.reply('主管，您好。我是您的 AI 助理 Angela。').catch(() => {});
