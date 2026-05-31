@@ -94,13 +94,13 @@ function checkAndRegisterPlayer(db, userId, username) {
 }
 
 function calculateIdentityStats(name, rarity) {
-    let hp = 130, atk = 14, def = 11, speed = 4, clashPower = 8, coinPower = 2;
+    let hp = 170, atk = 50, def = 15, speed = 6, clashPower = 8, coinPower = 2;
     
-    if (rarity === '00') { hp = 160; atk = 16; def = 13; speed = 5; clashPower = 10; coinPower = 3; }
-    if (rarity === '000') { hp = 195; atk = 19; def = 14; speed = 6; clashPower = 12; coinPower = 4; }
-    if (rarity === '0000') { hp = 230; atk = 23; def = 16; speed = 6; clashPower = 14; coinPower = 5; }
-    if (rarity === 'Special') { hp = 260; atk = 25; def = 18; speed = 7; clashPower = 15; coinPower = 5; }
-    if (rarity === 'Color Fixer') { hp = 310; atk = 32; def = 22; speed = 8; clashPower = 18; coinPower = 6; }
+    if (rarity === '00') { hp = 200; atk = 70; def = 17; speed = 8; clashPower = 10; coinPower = 3; }
+    if (rarity === '000') { hp = 350; atk = 130; def = 20; speed = 10; clashPower = 30; coinPower = 6; }
+    if (rarity === '0000') { hp = 400; atk = 150; def = 27; speed = 15; clashPower = 42; coinPower = 8; }
+    if (rarity === 'Special') { hp = 500; atk = 200; def = 25; speed = 17; clashPower = 37; coinPower = 9; }
+    if (rarity === 'Color Fixer') { hp = 750; atk = 320; def = 30; speed = 17; clashPower = 50; coinPower = 12; }
     if (rarity === 'Egos') { hp = 200; atk = 22; def = 15; speed = 5; clashPower = 16; coinPower = 4; }
 
     return { name, rarity, hp, maxHp: hp, atk, def, speed, sanity: 0, clashPower, coinPower, coins: 3 };
