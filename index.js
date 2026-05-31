@@ -5,6 +5,7 @@ const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fet
 const identitiesData = require('./identitiesData.js');
 
 // ==================== 🧠 純記憶體（In-Memory）本地資料庫 ===================
+// 改為物件儲存，支援計數: { userId: { "角色名稱": 數量 } }
 const memoryInventories = {}; 
 
 // ==================== 網頁伺服器設定 (Render 喚醒用) ====================
@@ -32,12 +33,15 @@ const PING_ROLE_MENTION = '<@&1406984068725211177>';
 
 const RATEUP_ANNOUNCE_CHANNEL_ID = '1510153086281187330';
 
-let lastRateUpSnapshot = JSON.stringify(
-    identitiesData.upTargets ||
-    identitiesData.rateUpIds ||
-    identitiesData.targetIdentities ||
-    {}
-);
+// 用於 !list 指令的精確機率參考
+const RARITY_RATES = {
+    'Special': 0.0001,
+    '0000': 0.0050,
+    'Egos': 0.0130,
+    '000': 0.0290,
+    '00': 0.1500,
+    '0': 0.8029
+};
 
 /* ---------------- RATE UP DATA & EXTRACTION ---------------- */
 const rateUpSource =
@@ -406,7 +410,11 @@ client.on('messageCreate', async (message) => {
         const userId = message.author.id;
         const count = msg === '!10pulls' ? 10 : 1;
         const results = [];
-        const identitiesToSave = [];
+
+        // 初始化使用者背包 (若為陣列則轉為物件)
+        if (!memoryInventories[userId] || Array.isArray(memoryInventories[userId])) {
+            memoryInventories[userId] = {};
+        }
 
         for (let i = 0; i < count; i++) {
             const rarity = buildRarity();
@@ -414,28 +422,19 @@ client.on('messageCreate', async (message) => {
 
             let baseIdentityName = getBaseIdentity(rarity);
             let displayResult = baseIdentityName;
+            let finalName = baseIdentityName;
 
             // 25% 判定是否成功觸發 Rate Up 目標
             if (rateUpName && Math.random() < 0.25) {
                 displayResult = `✨ **[PICK-UP!]** ${rateUpName}`;
-                baseIdentityName = rateUpName;
+                finalName = rateUpName;
             }
 
-            identitiesToSave.push(baseIdentityName);
+            // 更新計數
+            memoryInventories[userId][finalName] = (memoryInventories[userId][finalName] || 0) + 1;
             results.push(`${displayResult} (${rarityToStars(rarity)})`);
         }
 
-        // 🧠 即時同步機制：不再延遲，本地物件直接進行不重複集合保存 ($addToSet 模擬)
-        if (!memoryInventories[userId]) {
-            memoryInventories[userId] = [];
-        }
-        identitiesToSave.forEach(id => {
-            if (!memoryInventories[userId].includes(id)) {
-                memoryInventories[userId].push(id);
-            }
-        });
-
-        // 拋棄冗長的動畫加載提示，直接同步印出
         return message.reply(
             count === 10
                 ? `✨ **十連抽結果：**\n${results.join('\n')}\n*(📊 檔案館數據已完成即時同步)*`
@@ -466,21 +465,49 @@ client.on('messageCreate', async (message) => {
         return message.reply(`📈 **目前機率提升項目總覽**\n\n${lines.join('\n\n')}`);
     }
 
-    // ---------------- 📚 檔案館查詢系統 (!圖鑑 / !collection) ----------------
+    // 📚 檔案館查詢系統 (更新後：支援計數顯示)
     if (msg === '!圖鑑' || msg === '!collection') {
         const userId = message.author.id;
-        const userBag = memoryInventories[userId] || [];
+        const userBag = memoryInventories[userId] || {};
 
-        if (userBag.length === 0) {
+        if (Object.keys(userBag).length === 0) {
             return message.reply('📭 您的檔案館目前空空如也呢。請使用 `!pull` 抽取人格進行記錄吧。');
         }
 
-        const totalOwned = userBag.length;
+        const lines = Object.entries(userBag).map(([name, count]) => `• ${name} x${count}`);
+        
         return message.reply(
-            `📚 **主管 ${message.author.username} 的個人提取圖鑑 (已解鎖 ${totalOwned} 筆紀錄)：**\n` +
-            `${userBag.map(id => `• ${id}`).join('\n')}\n\n` +
+            `📚 **主管 ${message.author.username} 的個人提取圖鑑：**\n` +
+            `${lines.join('\n')}\n\n` +
             `*⚠️ 提示：資料目前儲存於核心暫存記憶體中，每次系統重啟時皆會自動歸零重新整理。*`
         );
+    }
+
+    // 📈 新增指令：!list (精確機率計算)
+    if (msg === '!list') {
+        let output = "📈 **目前各卡池人格抽取機率計算表：**\n\n";
+        
+        for (const [rarity, baseRate] of Object.entries(RARITY_RATES)) {
+            const rateUpList = normalizeRateUpList(rarity);
+            // 取得該稀有度的總庫 (需要排除掉已經在 RateUpList 的)
+            const allPool = (identitiesData.identities?.[rarity] || identitiesData[rarity] || []);
+            const stdPool = allPool.filter(id => !rateUpList.includes(id));
+            
+            output += `### ${rarity} (${(baseRate * 100).toFixed(2)}%)\n`;
+            
+            if (rateUpList.length > 0) {
+                // RateUp 佔 25% 機率
+                const prob = (baseRate * 0.25) / rateUpList.length;
+                output += `✨ **[Rate Up]** (每隻 ${(prob * 100).toFixed(4)}%):\n${rateUpList.map(i => `• ${i}`).join('\n')}\n`;
+            }
+            if (stdPool.length > 0) {
+                // 非 RateUp 佔 75% 機率
+                const prob = (baseRate * 0.75) / stdPool.length;
+                output += `🔹 **[普通]** (每隻 ${(prob * 100).toFixed(4)}%):\n${stdPool.map(i => `• ${i}`).join('\n')}\n`;
+            }
+            output += `\n`;
+        }
+        return message.reply(output);
     }
 
     if (msg.startsWith('!尋找機器人') || msg.startsWith('!findbot')) {
