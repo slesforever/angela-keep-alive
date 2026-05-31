@@ -200,13 +200,13 @@ const identities = {
 
 const upTargets = {
   'Special': [
-     []
+    null
   ],
   '0000': [
-     []
+    null
   ],
   'Egos': [
-    []
+    null
   ],
   '000': [
     "［蜘蛛巢：中指 父輩］奧提斯 / The House of Spiders: Middle Nursefather Outis",
@@ -217,7 +217,7 @@ const upTargets = {
     "［中指 小弟］默爾索 / Middle Brother Meursault"
   ],
   '0': [
-     []
+     null
   ]
 };
 
