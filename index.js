@@ -8,17 +8,14 @@ const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fet
 const IDENTITIES_DATA_PATH = path.join(__dirname, 'identitiesData.js');
 const RATEUP_CACHE_PATH = path.join(__dirname, 'rateup_cache.json');
 
-// ==================== 🧠 純記憶體（In-Memory）本地資料庫 ===================
+/* ==================== MEMORY ==================== */
 const memoryInventories = {};
-
-// ==================== UI sessions ===================
 const uiSessions = new Map();
 
-// ==================== identitiesData ===================
 let currentIdentitiesData = null;
 let lastRateUpState = null;
 
-// ==================== 網頁伺服器設定 (Render 喚醒用) ====================
+/* ==================== EXPRESS ==================== */
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -40,38 +37,38 @@ let lastFetchedId = null;
 
 const NOTIFY_CHANNEL_ID = '1402282604165730348';
 const PING_ROLE_MENTION = '<@&1406984068725211177>';
-
 const RATEUP_ANNOUNCE_CHANNEL_ID = '1510153086281187330';
 
 const PAGE_SIZE = 25;
 const RATE_UP_OVERRIDE_CHANCE = 0.25;
 
-const RARITY_ORDER = ['ColorFixer', 'Special', '0000', 'Egos', '000', '00', '0'];
+const RARITY_ORDER = ['Color Fixer', 'Special', '0000', 'Egos', '000', '00', '0'];
+
 const RARITY_BASE_CHANCE = {
-    ColorFixer: 0.0000143,
-    Special: 0.0001,
+    'Color Fixer': 0.0000143,
+    'Special': 0.0001,
     '0000': 0.005,
-    Egos: 0.013,
+    'Egos': 0.013,
     '000': 0.029,
     '00': 0.15,
     '0': 0.8028857
 };
 
 const RARITY_ALIASES = {
-    ColorFixer: ['ColorFixer', 'Color Fixer', 'colorfixer', 'color_fixer', 'CF'],
-    Special: ['Special', 'special'],
+    'Color Fixer': ['Color Fixer', 'ColorFixer', 'colorfixer', 'color_fixer', 'CF'],
+    'Special': ['Special', 'special'],
     '0000': ['0000'],
-    Egos: ['Egos', 'EGO', 'ego', 'egos'],
+    'Egos': ['Egos', 'EGO', 'ego', 'egos'],
     '000': ['000'],
     '00': ['00'],
     '0': ['0']
 };
 
 const RARITY_META = {
-    ColorFixer: { label: '🎨 Color Fixer', emoji: '🎨', sort: 7 },
-    Special: { label: '⚠️ Special', emoji: '⚠️', sort: 6 },
+    'Color Fixer': { label: '🎨 Color Fixer', emoji: '🎨', sort: 7 },
+    'Special': { label: '⚠️ Special', emoji: '⚠️', sort: 6 },
     '0000': { label: '👑 0000', emoji: '👑', sort: 5 },
-    Egos: { label: '⚔️ E.G.O', emoji: '⚔️', sort: 4 },
+    'Egos': { label: '⚔️ E.G.O', emoji: '⚔️', sort: 4 },
     '000': { label: '★★★ 000', emoji: '★★★', sort: 3 },
     '00': { label: '★★ 00', emoji: '★★', sort: 2 },
     '0': { label: '★ 0', emoji: '★', sort: 1 },
@@ -96,9 +93,7 @@ const FALLBACK_EGO_POOL = [
     }
 ];
 
-/* =========================================================
-   Load / refresh identitiesData.js
-========================================================= */
+/* ==================== DATA LOADING ==================== */
 function loadIdentitiesDataSafe() {
     try {
         delete require.cache[require.resolve(IDENTITIES_DATA_PATH)];
@@ -130,10 +125,14 @@ function saveRateUpCacheState(state) {
     try {
         fs.writeFileSync(
             RATEUP_CACHE_PATH,
-            JSON.stringify({
-                updatedAt: new Date().toISOString(),
-                state
-            }, null, 2),
+            JSON.stringify(
+                {
+                    updatedAt: new Date().toISOString(),
+                    state
+                },
+                null,
+                2
+            ),
             'utf8'
         );
     } catch (err) {
@@ -144,9 +143,7 @@ function saveRateUpCacheState(state) {
 currentIdentitiesData = loadIdentitiesDataSafe();
 lastRateUpState = readRateUpCacheFile();
 
-/* =========================================================
-   Generic helpers
-========================================================= */
+/* ==================== HELPERS ==================== */
 function chunkLines(lines, maxLen = 1900) {
     const chunks = [];
     let current = '';
@@ -234,7 +231,10 @@ function findArrayByAliases(container, aliases) {
 
 function getCurrentRateUpSource(data = currentIdentitiesData) {
     if (!data) return {};
-    return data.upTargets || data.rateUpIds || data.targetIdentities || {};
+    if (data.upTargets && typeof data.upTargets === 'object') return data.upTargets;
+    if (data.rateUpIds && typeof data.rateUpIds === 'object') return data.rateUpIds;
+    if (data.targetIdentities && typeof data.targetIdentities === 'object') return data.targetIdentities;
+    return {};
 }
 
 function normalizeRateUpListBySource(source, rarity) {
@@ -303,11 +303,12 @@ function getPoolForRarity(rarity, data = currentIdentitiesData) {
 
     const aliases = RARITY_ALIASES[rarity] || [rarity];
 
-    const fromIdentities = findArrayByAliases(data.identities || {}, aliases);
-    if (fromIdentities) return fromIdentities.map(formatRateUpItem).filter(Boolean);
+    const identitiesBlock = data.identities && typeof data.identities === 'object'
+        ? data.identities
+        : data;
 
-    const direct = findArrayByAliases(data, aliases);
-    if (direct) return direct.map(formatRateUpItem).filter(Boolean);
+    const fromIdentities = findArrayByAliases(identitiesBlock, aliases);
+    if (fromIdentities) return fromIdentities.map(formatRateUpItem).filter(Boolean);
 
     if (rarity === 'Egos') {
         return getFallbackEgoPool();
@@ -322,7 +323,7 @@ function getRarityChance(rarity) {
 
 function buildRarity() {
     const r = Math.random();
-    if (r < 0.0000143) return 'ColorFixer';
+    if (r < 0.0000143) return 'Color Fixer';
     if (r < 0.0001143) return 'Special';
     if (r < 0.0051143) return '0000';
     if (r < 0.0181143) return 'Egos';
@@ -332,7 +333,7 @@ function buildRarity() {
 }
 
 function rarityToStars(rarity) {
-    if (rarity === 'ColorFixer') return '🎨 Color Fixer';
+    if (rarity === 'Color Fixer') return '🎨 Color Fixer';
     if (rarity === 'Special') return '⚠️ Special';
     if (rarity === '0000') return '👑 ★★★★';
     if (rarity === 'Egos') return '⚔️ E.G.O';
@@ -345,7 +346,9 @@ function rarityDrawMode(rarity) {
     const basePool = getPoolForRarity(rarity);
     const ratePool = normalizeRateUpList(rarity);
 
-    if (basePool.length > 0 && ratePool.length > 0) return `混合池（基礎 ${Math.round((1 - RATE_UP_OVERRIDE_CHANCE) * 100)}% / RateUp ${Math.round(RATE_UP_OVERRIDE_CHANCE * 100)}%）`;
+    if (basePool.length > 0 && ratePool.length > 0) {
+        return `混合池（基礎 ${Math.round((1 - RATE_UP_OVERRIDE_CHANCE) * 100)}% / RateUp ${Math.round(RATE_UP_OVERRIDE_CHANCE * 100)}%）`;
+    }
     if (basePool.length > 0) return '單一基礎池';
     if (ratePool.length > 0) return '單一 RateUp 池';
     return '無資料';
@@ -422,10 +425,7 @@ function getExactDrawProbability(rarity, itemName) {
         return baseChance * (basePart + upPart);
     }
 
-    if (n > 0) {
-        return baseChance * (baseCount / n);
-    }
-
+    if (n > 0) return baseChance * (baseCount / n);
     return baseChance * (upCount / m);
 }
 
@@ -486,9 +486,7 @@ function buildRateUpOverviewSections() {
     return sections;
 }
 
-/* =========================================================
-   Inventory
-========================================================= */
+/* ==================== INVENTORY ==================== */
 function makeInventoryKey(rarity, name) {
     return `${rarity}::${name}`;
 }
@@ -606,11 +604,6 @@ function transferItem(fromUserId, toUserId, key) {
     return transferItemData;
 }
 
-function getEquippedSummary(userId) {
-    const state = ensureUserState(userId);
-    return state.equipped || null;
-}
-
 function buildPackLines(userId, username) {
     const state = ensureUserState(userId);
     const entries = getInventoryEntries(userId);
@@ -661,9 +654,7 @@ function buildCheckEmbed(targetUser, state) {
         .setTimestamp();
 }
 
-/* =========================================================
-   Selector / Trade UI
-========================================================= */
+/* ==================== UI / TRADE ==================== */
 function createUiSession(mode, ownerId, targetId = null) {
     const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
     const session = {
@@ -800,9 +791,7 @@ function buildTradeOfferView(session) {
     return { embeds: [embed], components: rows };
 }
 
-/* =========================================================
-   Rate Up announcement / diff
-========================================================= */
+/* ==================== RATE UP ANNOUNCE ==================== */
 function buildNormalizedRateUpState(data = currentIdentitiesData) {
     const source = getCurrentRateUpSource(data);
     const state = {};
@@ -911,9 +900,7 @@ async function syncRateUpStateAndAnnounce() {
     saveRateUpCacheState(newState);
 }
 
-/* =========================================================
-   Twitter / Nitter
-========================================================= */
+/* ==================== TWITTER / NITTER ==================== */
 function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -999,9 +986,7 @@ async function checkTwitterUpdates() {
     }
 }
 
-/* =========================================================
-   Express
-========================================================= */
+/* ==================== EXPRESS ==================== */
 app.get('/', (req, res) => {
     res.send('Angela 系統運作正常。歡迎來到腦葉公司核心控制室。');
 });
@@ -1010,9 +995,7 @@ app.listen(PORT, () => {
     console.log(`網頁伺服器已在連接埠 ${PORT} 啟動`);
 });
 
-/* =========================================================
-   Discord client
-========================================================= */
+/* ==================== DISCORD CLIENT ==================== */
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -1063,9 +1046,7 @@ client.once('ready', async () => {
     checkTwitterUpdates();
 });
 
-/* =========================================================
-   Commands
-========================================================= */
+/* ==================== COMMANDS ==================== */
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
 
@@ -1379,9 +1360,7 @@ client.on('messageCreate', async (message) => {
     }
 });
 
-/* =========================================================
-   Interactions
-========================================================= */
+/* ==================== INTERACTIONS ==================== */
 client.on('interactionCreate', async (interaction) => {
     try {
         if (interaction.isStringSelectMenu()) {
@@ -1611,9 +1590,7 @@ client.on('interactionCreate', async (interaction) => {
     }
 });
 
-/* =========================================================
-   Login
-========================================================= */
+/* ==================== LOGIN ==================== */
 const TOKEN = process.env.DISCORD_TOKEN;
 client.login(TOKEN).catch(err => {
     console.error('❌ 機器人登入失敗：', err);
