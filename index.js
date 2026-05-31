@@ -42,13 +42,12 @@ function getPlayer(userId) {
     if (!playersDB[userId]) {
         playersDB[userId] = {};
     }
-    
     if (typeof playersDB[userId].lunacy !== 'number') playersDB[userId].lunacy = 0;
     if (!playersDB[userId].inventory || typeof playersDB[userId].inventory !== 'object') playersDB[userId].inventory = {};
     if (!playersDB[userId].egos || typeof playersDB[userId].egos !== 'object') playersDB[userId].egos = {};
     if (!playersDB[userId].team || !Array.isArray(playersDB[userId].team)) playersDB[userId].team = [];
     if (playersDB[userId].equipped === undefined) playersDB[userId].equipped = null;
-
+    
     if (Object.keys(playersDB[userId].inventory).length === 0) {
         const baseSinners = identitiesData?.identities?.['0'] || [];
         baseSinners.forEach(sinner => {
@@ -66,7 +65,6 @@ const PORT = process.env.PORT || 3000;
 app.get('/', (req, res) => res.sendStatus(200));
 
 const server = app.listen(PORT, () => console.log(`網頁伺服器啟動於通訊埠 ${PORT}`));
-
 server.on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
         console.error(`⚠️ [網路警告] 連接埠 ${PORT} 已被佔用。機器人將跳過網頁監聽，繼續啟動核心 Discord 服務...`);
@@ -79,31 +77,33 @@ server.on('error', (err) => {
 const NOTIFY_CHANNEL_ID = '1402282604165730348';
 const PING_ROLE_MENTION = '<@&1406984068725211177>';
 const TARGET_USER = { username: 'LimbusCompany_B' };
+
+// 更新的高可用性 Nitter 節點
 const NITTER_NODES = [
-    'https://nitter.net', 
-    'https://nitter.cz', 
     'https://nitter.poast.org',
-    'https://nitter.privacydev.net'
+    'https://nitter.privacydev.net',
+    'https://nitter.lucabased.xyz',
+    'https://nitter.so',
+    'https://nitter.moomoo.me'
 ];
 
-// 核心修正：初始設定為 null，用來在重啟時建立「靜音基線」
 let lastTweetId = null;
 let lastSteamNewsId = null;
 const activeTrades = new Map();
 
 // ==================== 🎲 機率與抽卡核心 ====================
 const RARITY_RATES = {
-    'Color Fixer': 0.00000143, 
-    'Special': 0.0001,         
-    '0000': 0.0010,            
-    'Egos': 0.0130,            
-    '000': 0.0290,             
-    '00': 0.1500,              
-    '0': 0.80689857            
+    'Color Fixer': 0.00000143,
+    'Special': 0.0001,
+    '0000': 0.0010,
+    'Egos': 0.0130,
+    '000': 0.0290,
+    '00': 0.1500,
+    '0': 0.80689857
 };
 
 const GUARANTEE_RATES = { ...RARITY_RATES };
-delete GUARANTEE_RATES['0']; 
+delete GUARANTEE_RATES['0'];
 const totalGuaranteeWeight = Object.values(GUARANTEE_RATES).reduce((a, b) => a + b, 0);
 
 function buildRarity() {
@@ -132,49 +132,61 @@ function rarityToStars(rarity) {
     return '★';
 }
 
-// ==================== 📡 觀測系統 (修正重啟亂 Ping 擾民 Bug) ====================
+// ==================== 📡 觀測系統 ====================
 function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
-    return fetch(url, { ...options, signal: controller.signal, headers: { 'User-Agent': 'Mozilla/5.0' } })
-        .finally(() => clearTimeout(timeout));
+    return fetch(url, {
+        ...options,
+        signal: controller.signal,
+        headers: { 'User-Agent': 'Mozilla/5.0' }
+    }).finally(() => clearTimeout(timeout));
 }
 
 async function checkTwitterUpdates(manual = false, interaction = null) {
     let success = false;
     let errorLog = [];
-    
+
     for (const nodeUrl of NITTER_NODES) {
         try {
-            const response = await fetchWithTimeout(`${nodeUrl}/${TARGET_USER.username}/rss`);
-            if (!response.ok) { errorLog.push(`${nodeUrl} (${response.status})`); continue; }
-            const text = await response.text();
+            // 放寬超時至 10 秒
+            const response = await fetchWithTimeout(`${nodeUrl}/${TARGET_USER.username}/rss`, {}, 10000);
             
+            if (!response.ok) {
+                errorLog.push(`${nodeUrl} (${response.status})`);
+                continue;
+            }
+
+            const text = await response.text();
             const itemMatch = text.match(/<item>([\s\S]*?)<\/item>/);
+
             if (itemMatch) {
                 success = true;
                 const itemBlock = itemMatch[1];
-                let link = itemBlock.match(/<link>(.*?)<\/link>/)?.[1];
-                const id = itemBlock.match(/<guid[^>]*>(.*?)<\/guid>/)?.[1];
+                
+                const link = itemBlock.match(/<link>(.*?)<\/link>/)?.[1];
+                const rawGuid = itemBlock.match(/<guid[^>]*>(.*?)<\/guid>/)?.[1] || '';
                 const title = itemBlock.match(/<title>([\s\S]*?)<\/title>/)?.[1];
 
-                if (link && id) {
-                    // 🔥 [核心修正]：如果是更新/重啟後第一次自動偵測，僅默默建立基線，不准 Ping 擾民
+                // 核心修復：精準抓取 ID 並整合 vxtwitter 達到直接播放影片效果
+                const statusIdMatch = link?.match(/status\/(\d+)/) || rawGuid?.match(/status\/(\d+)/) || rawGuid?.match(/\d+/);
+                
+                if (statusIdMatch) {
+                    const finalStatusId = statusIdMatch[1] ? statusIdMatch[1] : statusIdMatch[0];
+                    const embedLink = `https://vxtwitter.com/${TARGET_USER.username}/status/${finalStatusId}`;
+
                     if (lastTweetId === null) {
-                        lastTweetId = id;
+                        lastTweetId = finalStatusId;
                         if (!manual) {
-                            console.log(`📡 [觀測系統] Twitter 初始基線鎖定成功，當前最新 ID: ${id}`);
-                            break; 
+                            console.log(`📡 [觀測系統] Twitter 初始基線鎖定成功，當前最新 ID: ${finalStatusId}`);
+                            break;
                         }
                     }
 
-                    const embedLink = link.replace('http://', 'https://').replace('twitter.com', 'vxtwitter.com').replace('x.com', 'vxtwitter.com');
-                    
-                    // 只有當 ID 真正發生改變（有新發布），或者是手動測試時才允許發送訊息
-                    if (id !== lastTweetId || manual) {
-                        if (!manual) lastTweetId = id;
+                    if (finalStatusId !== lastTweetId || manual) {
+                        if (!manual) lastTweetId = finalStatusId;
                         
-                        const msgContent = `🔔 ${PING_ROLE_MENTION} **[Twitter官方公告]**\n${title ? `> ${title}\n` : ''}${embedLink}`;
+                        const msgContent = `🔔 ${PING_ROLE_MENTION} **[Twitter官方公告]**\n> ${title || '最新動態'}\n${embedLink}`;
                         
                         if (manual && interaction) {
                             await interaction.reply({ content: msgContent }).catch(()=>{});
@@ -183,17 +195,19 @@ async function checkTwitterUpdates(manual = false, interaction = null) {
                             if (channel) await channel.send({ content: msgContent }).catch(()=>{});
                         }
                     } else {
-                        if (manual && interaction) await interaction.reply(`✅ 成功連線，目前無新推文。`).catch(()=>{});
+                        if (manual && interaction) await interaction.reply('✅ 成功連線，目前無新推文。').catch(()=>{});
                     }
                     break;
                 }
             }
         } catch (e) {
-            errorLog.push(`${nodeUrl} (Error)`);
+            errorLog.push(`${nodeUrl} (Error/Timeout)`);
         }
     }
-    
-    if (manual && !success && interaction) await interaction.reply(`❌ **觀測失敗**\n${errorLog.join('\n')}`).catch(()=>{});
+
+    if (manual && !success && interaction) {
+        await interaction.reply(`❌ **觀測失敗 (所有節點無法連線)**\n${errorLog.join('\n')}\n*註：Twitter API 封鎖極為嚴格，403 代表節點暫時被官方阻擋，請稍後再試。*`).catch(()=>{});
+    }
 }
 
 async function checkSteamUpdates(manual = false, interaction = null) {
@@ -201,9 +215,8 @@ async function checkSteamUpdates(manual = false, interaction = null) {
         const response = await fetchWithTimeout('https://api.steampowered.com/ISteamNews/GetNewsForApp/v0002/?appid=1973530&count=1');
         const data = await response.json();
         const newsItem = data?.appnews?.newsitems?.[0];
-        
+
         if (newsItem) {
-            // 🔥 [核心修正]：如果是更新/重啟後第一次自動偵測，僅默默建立基線，不准 Ping 擾民
             if (lastSteamNewsId === null) {
                 lastSteamNewsId = newsItem.gid;
                 if (!manual) {
@@ -214,8 +227,13 @@ async function checkSteamUpdates(manual = false, interaction = null) {
 
             if (newsItem.gid !== lastSteamNewsId || manual) {
                 if (!manual) lastSteamNewsId = newsItem.gid;
-                const embed = new EmbedBuilder().setTitle(`🚂 [Steam新聞] ${newsItem.title}`).setURL(newsItem.url).setColor(0x00A8E8).setTimestamp();
                 
+                const embed = new EmbedBuilder()
+                    .setTitle(`🚂 [Steam新聞] ${newsItem.title}`)
+                    .setURL(newsItem.url)
+                    .setColor(0x00A8E8)
+                    .setTimestamp();
+                    
                 if (manual && interaction) {
                     await interaction.reply({ embeds: [embed] }).catch(()=>{});
                 } else {
@@ -223,11 +241,11 @@ async function checkSteamUpdates(manual = false, interaction = null) {
                     if (channel) await channel.send({ content: `🔔 ${PING_ROLE_MENTION}`, embeds: [embed] }).catch(()=>{});
                 }
             } else {
-                if (manual && interaction) await interaction.reply(`✅ 目前無新公告。`).catch(()=>{});
+                if (manual && interaction) await interaction.reply('✅ 目前無新公告。').catch(()=>{});
             }
         }
     } catch (e) {
-        if (manual && interaction) await interaction.reply(`❌ **Steam API 錯誤**`).catch(()=>{});
+        if (manual && interaction) await interaction.reply('❌ **Steam API 錯誤**').catch(()=>{});
     }
 }
 
@@ -241,12 +259,11 @@ function buildPackEmbed(userId, page) {
     const pData = getPlayer(userId);
     const user = client.users.cache.get(userId);
     const username = user ? user.username : '主管';
-
     const allItems = [
         ...Object.entries(pData.inventory).map(([k, v]) => `👤 ${k} x${v}`),
         ...Object.entries(pData.egos).map(([k, v]) => `⚔️ ${k} x${v}`)
     ];
-    
+
     const itemsPerPage = 15;
     const totalPages = Math.max(1, Math.ceil(allItems.length / itemsPerPage));
     const safePage = Math.max(0, Math.min(page, totalPages - 1));
@@ -281,7 +298,7 @@ function buildListEmbed(rarity, page) {
     const allPool = identitiesData?.identities?.[rarity] || [];
     const upPool = identitiesData?.upTargets?.[rarity] || [];
     const stdPool = allPool.filter(id => !upPool.includes(id) && id !== null);
-
+    
     let desc = `**總基礎機率：** ${(baseRate * 100).toFixed(6)}%\n\n`;
     
     const validUp = upPool.filter(i => i !== null);
@@ -330,7 +347,6 @@ client.once('ready', async () => {
     console.log(`🤖 Angela 已登入：${client.user.tag}`);
     loadDatabase();
     client.user.setPresence({ status: 'idle', activities: [{ name: 'customstatus', type: 4, state: '基線鎖定與狀態監控版' }] });
-    
     setInterval(performSystemChecks, 60 * 1000);
     performSystemChecks();
 });
@@ -339,17 +355,15 @@ client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
     const msg = message.content.trim();
     if (!msg) return;
-    
     const args = msg.split(/\s+/);
     const cmd = args[0].toLowerCase();
 
-    // ⚙️ 新增狀態觀測指令
+    // ⚙️ 狀態觀測指令
     if (cmd === '!status') {
         const uptime = process.uptime();
         const hrs = Math.floor(uptime / 3600);
         const mins = Math.floor((uptime % 3600) / 60);
         const secs = Math.floor(uptime % 60);
-        
         const embed = new EmbedBuilder()
             .setTitle('⚙️ Angela 系統觀測核心狀態')
             .setColor(0x457B9D)
@@ -357,8 +371,8 @@ client.on('messageCreate', async (message) => {
                 { name: '🟢 運行時間', value: `${hrs} 小時 ${mins} 分鐘 ${secs} 秒`, inline: true },
                 { name: '⚡ 系統延遲', value: `${client.ws.ping}ms`, inline: true },
                 { name: '💾 資料庫連線', value: `已連線 (${Object.keys(playersDB).length} 位主管紀錄)`, inline: true },
-                { name: '📡 Twitter 觀測基線', value: lastTweetId ? `🔒 已鎖定 ID: \`${lastTweetId}\`` : '⏳ 正在建立...', inline: false },
-                { name: '🚂 Steam 新聞基線', value: lastSteamNewsId ? `🔒 已鎖定 ID: \`${lastSteamNewsId}\`` : '⏳ 正在建立...', inline: false }
+                { name: '📡 Twitter 觀測基線', value: lastTweetId ? `🔒 已鎖定 ID: ${lastTweetId}` : '⏳ 正在建立...', inline: false },
+                { name: '🚂 Steam 新聞基線', value: lastSteamNewsId ? `🔒 已鎖定 ID: ${lastSteamNewsId}` : '⏳ 正在建立...', inline: false }
             )
             .setTimestamp();
         return message.reply({ embeds: [embed] }).catch(()=>{});
@@ -366,11 +380,13 @@ client.on('messageCreate', async (message) => {
 
     if (cmd === '!testtweet') return checkTwitterUpdates(true, message);
     if (cmd === '!teststeam') return checkSteamUpdates(true, message);
+    
     if (cmd === '!givelunacy') {
         if (message.author.username !== 'sles_forever') return message.reply('❌ 權限不足。').catch(()=>{});
         const target = message.mentions.users.first();
         const amount = parseInt(args[2]);
-        if (!target || isNaN(amount)) return message.reply('📝 `!givelunacy @user 數量`').catch(()=>{});
+        if (!target || isNaN(amount)) return message.reply('📝 !givelunacy @user 數量').catch(()=>{});
+        
         getPlayer(target.id).lunacy += amount;
         saveDatabase();
         return message.reply(`✅ 给予 ${amount} Lunacy。`).catch(()=>{});
@@ -386,23 +402,25 @@ client.on('messageCreate', async (message) => {
         
         const results = [];
         const count = isTen ? 10 : 1;
+        
         for (let i = 0; i < count; i++) {
             const rarity = (isTen && i === 9) ? buildRarityGuaranteed() : buildRarity();
             let finalName = identitiesData?.pullUpIdentity?.(rarity);
             let display;
-
+            
             if (finalName && Math.random() < 0.25) {
                 display = `✨ **[PICK-UP!]** ${finalName}`;
             } else {
                 finalName = identitiesData?.pullIdentity?.(rarity);
                 display = finalName || '未知記憶碎片';
             }
-
+            
             if (rarity === 'Egos') player.egos[finalName] = (player.egos[finalName] || 0) + 1;
             else player.inventory[finalName] = (player.inventory[finalName] || 0) + 1;
             
             results.push(`${display} (${rarityToStars(rarity)})`);
         }
+        
         saveDatabase();
         return message.reply(isTen ? `✨ **十連提取 (剩餘 ${player.lunacy})：**\n${results.join('\n')}` : `🎯 **單抽 (剩餘 ${player.lunacy})：**\n${results[0]}`).catch(()=>{});
     }
@@ -413,7 +431,7 @@ client.on('messageCreate', async (message) => {
     }
 
     if (cmd === '!list') {
-        const embed = new EmbedBuilder().setTitle(`📈 提取機率總覽`).setColor(0x457B9D).setDescription('選擇稀有度查看：');
+        const embed = new EmbedBuilder().setTitle('📈 提取機率總覽').setColor(0x457B9D).setDescription('選擇稀有度查看：');
         const row = new ActionRowBuilder().addComponents(
             new StringSelectMenuBuilder().setCustomId('list_select').setPlaceholder('選擇稀有度...').addOptions(Object.keys(RARITY_RATES).map(r => ({ label: `${r} 卡池`, value: r })))
         );
@@ -422,13 +440,13 @@ client.on('messageCreate', async (message) => {
 
     if (cmd === '!stages') {
         const player = getPlayer(message.author.id);
-        if (!player.team || player.team.length === 0) return message.reply('⚠️ 主管，請先透過 `!pack` 編排作戰隊伍才能出擊！').catch(()=>{});
-
+        if (!player.team || player.team.length === 0) return message.reply('⚠️ 主管，請先透過 !pack 編排作戰隊伍才能出擊！').catch(()=>{});
+        
         const embed = new EmbedBuilder()
             .setTitle('🗺️ 選擇作戰難度區域')
             .setDescription(`**當前出戰小隊 (${player.team.length}/7)：**\n${player.team.map(t => `• ${t}`).join('\n')}`)
             .setColor(0x1D3557);
-
+            
         const row = new ActionRowBuilder().addComponents(
             new StringSelectMenuBuilder()
                 .setCustomId(`stage_select_${message.author.id}`)
@@ -446,17 +464,19 @@ client.on('messageCreate', async (message) => {
 
     if (cmd === '!trade') {
         const target = message.mentions.users.first();
-        if (!target || target.id === message.author.id) return message.reply('📝 用法: `!trade @目標玩家`').catch(()=>{});
+        if (!target || target.id === message.author.id) return message.reply('📝 用法: !trade @目標玩家').catch(()=>{});
         if (target.bot) return message.reply('❌ 無法與 AI 交易。').catch(()=>{});
-
+        
         const embed = new EmbedBuilder().setTitle('🔄 交易請求').setDescription(`<@${target.id}>，**${message.author.username}** 發起交易。是否接受？`).setColor(0xF4A261);
         const tradeId = Date.now().toString();
+        
         const row = new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId(`trade_acc_${tradeId}`).setLabel('✅ 接受').setStyle(ButtonStyle.Success),
             new ButtonBuilder().setCustomId(`trade_dec_${tradeId}`).setLabel('❌ 拒絕').setStyle(ButtonStyle.Danger)
         );
         
         const tradeMsg = await message.reply({ content: `<@${target.id}>`, embeds: [embed], components: [row] }).catch(()=>{});
+        
         if (tradeMsg) {
             activeTrades.set(tradeId, {
                 originalMsgId: tradeMsg.id,
@@ -481,11 +501,11 @@ client.on('interactionCreate', async (interaction) => {
             const action = parts[1];
             const targetId = parts[2];
             const arg = parts[3];
-
+            
             if (interaction.user.id !== targetId && interaction.user.id !== 'sles_forever') {
                 return interaction.reply({ content: '❌ 無法操作他人的面板。', ephemeral: true }).catch(()=>{});
             }
-
+            
             if (action === 'nav') return interaction.update(buildPackEmbed(targetId, parseInt(arg))).catch(()=>{});
             if (action === 'back') return interaction.update(buildPackEmbed(targetId, 0)).catch(()=>{});
             
@@ -493,9 +513,10 @@ client.on('interactionCreate', async (interaction) => {
                 const pData = getPlayer(targetId);
                 const invKeys = Object.keys(pData.inventory);
                 if (invKeys.length === 0) return interaction.reply({ content: '❌ 背包為空。', ephemeral: true }).catch(()=>{});
-
+                
                 const embed = new EmbedBuilder().setTitle(action === 'equip' ? '🎖️ 選擇裝備' : '👥 編隊').setDescription(action === 'team' ? `隊伍 (${pData.team.length}/7)：\n${pData.team.join(', ') || '無'}` : '請選擇。').setColor(0x457B9D);
                 const rows = [];
+                
                 for (let i = 0; i < invKeys.length && rows.length < 4; i += 25) {
                     const chunk = invKeys.slice(i, i + 25);
                     rows.push(new ActionRowBuilder().addComponents(
@@ -512,15 +533,16 @@ client.on('interactionCreate', async (interaction) => {
             const action = parts[1];
             const targetId = parts[2];
             if (interaction.user.id !== targetId) return;
-
+            
             const pData = getPlayer(targetId);
             const selection = interaction.values[0];
-
+            
             if (action === 'equip') {
                 pData.equipped = selection;
                 saveDatabase();
                 return interaction.update(buildPackEmbed(targetId, 0)).catch(()=>{});
             }
+            
             if (action === 'team') {
                 if (pData.team.includes(selection)) pData.team = pData.team.filter(x => x !== selection);
                 else if (pData.team.length < 7) pData.team.push(selection);
@@ -539,25 +561,30 @@ client.on('interactionCreate', async (interaction) => {
             if (interaction.user.id !== expectedUserId) {
                 return interaction.reply({ content: '❌ 這不是你的作戰面板！', ephemeral: true }).catch(()=>{});
             }
-
+            
             const player = getPlayer(interaction.user.id);
             const [powerStr, rewardStr] = interaction.values[0].split('_');
             const eFinal = parseInt(powerStr) * (0.9 + Math.random() * 0.2);
-            
             let pClash = 0;
+            
             if (player.team && Array.isArray(player.team)) {
-                player.team.forEach(() => { pClash += Math.floor(Math.random() * 25 + 15); }); 
+                player.team.forEach(() => {
+                    pClash += Math.floor(Math.random() * 25 + 15);
+                });
             }
             const pFinal = pClash * (0.8 + Math.random() * 0.4);
             const isWin = pFinal >= eFinal;
-
-            const embed = new EmbedBuilder().setTitle(`⚔️ 戰鬥結算報告`).addFields(
+            
+            const embed = new EmbedBuilder().setTitle('⚔️ 戰鬥結算報告').addFields(
                 { name: '🔹 我方小隊戰力判定', value: `${Math.floor(pFinal)}`, inline: true },
                 { name: '🔸 敵方區域威脅判定', value: `${Math.floor(eFinal)}`, inline: true },
                 { name: '🏆 戰役結果', value: isWin ? `✅ 壓制成功！獲得 **${rewardStr}** Lunacy` : '❌ 壓制失敗，小隊全滅回溯。', inline: false }
             ).setColor(isWin ? 0x2A9D8F : 0xE63946);
-
-            if (isWin) { player.lunacy += parseInt(rewardStr); saveDatabase(); }
+            
+            if (isWin) {
+                player.lunacy += parseInt(rewardStr);
+                saveDatabase();
+            }
             return interaction.update({ embeds: [embed], components: [] }).catch(()=>{});
         }
 
@@ -567,12 +594,12 @@ client.on('interactionCreate', async (interaction) => {
             const act = parts[1];
             const tId = parts[2];
             const trade = activeTrades.get(tId);
-
+            
             if (!trade) return interaction.reply({ content: '❌ 交易過期。', ephemeral: true }).catch(()=>{});
-
+            
             if (act === 'acc') {
                 if (interaction.user.id !== trade.p2.id) return interaction.reply({ content: '❌ 僅限被邀請者。', ephemeral: true }).catch(()=>{});
-                const embed = new EmbedBuilder().setTitle('🔄 交易終端').setColor(0x2A9D8F).addFields({ name: `P1: ${trade.p1.name}`, value: `提供: 未選擇`, inline: true }, { name: `P2: ${trade.p2.name}`, value: `提供: 未選擇`, inline: true });
+                const embed = new EmbedBuilder().setTitle('🔄 交易終端').setColor(0x2A9D8F).addFields({ name: `P1: ${trade.p1.name}`, value: '提供: 未選擇', inline: true }, { name: `P2: ${trade.p2.name}`, value: '提供: 未選擇', inline: true });
                 const row = new ActionRowBuilder().addComponents(
                     new ButtonBuilder().setCustomId(`trade_pick_${tId}_p1`).setLabel(`${trade.p1.name} 選物`).setStyle(ButtonStyle.Primary),
                     new ButtonBuilder().setCustomId(`trade_pick_${tId}_p2`).setLabel(`${trade.p2.name} 選物`).setStyle(ButtonStyle.Primary),
@@ -580,18 +607,21 @@ client.on('interactionCreate', async (interaction) => {
                 );
                 return interaction.update({ content: null, embeds: [embed], components: [row] }).catch(()=>{});
             }
+            
             if (act === 'dec') {
                 if (interaction.user.id !== trade.p2.id) return;
                 activeTrades.delete(tId);
                 return interaction.update({ content: '❌ 交易拒絕。', embeds: [], components: [] }).catch(()=>{});
             }
+            
             if (act === 'pick') {
                 const playerKey = parts[3];
                 if (interaction.user.id !== trade[playerKey].id) return interaction.reply({ content: '❌ 非您的按鈕。', ephemeral: true }).catch(()=>{});
+                
                 const pData = getPlayer(interaction.user.id);
                 const allItems = [...Object.keys(pData.inventory), ...Object.keys(pData.egos)];
                 if (allItems.length === 0) return interaction.reply({ content: '❌ 背包空。', ephemeral: true }).catch(()=>{});
-
+                
                 const rows = [];
                 for (let i = 0; i < allItems.length && rows.length < 5; i += 25) {
                     rows.push(new ActionRowBuilder().addComponents(
@@ -600,6 +630,7 @@ client.on('interactionCreate', async (interaction) => {
                 }
                 return interaction.reply({ content: '請選擇物品：', components: rows, ephemeral: true }).catch(()=>{});
             }
+            
             if (act === 'sel') {
                 const playerKey = parts[3];
                 trade[playerKey].offer = interaction.values[0];
@@ -615,21 +646,28 @@ client.on('interactionCreate', async (interaction) => {
                 }
                 return interaction.update({ content: '✅ 選擇完畢，請在原對話框按確認。', components: [] }).catch(()=>{});
             }
+            
             if (act === 'ok') {
                 const isP1 = interaction.user.id === trade.p1.id;
                 const isP2 = interaction.user.id === trade.p2.id;
+                
                 if (!isP1 && !isP2) return interaction.reply({ content: '❌ 無權限。', ephemeral: true }).catch(()=>{});
                 if (!trade.p1.offer || !trade.p2.offer) return interaction.reply({ content: '❌ 雙方皆須放物品。', ephemeral: true }).catch(()=>{});
-
+                
                 if (isP1) trade.p1.confirmed = true;
                 if (isP2) trade.p2.confirmed = true;
-
+                
                 if (trade.p1.confirmed && trade.p2.confirmed) {
                     const p1Data = getPlayer(trade.p1.id), p2Data = getPlayer(trade.p2.id);
+                    
                     function transferItem(fromDB, toDB, itemName) {
                         if (fromDB.inventory[itemName]) {
                             fromDB.inventory[itemName]--;
-                            if (fromDB.inventory[itemName] <= 0) { delete fromDB.inventory[itemName]; if (fromDB.equipped === itemName) fromDB.equipped = null; fromDB.team = fromDB.team.filter(x => x !== itemName); }
+                            if (fromDB.inventory[itemName] <= 0) {
+                                delete fromDB.inventory[itemName];
+                                if (fromDB.equipped === itemName) fromDB.equipped = null;
+                                fromDB.team = fromDB.team.filter(x => x !== itemName);
+                            }
                             toDB.inventory[itemName] = (toDB.inventory[itemName] || 0) + 1;
                         } else if (fromDB.egos[itemName]) {
                             fromDB.egos[itemName]--;
@@ -637,13 +675,15 @@ client.on('interactionCreate', async (interaction) => {
                             toDB.egos[itemName] = (toDB.egos[itemName] || 0) + 1;
                         }
                     }
+                    
                     transferItem(p1Data, p2Data, trade.p1.offer);
                     transferItem(p2Data, p1Data, trade.p2.offer);
                     saveDatabase();
                     activeTrades.delete(tId);
+                    
                     return interaction.update({ embeds: [new EmbedBuilder().setTitle('✅ 交易成功').setColor(0x2A9D8F).setDescription(`**${trade.p1.name}** 得 ${trade.p2.offer}\n**${trade.p2.name}** 得 ${trade.p1.offer}`)], components: [] }).catch(()=>{});
                 } else {
-                    return interaction.reply({ content: `✅ 您已確認。等待對方...`, ephemeral: true }).catch(()=>{});
+                    return interaction.reply({ content: '✅ 您已確認。等待對方...', ephemeral: true }).catch(()=>{});
                 }
             }
         }
