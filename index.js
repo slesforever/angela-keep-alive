@@ -161,14 +161,21 @@ function checkAndRegisterPlayer(db, userId, username) {
             level: 1,
             exp: 0,
             thread: 0,
-            stageProgress: 1
+            stageProgress: 1,
+            lastDaily: 0
         };
         savePlayerData(db);
         return true;
     }
+    // 補齊可能缺失的舊欄位
     if (!db[userId].egos) db[userId].egos = [];
     if (!db[userId].equippedEgos) db[userId].equippedEgos = [];
     if (!db[userId].team) db[userId].team = [];
+    if (db[userId].level === undefined) db[userId].level = 1;
+    if (db[userId].exp === undefined) db[userId].exp = 0;
+    if (db[userId].thread === undefined) db[userId].thread = 0;
+    if (db[userId].stageProgress === undefined) db[userId].stageProgress = 1;
+    if (db[userId].lastDaily === undefined) db[userId].lastDaily = 0;
     return false;
 }
 
@@ -287,7 +294,6 @@ client.once('ready', async () => {
     await syncDBFromDiscord();
     isDbReady = true;
 
-    // 排程每 60 秒監控公告
     setInterval(() => { 
         checkSteamUpdates(false, null); 
         checkTwitterUpdates(false, null);
@@ -401,8 +407,49 @@ client.on('messageCreate', async (message) => {
         return checkTwitterUpdates(true, message);
     }
 
-    // 權限指令組
-    if (msg.startsWith('!givelunacy') || msg.startsWith('!updaterewards') || msg.startsWith('!updatebuff')) {
+    // 每日簽到
+    if (msg === '!daily') {
+        const player = db[message.author.id];
+        const now = Date.now();
+        const oneDay = 24 * 60 * 60 * 1000;
+        if (now - player.lastDaily < oneDay) {
+            const remaining = oneDay - (now - player.lastDaily);
+            const hours = Math.floor(remaining / (60 * 60 * 1000));
+            const mins = Math.floor((remaining % (60 * 60 * 1000)) / (60 * 1000));
+            return message.reply(`⏳ 報告主管，您今天已經完成了補給簽到。請等待 ${hours} 小時 ${mins} 分鐘後再次申請。`);
+        }
+        player.lunacy += 300;
+        player.thread += 10;
+        player.lastDaily = now;
+        savePlayerData(db);
+        return message.reply('🎁 **今日腦葉物資已核發**：獲取了 💎 `300` 狂氣 與 🧵 `10` 紡織線！');
+    }
+
+    // 個人觀測檔案
+    if (msg === '!profile' || msg === '!status') {
+        const player = db[message.author.id];
+        const expNeeded = player.level * 100;
+        const progressPercent = Math.min(100, Math.floor((player.exp / expNeeded) * 100));
+        const barLength = 10;
+        const filled = Math.round((progressPercent / 100) * barLength);
+        const bar = '■'.repeat(filled) + '□'.repeat(barLength - filled);
+
+        const embed = new EmbedBuilder()
+            .setTitle(`🗂️ 邊獄公司管理部 — 執行檔案 : ${message.author.username}`)
+            .setColor(0x00ffffff)
+            .addFields(
+                { name: '🎖️ 核心觀測等級', value: `\`Lv. ${player.level}\` \n[${bar}] ${player.exp}/${expNeeded} (${progressPercent}%)`, inline: false },
+                { name: '💎 現有狂氣', value: `\`${player.lunacy}\` 點`, inline: true },
+                { name: '🧵 自我中心紡織線', value: `\`${player.thread}\` 條`, inline: true },
+                { name: '🧭 當前迷宮觀測進度', value: `第 \`${player.stageProgress}\` 關卡`, inline: true },
+                { name: '👥 當前配置小隊', value: `\`\`\`${player.team.join(', ') || '尚未編制部隊'}\`\`\``, inline: false }
+            )
+            .setTimestamp();
+        return message.reply({ embeds: [embed] });
+    }
+
+    // 權限管理指令組
+    if (msg.startsWith('!givelunacy') || msg.startsWith('!updaterewards') || msg.startsWith('!updatebuff') || msg.startsWith('!givethread')) {
         if (message.author.id !== OWNER_ID && message.author.username !== ADMIN_ID) return;
 
         if (msg.startsWith('!givelunacy')) {
@@ -415,6 +462,18 @@ client.on('messageCreate', async (message) => {
             db[targetId].lunacy += amount;
             savePlayerData(db);
             return message.reply(`✅ 成功向 ${targetUser ? targetUser.username : '您自己'} 發放了 **${amount}** 點狂氣。`);
+        }
+
+        if (msg.startsWith('!givethread')) {
+            const targetUser = message.mentions.users.first();
+            const amount = parseInt(targetUser ? args[2] : args[1]);
+            if (isNaN(amount)) return message.reply('❌ 語法錯誤：`!givethread [@用戶] <數量>`');
+
+            const targetId = targetUser ? targetUser.id : message.author.id;
+            checkAndRegisterPlayer(db, targetId, targetUser ? targetUser.username : message.author.username);
+            db[targetId].thread += amount;
+            savePlayerData(db);
+            return message.reply(`✅ 成功向 ${targetUser ? targetUser.username : '您自己'} 發放了 **${amount}** 條紡織線。`);
         }
 
         if (msg.startsWith('!updaterewards')) {
@@ -441,7 +500,7 @@ client.on('messageCreate', async (message) => {
         }
     }
 
-    // !list 完美對齊且不跳頁
+    // !list：精準排序不跳階
     if (msg === '!list') {
         const EXACT_RARITIES = ['0', '00', '000', 'E.g.o', '0000', 'ColorFixer', 'Special'];
         const ITEMS_PER_PAGE = 12; 
@@ -512,6 +571,7 @@ client.on('messageCreate', async (message) => {
         return;
     }
 
+    // !pull 與 !10pulls：新增重複抽取自動轉換紡織線功能
     if (msg === '!pull' || msg === '!10pulls') {
         const player = db[message.author.id];
         const cost = msg === '!10pulls' ? 1300 : 130;
@@ -519,25 +579,43 @@ client.on('messageCreate', async (message) => {
 
         player.lunacy -= cost;
         const totalRolls = msg === '!10pulls' ? 10 : 1;
-        const results = [];
+        const resultsText = [];
 
         for (let i = 1; i <= totalRolls; i++) {
             const rolledRarity = rollRarity(msg === '!10pulls' && i === 10);
             const finalCharacter = pullIdentity(rolledRarity);
-            results.push({ name: finalCharacter, rarity: rolledRarity });
 
             if (rolledRarity === 'E.g.o' || rolledRarity === 'Egos') {
-                if (!player.egos.includes(finalCharacter)) player.egos.push(finalCharacter);
+                if (!player.egos.includes(finalCharacter)) {
+                    player.egos.push(finalCharacter);
+                    resultsText.push(`🔮 **${finalCharacter}** [${rarityToStars(rolledRarity)}] ✨ *NEW!*`);
+                } else {
+                    player.thread += 40; // 重複 E.G.O 轉換
+                    resultsText.push(`🔮 **${finalCharacter}** [${rarityToStars(rolledRarity)}] 🔁 *(重複，已自動轉換為 🧵 40 條紡織線)*`);
+                }
             } else {
-                if (!player.identities.includes(finalCharacter)) player.identities.push(finalCharacter);
+                if (!player.identities.includes(finalCharacter)) {
+                    player.identities.push(finalCharacter);
+                    resultsText.push(`• **${finalCharacter}** [${rarityToStars(rolledRarity)}] ✨ *NEW!*`);
+                } else {
+                    // 依階級發放不同數量的自我中心紡織線
+                    let refundThread = 5;
+                    if (rolledRarity === '00') refundThread = 15;
+                    if (rolledRarity === '000') refundThread = 30;
+                    if (rolledRarity === '0000') refundThread = 50;
+                    if (rolledRarity === 'ColorFixer' || rolledRarity === 'Special') refundThread = 100;
+                    
+                    player.thread += refundThread;
+                    resultsText.push(`• **${finalCharacter}** [${rarityToStars(rolledRarity)}] 🔁 *(重複 ➔ 🧵 +${refundThread} 紡織線)*`);
+                }
             }
         }
         savePlayerData(db);
 
         const embed = new EmbedBuilder()
-            .setTitle(msg === '!10pulls' ? '✨ 十連提取報告' : '🎯 單抽提取報告')
+            .setTitle(msg === '!10pulls' ? '✨ 腦葉大庫 — 十連提取完成報告' : '🎯 腦葉大庫 — 單次提取完成報告')
             .setColor(0xffd166)
-            .setDescription(results.map(r => `${r.name} (${rarityToStars(r.rarity)})`).join('\n'));
+            .setDescription(resultsText.join('\n'));
         return message.reply({ embeds: [embed] });
     }
 
@@ -617,11 +695,11 @@ client.on('messageCreate', async (message) => {
             .setCustomId('select_stage')
             .setPlaceholder('選擇戰術難度...')
             .addOptions([
-                { label: '後巷流浪漢', description: `基礎收益 50 狂氣`, value: 'stage_1' },
-                { label: '後巷幫派', description: `基礎收益 100 狂氣`, value: 'stage_2' },
-                { label: '協會成員', description: `基礎收益 200 狂氣`, value: 'stage_3' },
-                { label: '異想體', description: `基礎收益 400 狂氣`, value: 'stage_4' },
-                { label: '高階收尾人', description: `基礎收益 800 狂氣`, value: 'stage_5' }
+                { label: '第一關：後巷流浪漢', description: `需要解鎖進度 1 | 收益 50 狂氣, 20 經驗值`, value: 'stage_1' },
+                { label: '第二關：後巷幫派', description: `需要解鎖進度 2 | 收益 100 狂氣, 50 經驗值`, value: 'stage_2' },
+                { label: '第三關：協會成員', description: `需要解鎖進度 3 | 收益 200 狂氣, 100 經驗值`, value: 'stage_3' },
+                { label: '第四關：異想體觀測', description: `需要解鎖進度 4 | 收益 400 狂氣, 250 經驗值`, value: 'stage_4' },
+                { label: '第五關：高階收尾人', description: `需要解鎖進度 5 | 收益 800 狂氣, 600 經驗值`, value: 'stage_5' }
             ]);
         return message.reply({ embeds: [embed], components: [new ActionRowBuilder().addComponents(menu)] });
     }
@@ -634,7 +712,7 @@ client.on('interactionCreate', async (interaction) => {
     const player = db[interaction.user.id];
     if (!player) return;
 
-    // 處理出擊隊伍選擇 (嚴格限制同罪人不可重複)
+    // 處理出擊隊伍選擇 (限制同罪人不可重複)
     if (interaction.isStringSelectMenu() && interaction.customId === 'team_select_menu') {
         const selectedSinners = new Set();
         for (const idName of interaction.values) {
@@ -658,21 +736,27 @@ client.on('interactionCreate', async (interaction) => {
         return interaction.update({ content: `✅ E.G.O 裝備完畢！(共 ${player.equippedEgos.length} 件綁定完成)`, embeds: [], components: [] });
     }
 
-    // 處理戰鬥階段
+    // 處理戰鬥階段 (內含等級提升、經驗結算、進度升級)
     if (interaction.isStringSelectMenu() && interaction.customId === 'select_stage') {
         if (!player.team || player.team.length === 0) {
-            return interaction.reply({ content: '❌ 請先使用 `!pack` 配置您的隊伍！', ephemeral: true });
+            return interaction.reply({ content: '❌ 請先使用 `!pack` 配置您的出擊小隊！', ephemeral: true });
         }
 
         const stages = {
-            stage_1: { name: '後巷流浪漢', hp: 90, cp: 5, rwd: 50 },
-            stage_2: { name: '後巷幫派', hp: 220, cp: 7, rwd: 100 },
-            stage_3: { name: '協會成員', hp: 450, cp: 9, rwd: 200 },
-            stage_4: { name: '異想體', hp: 900, cp: 11, rwd: 400 },
-            stage_5: { name: '高階收尾人', hp: 1500, cp: 14, rwd: 800 }
+            stage_1: { id: 1, name: '後巷流浪漢', hp: 90, cp: 5, rwd: 50, exp: 20 },
+            stage_2: { id: 2, name: '後巷幫派', hp: 220, cp: 7, rwd: 100, exp: 50 },
+            stage_3: { id: 3, name: '協會成員', hp: 450, cp: 9, rwd: 200, exp: 100 },
+            stage_4: { id: 4, name: '異想體', hp: 900, cp: 11, rwd: 400, exp: 250 },
+            stage_5: { id: 5, name: '高階收尾人', hp: 1500, cp: 14, rwd: 800, exp: 600 }
         };
 
         const targetStage = stages[interaction.values[0]];
+
+        // 關卡解鎖進度驗證
+        if (player.stageProgress < targetStage.id) {
+            return interaction.reply({ content: `❌ **觀測權限不足**：您尚未解鎖此關卡。當前最大容許進度：第 **${player.stageProgress}** 關。`, ephemeral: true });
+        }
+
         await interaction.deferReply();
 
         // 讀取 E.G.O 加成數值 (每件提供 HP +15, 拼點 +1)
@@ -680,20 +764,24 @@ client.on('interactionCreate', async (interaction) => {
         const hpBuff = egosCount * 15;
         const clashBuff = egosCount * 1;
 
+        // 根據玩家核心等級提升基礎戰力 (每級全體 HP+5%, 拼點基礎+0.2)
+        const levelMultiplier = 1 + (player.level - 1) * 0.05;
+        const levelClashBonus = Math.floor((player.level - 1) * 0.2);
+
         const combatTeam = player.team.map(name => {
             let foundRarity = '0';
             for (const [r, list] of Object.entries(identitiesData.identities)) {
                 if (list.includes(name)) { foundRarity = r; break; }
             }
             const stats = calculateIdentityStats(name, foundRarity);
-            stats.hp += hpBuff;            
-            stats.clashPower += clashBuff; 
+            stats.hp = Math.round((stats.hp + hpBuff) * levelMultiplier);            
+            stats.clashPower += clashBuff + levelClashBonus; 
             return stats;
         });
 
         let enemyHp = targetStage.hp;
         let turn = 1;
-        let logs = [`🎬 **交戰『${targetStage.name}』** (隊伍 E.G.O 增益: HP+${hpBuff}, 拼點+${clashBuff})`];
+        let logs = [`🎬 **交戰『${targetStage.name}』** (E.G.O 增益: HP+${hpBuff}, 拼點+${clashBuff} | 等級增幅: ${Math.round(levelMultiplier*100)}%)`];
 
         while (turn <= 30 && enemyHp > 0 && combatTeam.some(s => s.hp > 0)) {
             const alive = combatTeam.filter(s => s.hp > 0);
@@ -715,14 +803,32 @@ client.on('interactionCreate', async (interaction) => {
         const endEmbed = new EmbedBuilder().setTimestamp();
 
         if (victory) {
-            const rwd = Math.round(targetStage.rwd * globalRewardMultiplier);
-            player.lunacy += rwd;
+            const rwdLunacy = Math.round(targetStage.rwd * globalRewardMultiplier);
+            const rwdExp = targetStage.exp;
+            
+            player.lunacy += rwdLunacy;
+            player.exp += rwdExp;
+
+            let levelUpNotice = '';
+            // 處理等級提升
+            while (player.exp >= player.level * 100) {
+                player.exp -= player.level * 100;
+                player.level++;
+                levelUpNotice = `\n🎊 **【核心階級觀測解禁】**：恭喜主管，您提升至了 **Lv.${player.level}**！戰隊整體基礎實力獲得永久成長！`;
+            }
+
+            // 推進關卡進度
+            if (player.stageProgress === targetStage.id && player.stageProgress < 5) {
+                player.stageProgress++;
+                levelUpNotice += `\n🧭 **【新區段觀測點解鎖】**：已獲准開拓第 **${player.stageProgress}** 關卡控制權。`;
+            }
+
             savePlayerData(db);
             endEmbed.setTitle('🏆 戰術壓制成功').setColor(0x00f5d4)
-                .setDescription(`${logs.slice(-4).join('\n')}\n\n**🎁 獎勵：** 核發 💎 **${rwd}** 狂氣！`);
+                .setDescription(`${logs.slice(-4).join('\n')}\n\n**🎁 戰果結算：**\n核發 💎 **${rwdLunacy}** 狂氣！\n注入 🎖️ **${rwdExp}** 核心觀測經驗值。${levelUpNotice}`);
         } else {
             endEmbed.setTitle('🛑 隊伍潰散').setColor(0xd90429)
-                .setDescription(`${logs.slice(-4).join('\n')}\n\n「主管，請調整編制或裝備更多 E.G.O。」`);
+                .setDescription(`${logs.slice(-4).join('\n')}\n\n「主管，作戰失敗。請使用 \`!pack\` 調整編制、抽取更高級的人格，或者裝備更多 E.G.O 後重試。」`);
         }
         return interaction.editReply({ embeds: [endEmbed] });
     }
