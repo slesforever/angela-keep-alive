@@ -167,7 +167,6 @@ function checkAndRegisterPlayer(db, userId, username) {
         savePlayerData(db);
         return true;
     }
-    // 補齊可能缺失的舊欄位
     if (!db[userId].egos) db[userId].egos = [];
     if (!db[userId].equippedEgos) db[userId].equippedEgos = [];
     if (!db[userId].team) db[userId].team = [];
@@ -397,12 +396,31 @@ client.on('messageCreate', async (message) => {
     const msg = message.content.trim();
     const args = msg.split(/\s+/);
 
+    // 1. 全指令手冊 (極重要核心功能補回)
+    if (msg === '!cmds' || msg === '!help') {
+        const embed = new EmbedBuilder()
+            .setTitle('📑 邊獄公司管理部 — 系統控制終端指令集')
+            .setDescription('報告主管，以下為當前控制台對應之全功能指令手冊：')
+            .setColor(0x313131)
+            .addFields(
+                { name: '🧭 官方動態觀測', value: '`!steam` - 強制讀取官方 Steam 最新更動公告。\n`!tweet` 或 `!twitter` - 強制觀測官方 X (Twitter) 最新公告。', inline: false },
+                { name: '🎲 腦葉大庫提取 (扭蛋系統)', value: '`!pull` - 消耗 💎 130 狂氣進行單次人格/E.G.O提取。\n`!10pulls` - 消耗 💎 1300 狂氣進行十連提取（第十抽保底 ★★ 以上）。\n`!list` - 開啟互動式不跳階面版，查閱各階級與各人格之精準概率。', inline: false },
+                { name: '🎒 物資檢視與編組', value: '`!pack` - 開啟互動儲藏庫面版。可分頁查閱持有物、配置出擊戰隊（限7人且罪人唯一）與裝備 E.G.O。\n`!profile` 或 `!status` - 查閱主管個人的核心等級、總經驗值、紡織線與迷宮關卡進度。', inline: false },
+                { name: '⚔️ 鏡像迷宮觀測 (戰鬥與進度)', value: '`!stages` - 挑選難度並派遣已編制戰隊進行戰術壓制。通關可獲取狂氣、經驗值並推進解鎖新關卡。', inline: false },
+                { name: '🎁 日常物資發放', value: '`!daily` - 每日向管理部申領一次 💎 300 狂氣 與 🧵 10 紡織線。', inline: false }
+            )
+            .setFooter({ text: '※ 管理員專用指令組：!givelunacy, !givethread, !updaterewards, !updatebuff' })
+            .setTimestamp();
+        return message.reply({ embeds: [embed] });
+    }
+
+    // 2. 官方動態強制爬取指令 (同步支援 !tweet / !twitter 與 !steam)
     if (msg === '!steam') {
         await message.channel.sendTyping();
         return checkSteamUpdates(true, message);
     }
 
-    if (msg === '!twitter') {
+    if (msg === '!twitter' || msg === '!tweet') {
         await message.channel.sendTyping();
         return checkTwitterUpdates(true, message);
     }
@@ -540,9 +558,9 @@ client.on('messageCreate', async (message) => {
                     const prefix = isUp ? `🔼 [UP] ${name}` : `• ${name}`;
                     const currentWidth = getVisualWidth(prefix);
                     const dots = ".".repeat(Math.max(2, 52 - currentWidth));
-                    return `\`${prefix} ${dots} [${individualPercent}%]\``;
+                    return `${prefix} ${dots} [${individualPercent}%]`;
                 });
-                desc = `• 階級總獲取概率: \`${pageData.basePercent}%\`\n• 總計實體: \`${pageData.poolSize}\` 名\n\n${displayLines.join('\n')}`;
+                desc = `• 階級總獲取概率: \`${pageData.basePercent}%\`\n• 總計實體: \`${pageData.poolSize}\` 名\n\n\`\`\`md\n${displayLines.join('\n')}\n\`\`\``;
             }
 
             return new EmbedBuilder()
@@ -571,7 +589,7 @@ client.on('messageCreate', async (message) => {
         return;
     }
 
-    // !pull 與 !10pulls：新增重複抽取自動轉換紡織線功能
+    // !pull 與 !10pulls：重複抽取自動轉換紡織線功能
     if (msg === '!pull' || msg === '!10pulls') {
         const player = db[message.author.id];
         const cost = msg === '!10pulls' ? 1300 : 130;
@@ -590,15 +608,14 @@ client.on('messageCreate', async (message) => {
                     player.egos.push(finalCharacter);
                     resultsText.push(`🔮 **${finalCharacter}** [${rarityToStars(rolledRarity)}] ✨ *NEW!*`);
                 } else {
-                    player.thread += 40; // 重複 E.G.O 轉換
-                    resultsText.push(`🔮 **${finalCharacter}** [${rarityToStars(rolledRarity)}] 🔁 *(重複，已自動轉換為 🧵 40 條紡織線)*`);
+                    player.thread += 40; 
+                    resultsText.push(`🔮 **${finalCharacter}** [${rarityToStars(rolledRarity)}] 🔁 *(重複 ➔ 🧵 +40 紡織線)*`);
                 }
             } else {
                 if (!player.identities.includes(finalCharacter)) {
                     player.identities.push(finalCharacter);
                     resultsText.push(`• **${finalCharacter}** [${rarityToStars(rolledRarity)}] ✨ *NEW!*`);
                 } else {
-                    // 依階級發放不同數量的自我中心紡織線
                     let refundThread = 5;
                     if (rolledRarity === '00') refundThread = 15;
                     if (rolledRarity === '000') refundThread = 30;
@@ -752,19 +769,16 @@ client.on('interactionCreate', async (interaction) => {
 
         const targetStage = stages[interaction.values[0]];
 
-        // 關卡解鎖進度驗證
         if (player.stageProgress < targetStage.id) {
             return interaction.reply({ content: `❌ **觀測權限不足**：您尚未解鎖此關卡。當前最大容許進度：第 **${player.stageProgress}** 關。`, ephemeral: true });
         }
 
         await interaction.deferReply();
 
-        // 讀取 E.G.O 加成數值 (每件提供 HP +15, 拼點 +1)
         const egosCount = (player.equippedEgos || []).length;
         const hpBuff = egosCount * 15;
         const clashBuff = egosCount * 1;
 
-        // 根據玩家核心等級提升基礎戰力 (每級全體 HP+5%, 拼點基礎+0.2)
         const levelMultiplier = 1 + (player.level - 1) * 0.05;
         const levelClashBonus = Math.floor((player.level - 1) * 0.2);
 
@@ -810,14 +824,12 @@ client.on('interactionCreate', async (interaction) => {
             player.exp += rwdExp;
 
             let levelUpNotice = '';
-            // 處理等級提升
             while (player.exp >= player.level * 100) {
                 player.exp -= player.level * 100;
                 player.level++;
                 levelUpNotice = `\n🎊 **【核心階級觀測解禁】**：恭喜主管，您提升至了 **Lv.${player.level}**！戰隊整體基礎實力獲得永久成長！`;
             }
 
-            // 推進關卡進度
             if (player.stageProgress === targetStage.id && player.stageProgress < 5) {
                 player.stageProgress++;
                 levelUpNotice += `\n🧭 **【新區段觀測點解鎖】**：已獲准開拓第 **${player.stageProgress}** 關卡控制權。`;
