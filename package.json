@@ -1,14 +1,21 @@
 {
   "name": "angela-bot",
-  "version": "1.1.0",
-  "description": "Angela Bot for Discord - Stream & Twitter Feature Version",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Angela Discord bot",
   "main": "index.js",
+  "type": "commonjs",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "postinstall": "node scripts/init-data.js"
+  },
+  "engines": {
+    "node": "20.x"
   },
   "dependencies": {
-    "discord.js": "^14.14.1",
-    "express": "^4.18.2",
-    "node-fetch": "^2.7.0"
+    "better-sqlite3": "^11.8.1",
+    "discord.js": "^14.16.3",
+    "express": "^4.21.2",
+    "node-fetch": "^3.3.2"
   }
 }
