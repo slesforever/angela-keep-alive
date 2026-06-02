@@ -7,11 +7,11 @@ const fetchImpl =
         ? global.fetch.bind(global)
         : (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
-const TARGET_USER = 'LimbusCompany_B';
-const NOTIFY_CHANNEL_ID = '1402282604165730348';
-const PING_ROLE_MENTION = '<@&1406984068725211177>';
+const TARGET_USER = process.env.TARGET_USER || 'LimbusCompany_B';
+const NOTIFY_CHANNEL_ID = process.env.NOTIFY_CHANNEL_ID || '1402282604165730348';
+const PING_ROLE_MENTION = process.env.PING_ROLE_MENTION || '<@&1406984068725211177>';
+const X_BEARER_TOKEN = process.env.X_BEARER_TOKEN || '';
 
-// 備援用的 RSSHub 及 Nitter 節點群
 const RSSHUB_NODES = [
     'https://rsshub.app',
     'https://rsshub.moeyy.cn',
@@ -27,13 +27,14 @@ const NITTER_NODES = [
 
 let lastFetchedId = null;
 
-// 帶有超時控制的 Fetch
 function fetchWithTimeout(url, options = {}, timeoutMs = 7000) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
-    return fetchImpl(url, { ...options, signal: controller.signal })
-        .finally(() => clearTimeout(timeout));
+    return fetchImpl(url, {
+        ...options,
+        signal: controller.signal,
+    }).finally(() => clearTimeout(timeout));
 }
 
 function decodeHtmlEntities(str = '') {
@@ -66,21 +67,14 @@ function normalizeTweetLink(link = '') {
     let out = link.trim();
 
     if (out.startsWith('http://')) out = out.replace('http://', 'https://');
+
     out = out.replace(/^https:\/\/(twitter\.com|x\.com)/i, 'https://vxtwitter.com');
-    out = out.replace(/^https:\/\/[^/]+\/([A-Za-z0-9_]+)\/status\/(\d+).*/i, 'https://vxtwitter.com/$1/status/$2');
+    out = out.replace(
+        /^https:\/\/[^/]+\/([A-Za-z0-9_]+)\/status\/(\d+).*/i,
+        'https://vxtwitter.com/$1/status/$2'
+    );
 
     return out;
-}
-
-function extractLatestTweetFromVx(data) {
-    if (!data) return null;
-
-    if (Array.isArray(data?.tweets) && data.tweets.length > 0) return data.tweets[0];
-    if (Array.isArray(data?.data) && data.data.length > 0) return data.data[0];
-    if (Array.isArray(data) && data.length > 0) return data[0];
-    if (data?.tweet) return data.tweet;
-
-    return null;
 }
 
 function extractFirstMatch(text, regex) {
@@ -104,6 +98,17 @@ function extractItemFromRss(xml) {
         extractFirstMatch(item, /<description>([\s\S]*?)<\/description>/i);
 
     return { link, title, desc };
+}
+
+function extractLatestTweetFromVx(data) {
+    if (!data) return null;
+
+    if (Array.isArray(data?.tweets) && data.tweets.length > 0) return data.tweets[0];
+    if (Array.isArray(data?.data) && data.data.length > 0) return data.data[0];
+    if (Array.isArray(data) && data.length > 0) return data[0];
+    if (data?.tweet) return data.tweet;
+
+    return null;
 }
 
 async function sendNotification(client, embed, isManual = false, messageContext = null) {
@@ -130,98 +135,172 @@ async function sendNotification(client, embed, isManual = false, messageContext 
     });
 }
 
+async function fetchOfficialXLatestTweet() {
+    if (!X_BEARER_TOKEN) return null;
+
+    const headers = {
+        Authorization: `Bearer ${X_BEARER_TOKEN}`,
+    };
+
+    const userUrl = `https://api.x.com/2/users/by/username/${encodeURIComponent(TARGET_USER)}?user.fields=id,username,name`;
+    const userRes = await fetchWithTimeout(userUrl, { headers });
+
+    if (!userRes.ok) return null;
+
+    const userJson = await userRes.json();
+    const userId = userJson?.data?.id;
+    if (!userId) return null;
+
+    const tweetUrl = `https://api.x.com/2/users/${userId}/tweets?max_results=5&tweet.fields=created_at,text`;
+    const tweetRes = await fetchWithTimeout(tweetUrl, { headers });
+
+    if (!tweetRes.ok) return null;
+
+    const tweetJson = await tweetRes.json();
+    const tweet = tweetJson?.data?.[0];
+    if (!tweet?.id) return null;
+
+    return {
+        id: tweet.id,
+        text: tweet.text || '',
+        link: `https://x.com/${TARGET_USER}/status/${tweet.id}`,
+        source: 'X API v2',
+    };
+}
+
+async function fetchVxTwitterLatestTweet() {
+    const vxUrl = `https://api.vxtwitter.com/${encodeURIComponent(TARGET_USER)}`;
+    const res = await fetchWithTimeout(vxUrl);
+
+    if (!res.ok) return null;
+
+    const data = await res.json();
+    const latestTweet = extractLatestTweetFromVx(data);
+    if (!latestTweet) return null;
+
+    const id = latestTweet.id || latestTweet.tweetID || latestTweet.tweet_id;
+    if (!id) return null;
+
+    const text = latestTweet.text || latestTweet.full_text || latestTweet.content || '';
+
+    return {
+        id: String(id),
+        text,
+        link: `https://vxtwitter.com/${TARGET_USER}/status/${id}`,
+        source: 'VxTwitter JSON API',
+    };
+}
+
+async function fetchFromRssHub() {
+    for (const node of RSSHUB_NODES) {
+        try {
+            const rssHubUrl = `${node}/twitter/user/${encodeURIComponent(TARGET_USER)}`;
+            const res = await fetchWithTimeout(rssHubUrl);
+
+            if (!res.ok) continue;
+
+            const xml = await res.text();
+            const item = extractItemFromRss(xml);
+            if (!item?.link) continue;
+
+            const normalizedLink = normalizeTweetLink(item.link);
+            if (!normalizedLink) continue;
+
+            const idMatch = normalizedLink.match(/status\/(\d+)/i);
+            const id = idMatch?.[1] || normalizedLink;
+
+            return {
+                id,
+                text: cleanText(item.title || item.desc || ''),
+                link: normalizedLink,
+                source: `RSSHub (${new URL(node).hostname})`,
+            };
+        } catch (e) {
+            console.warn(`[Twitter監測] RSSHub 節點 ${node} 異常: ${e.message}`);
+        }
+    }
+
+    return null;
+}
+
+async function fetchFromNitterRss() {
+    for (const node of NITTER_NODES) {
+        try {
+            const nitterUrl = `${node}/${encodeURIComponent(TARGET_USER)}/rss`;
+            const res = await fetchWithTimeout(nitterUrl);
+
+            if (!res.ok) continue;
+
+            const xml = await res.text();
+            const item = extractItemFromRss(xml);
+            if (!item?.link) continue;
+
+            const normalizedLink = normalizeTweetLink(item.link);
+            if (!normalizedLink) continue;
+
+            const idMatch = normalizedLink.match(/status\/(\d+)/i);
+            const id = idMatch?.[1] || normalizedLink;
+
+            return {
+                id,
+                text: cleanText(item.desc || item.title || ''),
+                link: normalizedLink,
+                source: `Nitter RSS (${new URL(node).hostname})`,
+            };
+        } catch (e) {
+            console.warn(`[Twitter監測] Nitter 節點 ${node} 異常: ${e.message}`);
+        }
+    }
+
+    return null;
+}
+
+async function getLatestTweet() {
+    const strategies = [
+        fetchOfficialXLatestTweet,
+        fetchVxTwitterLatestTweet,
+        fetchFromRssHub,
+        fetchFromNitterRss,
+    ];
+
+    for (const strategy of strategies) {
+        try {
+            const result = await strategy();
+            if (result?.link) return result;
+        } catch (e) {
+            console.warn(`[Twitter監測] 策略失敗: ${e.message}`);
+        }
+    }
+
+    return null;
+}
+
 /**
  * Twitter / X 監測核心
  */
 async function checkTwitterUpdates(client, isManual = false, messageContext = null) {
-    let finalTweetLink = null;
-    let finalTweetText = '點擊下方連結檢視最新公告內容';
-    let strategyUsed = '';
+    let latestTweet = null;
 
-    // 方案一：VxTwitter API
     try {
-        console.log('[Twitter監測] 正在嘗試 方案一 (VxTwitter API)...');
-        const vxUrl = `https://api.vxtwitter.com/${TARGET_USER}`;
-        const res = await fetchWithTimeout(vxUrl);
-
-        if (res.ok) {
-            const data = await res.json();
-            const latestTweet = extractLatestTweetFromVx(data);
-
-            if (latestTweet) {
-                const id = latestTweet.id || latestTweet.tweetID || latestTweet.tweet_id;
-                const text = latestTweet.text || latestTweet.full_text || latestTweet.content || '';
-
-                if (id) {
-                    finalTweetLink = `https://vxtwitter.com/${TARGET_USER}/status/${id}`;
-                    finalTweetText = cleanText(text).slice(0, 300) || finalTweetText;
-                    strategyUsed = 'VxTwitter JSON API';
-                }
-            }
-        }
+        console.log(`[Twitter監測] 開始抓取：${TARGET_USER}`);
+        latestTweet = await getLatestTweet();
     } catch (e) {
-        console.warn(`[Twitter監測] 方案一失敗: ${e.message}`);
+        console.error(`[Twitter監測] 抓取流程異常: ${e.message}`);
     }
 
-    // 方案二：RSSHub
-    if (!finalTweetLink) {
-        for (const node of RSSHUB_NODES) {
-            try {
-                console.log(`[Twitter監測] 正在嘗試 方案二 (RSSHub: ${node})...`);
-                const rssHubUrl = `${node}/twitter/user/${TARGET_USER}`;
-                const res = await fetchWithTimeout(rssHubUrl);
-
-                if (!res.ok) continue;
-
-                const xml = await res.text();
-                const item = extractItemFromRss(xml);
-                if (!item?.link) continue;
-
-                finalTweetLink = normalizeTweetLink(item.link);
-                finalTweetText = cleanText(item.title || item.desc || finalTweetText).slice(0, 300) || finalTweetText;
-                strategyUsed = `RSSHub (${new URL(node).hostname})`;
-                break;
-            } catch (e) {
-                console.warn(`[Twitter監測] RSSHub 節點 ${node} 異常: ${e.message}`);
-            }
-        }
-    }
-
-    // 方案三：Nitter RSS
-    if (!finalTweetLink) {
-        for (const node of NITTER_NODES) {
-            try {
-                console.log(`[Twitter監測] 正在嘗試 方案三 (Nitter: ${node})...`);
-                const nitterUrl = `${node}/${TARGET_USER}/rss`;
-                const res = await fetchWithTimeout(nitterUrl);
-
-                if (!res.ok) continue;
-
-                const xml = await res.text();
-                const item = extractItemFromRss(xml);
-                if (!item?.link) continue;
-
-                finalTweetLink = normalizeTweetLink(item.link);
-                finalTweetText = cleanText(item.desc || item.title || finalTweetText).slice(0, 300) || finalTweetText;
-                strategyUsed = `Nitter RSS (${new URL(node).hostname})`;
-                break;
-            } catch (e) {
-                console.warn(`[Twitter監測] Nitter 節點 ${node} 異常: ${e.message}`);
-            }
-        }
-    }
-
-    if (!finalTweetLink) {
+    if (!latestTweet) {
         console.error('❌ [Twitter監測] 所有抓取策略均失敗，無法取得最新推文。');
 
         if (isManual && messageContext) {
-            return messageContext.reply('❌ 目前所有監測線路（API / RSSHub / Nitter）都不可用，請稍後再試。');
+            return messageContext.reply(
+                '❌ 目前所有監測線路（官方 API / VxTwitter / RSSHub / Nitter）都不可用，請稍後再試。'
+            );
         }
 
         return;
     }
 
-    const uniqueId = finalTweetLink;
+    const uniqueId = latestTweet.id || latestTweet.link;
 
     if (!isManual && lastFetchedId === uniqueId) {
         return;
@@ -229,14 +308,16 @@ async function checkTwitterUpdates(client, isManual = false, messageContext = nu
 
     if (!isManual) lastFetchedId = uniqueId;
 
+    const finalText = cleanText(latestTweet.text || '點擊下方連結檢視最新公告內容').slice(0, 300);
+
     const tweetEmbed = new EmbedBuilder()
         .setTitle('📢 Project Moon 官方 Twitter 最新情報')
         .setDescription(
-            `**內文摘要：**\n${finalTweetText}\n\n` +
-            `**連結：** [點擊此處查看原文](${finalTweetLink})`
+            `**內文摘要：**\n${finalText || '（無法解析內文）'}\n\n` +
+            `**連結：** [點擊此處查看原文](${latestTweet.link})`
         )
         .setColor(0x5865f2)
-        .setFooter({ text: `來源策略：${strategyUsed || 'Unknown'}` })
+        .setFooter({ text: `來源策略：${latestTweet.source || 'Unknown'}` })
         .setTimestamp(new Date());
 
     return sendNotification(client, tweetEmbed, isManual, messageContext);
