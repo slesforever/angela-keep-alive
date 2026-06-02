@@ -29,7 +29,7 @@ const identities = {
     "［家主候選人］以實瑪利 / Family Hierarch Candidate Ishmael",
     "［鴻園的流浪武者］良秀 / Drifting Blade of Hongyuan Ryōshū",
     "［拇指東部指揮官 IIII］默爾索 / The Thumb East Capo IIII Meursault",
-    "［東部拇指 士兵 II］辛克萊 / The Thumb East Soldato II Sinclair ",
+    "［東部拇指 士兵 II］辛克萊 / The Thumb East Soldato II Sinclair",
     "［黑獸-未］堂吉訶德 / Heishou Pack - Wei Branch Don Quixote",
     "［黑獸-巳］格里高爾 / Heishou Pack - Si Branch Gregor",
     "［黑獸-巳］羅佳 / Heishou Pack - Si Branch Rodion",
@@ -41,7 +41,7 @@ const identities = {
     "［黑獸-卯］良秀 / Heishou Pack - Mao Branch Ryōshū",
     "［拉曼查·卻領 總督］堂吉訶德 / The Manager of La Manchaland Don Quixote",
     "［拉曼查·卻領 王子］默爾索 / The Prince of La Manchaland Meursault",
-    "［拉曼查·卻領 公主］羅佳 / The Princess of La Manchaland Rodionr",
+    "［拉曼查·卻領 公主］羅佳 / The Princess of La Manchaland Rodion",
     "［拉曼查·卻領 神父］格里高爾 / The Priest of La Manchaland Gregor",
     "［拉曼查·卻領 理髮師］奧提斯 / The Barber of La Manchaland Outis",
     "［句點事務所收尾人］希斯克里夫 / Full-Stop Office Fixer Heathcliff",
@@ -75,7 +75,7 @@ const identities = {
     "［黑雲會 眾］希斯克里夫 / Kurokumo Clan Wakashu Heathcliff",
     "［黑雲會 眾］羅佳 / Kurokumo Clan Wakashu Rodion",
     "［黑雲會 眾］良秀 / Kurokumo Clan Wakashu Ryōshū",
-    "［W公司 2區 清掃人員］奧提斯 / orp. L3 Cleanup Captain Outis",
+    "［W公司 2區 清掃人員］奧提斯 / W Corp. L3 Cleanup Captain Outis",
     "［W公司 2區 清掃人員］默爾索 / W Corp. L2 Cleanup Agent Meursault",
     "［W公司 3區 清掃人員］李箱 / W Corp. L3 Cleanup Agent Yi Sang",
     "［W公司 3區 清掃人員］良秀 / W Corp. L3 Cleanup Agent Ryōshū",
@@ -97,8 +97,8 @@ const identities = {
     "［七協會 南部6科 部長］奧提斯 / Seven Assoc. South Section 6 Director Outis",
     "［七協會 南部4科］浮士德 / Seven Assoc. South Section 4 Faust",
     "［六協會 南部4科 部長］羅佳 / Liu Assoc. South Section 4 Rodion",
-    " [五協會 南部5科 科長] 堂吉訶德 / Cinq Assoc. South Section 5 Director Don Quixote",
-    "［Cinq協會 南部5科］堂吉訶德 / Cinq Assoc. South Section 5 Don Director Quixote",
+    "［五協會 南部5科 科長］堂吉訶德 / Cinq Assoc. South Section 5 Director Don Quixote",
+    "［Cinq協會 南部5科］堂吉訶德 / Cinq Assoc. South Section 5 Don Quixote",
     "［Cinq協會 東部3科］堂吉訶德 / Cinq Assoc. East Section 3 Don Quixote",
     "［Cinq協會 西部3科］默爾索 / Cinq Assoc. West Section 3 Meursault",
     "［Zwei協會 西部3科］以實瑪利 / Zwei Assoc. West Section 3 Ishmael",
@@ -190,7 +190,7 @@ const identities = {
     "［邊獄公司 罪人］奧提斯 / LCB Sinner Outis",
     "［邊獄公司 罪人］格里高爾 / LCB Sinner Gregor"
   ],
-  
+
   'Egos': [
     "[ZAYIN] 緋色眼睛 / Scarlet Eyes - 羅秀",
     "[HE] 表皮 / Shrewd Skinny - 奧提斯",
