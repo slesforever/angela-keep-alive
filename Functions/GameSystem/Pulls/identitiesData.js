@@ -218,7 +218,7 @@ const upTargets = {
     "［中指 小弟］默爾索 / Middle Brother Meursault"
   ],
   '0': [
-     "［邊獄公司 罪人］格里高爾 / LCB Sinner Gregor"
+    "［邊獄公司 罪人］格里高爾 / LCB Sinner Gregor"
   ]
 };
 
@@ -237,6 +237,7 @@ function pullUpIdentity(rarity) {
 module.exports = {
   identities,
   upTargets,
+  pool: identities,
   pullIdentity,
   pullUpIdentity
 };
