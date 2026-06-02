@@ -1,7 +1,6 @@
 // Functions/Newscheck.js
 const { EmbedBuilder } = require('discord.js');
 
-// Node 18+ 有全域 fetch；沒有的話才動態載入 node-fetch
 const fetchImpl =
     typeof global.fetch === 'function'
         ? global.fetch.bind(global)
@@ -12,20 +11,26 @@ const NOTIFY_CHANNEL_ID = process.env.NOTIFY_CHANNEL_ID || '1402282604165730348'
 const PING_ROLE_MENTION = process.env.PING_ROLE_MENTION || '<@&1406984068725211177>';
 const X_BEARER_TOKEN = process.env.X_BEARER_TOKEN || '';
 
+// 更新後的 RSSHub 節點（移除已知失效節點）
 const RSSHUB_NODES = [
     'https://rsshub.app',
-    'https://rsshub.moeyy.cn',
     'https://rsshub.rssforever.com',
+    'https://rsshub.moeyy.xyz',
+    'https://rss.fatpandadev.com',
 ];
 
+// 更新後的 Nitter 節點（移除已知失效節點）
 const NITTER_NODES = [
-    'https://nitter.net',
     'https://nitter.poast.org',
     'https://nitter.cz',
-    'https://nitter.privacydev.net',
+    'https://nitter.net',
+    'https://nitter.1d4.us',
 ];
 
 let lastFetchedId = null;
+let newsLoopTimer = null;
+
+const CHECK_INTERVAL_MS = 60 * 1000;
 
 function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
     const controller = new AbortController();
@@ -288,9 +293,6 @@ async function getLatestTweet() {
     return null;
 }
 
-/**
- * Twitter / X 監測核心
- */
 async function checkTwitterUpdates(client, isManual = false, messageContext = null) {
     let latestTweet = null;
 
@@ -336,6 +338,75 @@ async function checkTwitterUpdates(client, isManual = false, messageContext = nu
     return sendNotification(client, tweetEmbed, isManual, messageContext);
 }
 
+// 修復：新增 checkSteamUpdates（避免 Commanders.js 引用錯誤）
+async function checkSteamUpdates(client, isManual = false, messageContext = null) {
+    try {
+        const STEAM_APP_ID = process.env.STEAM_APP_ID || '1973530';
+        const url = `https://store.steampowered.com/events/ajaxgetadjacentpartnerevents/?appid=${STEAM_APP_ID}&count_before=0&count_after=5&lang=tchinese`;
+
+        const res = await fetchWithTimeout(url);
+        if (!res.ok) throw new Error(`Steam API 回應異常: ${res.status}`);
+
+        const data = await res.json();
+        const events = data?.events;
+
+        if (!Array.isArray(events) || events.length === 0) {
+            if (isManual && messageContext) {
+                return messageContext.reply('ℹ️ 目前 Steam 上沒有新的公告。');
+            }
+            return;
+        }
+
+        const latest = events[0];
+        const title = latest?.announcement_body?.headline || '（無標題）';
+        const body = (latest?.announcement_body?.body || '')
+            .replace(/<[^>]+>/g, '')
+            .trim()
+            .slice(0, 300);
+        const gid = latest?.announcement_body?.gid;
+        const link = gid
+            ? `https://store.steampowered.com/news/app/${STEAM_APP_ID}/view/${gid}`
+            : `https://store.steampowered.com/app/${STEAM_APP_ID}/`;
+
+        const embed = new EmbedBuilder()
+            .setTitle(`🎮 Steam 最新公告：${title}`)
+            .setDescription(
+                `${body}\n\n**連結：** [點擊此處查看原文](${link})`
+            )
+            .setColor(0x1b2838)
+            .setTimestamp(new Date());
+
+        return sendNotification(client, embed, isManual, messageContext);
+    } catch (e) {
+        console.error(`[Steam監測] 抓取失敗: ${e.message}`);
+        if (isManual && messageContext) {
+            return messageContext.reply(`❌ Steam 公告抓取失敗：${e.message}`);
+        }
+    }
+}
+
+// 修復：新增 startNewsCheckLoop，每分鐘執行一次 Twitter 監測
+function startNewsCheckLoop(client) {
+    if (newsLoopTimer) {
+        clearInterval(newsLoopTimer);
+    }
+
+    // 啟動後立即執行一次
+    checkTwitterUpdates(client).catch(err =>
+        console.error('[Newscheck] 初次檢查異常:', err.message)
+    );
+
+    newsLoopTimer = setInterval(() => {
+        checkTwitterUpdates(client).catch(err =>
+            console.error('[Newscheck] 定期檢查異常:', err.message)
+        );
+    }, CHECK_INTERVAL_MS);
+
+    console.log(`✅ [Newscheck] 監測循環已啟動，間隔 ${CHECK_INTERVAL_MS / 1000} 秒`);
+}
+
 module.exports = {
     checkTwitterUpdates,
+    checkSteamUpdates,
+    startNewsCheckLoop,
 };
