@@ -1,120 +1,127 @@
-// Functions/Startup.js
+/ Functions/Startup.js
 const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 const express = require('express');
-const identitiesData = require('./GameSystem/Pulls/identitiesData.js');
 
+const identitiesData    = require('./GameSystem/Pulls/identitiesData.js');
 const { startNewsCheckLoop } = require('./Newscheck.js');
-const { handleCommands } = require('./Commanders.js');
+const { handleCommands }     = require('./Commanders.js');
 
-const NOTIFY_CHANNEL_ID = '1402282604165730348';
-const RATEUP_ANNOUNCE_CHANNEL_ID = '1510153086281187330';
-
-// ===== Keep-alive HTTP server for Render =====
-const app = express();
+const NOTIFY_CHANNEL_ID       = process.env.NOTIFY_CHANNEL_ID       || '1402282604165730348';
+const RATEUP_ANNOUNCE_CHANNEL  = process.env.RATEUP_ANNOUNCE_CHANNEL || '1510153086281187330';
 const PORT = process.env.PORT || 3000;
 
-app.get('/', (req, res) => {
-    res.send('Angela bot is alive.');
-});
+// ─── Keep-alive HTTP server（Render 需要綁定 port）───────────
+const app = express();
+app.get('/', (_, res) => res.send('Angela is online.'));
+app.get('/health', (_, res) => res.json({ status: 'ok', uptime: process.uptime() }));
+app.listen(PORT, () => console.log(`🌐 HTTP server 已啟動 port ${PORT}`));
 
-app.listen(PORT, () => {
-    console.log(`🌐 Keep-alive server 已啟動，監聽 port ${PORT}`);
-});
-// =============================================
-
+// ─── Discord client ───────────────────────────────────────────
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildMembers
-    ]
+        GatewayIntentBits.GuildMembers,
+    ],
 });
 
-function rarityToStars(rarity) {
-    if (rarity === 'Color Fixer') return '👑 Color Fixer';
-    if (rarity === 'Special') return '🌀 Special';
-    if (rarity === '0000') return '✨ ★★★★';
-    if (rarity === 'Egos') return '🔮 E.G.O';
-    if (rarity === '000') return '★★★';
-    if (rarity === '00') return '★★';
-    return '★';
-}
-
-function normalizeRateUpList(rarity) {
-    const rateUpSource = identitiesData.upTargets || {};
-    const value = rateUpSource[rarity];
-    if (!value) return [];
-    if (Array.isArray(value)) return value.filter(Boolean);
-    if (typeof value === 'string') return [value];
-    return [];
+// ─── 工具函式 ─────────────────────────────────────────────────
+function rarityLabel(rarity) {
+    const map = {
+        'Color Fixer': '👑 Color Fixer',
+        'Special':     '🌀 Special',
+        '0000':        '✨ ★★★★',
+        'Egos':        '🔮 E.G.O',
+        '000':         '★★★',
+        '00':          '★★',
+        '0':           '★',
+    };
+    return map[rarity] || rarity;
 }
 
 async function announceCurrentRateUps(botClient) {
     try {
-        const channel = await botClient.channels.fetch(RATEUP_ANNOUNCE_CHANNEL_ID);
+        const channel = await botClient.channels.fetch(RATEUP_ANNOUNCE_CHANNEL);
         if (!channel) return;
-        const rarities = ['Color Fixer', 'Special', '0000', 'Egos', '000', '00', '0'];
-        const sections = [];
-        for (const r of rarities) {
-            const list = normalizeRateUpList(r);
-            if (list.length) sections.push(`### ${rarityToStars(r)}\n${list.map(v => `• ${v}`).join('\n')}`);
-        }
+
+        const up = identitiesData.upTargets || {};
+        const sections = Object.entries(up)
+            .filter(([, v]) => Array.isArray(v) && v.length)
+            .map(([r, items]) =>
+                `### ${rarityLabel(r)}\n${items.map(i => `• ${i}`).join('\n')}`
+            );
+
         await channel.send({
             embeds: [
                 new EmbedBuilder()
                     .setColor(0xffd166)
                     .setTitle('📢 Rate Up 人格與物資資料已成功載入')
-                    .setDescription(sections.length ? sections.join('\n\n') : '目前池內沒有設定任何 Rate Up 對象。')
-                    .setTimestamp()
-            ]
+                    .setDescription(sections.length ? sections.join('\n\n') : '目前沒有設定任何 Rate Up 對象。')
+                    .setTimestamp(),
+            ],
         });
     } catch (err) {
-        console.error('Rate Up 公告失敗:', err);
+        console.error('Rate Up 公告失敗:', err.message);
     }
 }
 
+// ─── 訊息監聽 ─────────────────────────────────────────────────
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
-    if (typeof handleCommands === 'function') {
-        try {
-            await handleCommands(client, message);
-        } catch (err) {
-            console.error('❌ 指令執行模組發生內部錯誤:', err);
-        }
+    try {
+        await handleCommands(client, message);
+    } catch (err) {
+        console.error('❌ 指令錯誤:', err.message);
+        message.reply('「系統發生內部錯誤，請稍後再試。」').catch(() => {});
     }
 });
 
-// 修復：ready → clientReady
+// ─── 上線事件（修復：ready → clientReady）────────────────────
 client.once('clientReady', async () => {
-    console.log(`🤖 Angela 系統脈衝對齊。主入口已由 Startup.js 成功激活：${client.user.tag}`);
+    console.log(`🤖 Angela 系統脈衝對齊。已激活：${client.user.tag}`);
 
     client.user.setPresence({
         status: 'idle',
-        activities: [{ name: 'customstatus', type: 4, state: 'Sles被我吃掉了' }]
+        activities: [{ name: 'customstatus', type: 4, state: 'Sles被我吃掉了' }],
     });
 
+    // 上線報告
     try {
         const channel = await client.channels.fetch(NOTIFY_CHANNEL_ID);
         if (channel) {
-            const loginEmbed = new EmbedBuilder()
-                .setTitle('🟢 系統連線：AI 助理 Angela 已重新上線')
-                .setColor(0x00b4d8)
-                .setDescription('「主管，精神脈衝已重新對齊。核心系統與指令發射器已就緒，隨時待命。」')
-                .setTimestamp();
-            await channel.send({ embeds: [loginEmbed] });
+            await channel.send({
+                embeds: [
+                    new EmbedBuilder()
+                        .setTitle('🟢 系統連線：AI 助理 Angela 已重新上線')
+                        .setColor(0x00b4d8)
+                        .setDescription(
+                            '「主管，精神脈衝已重新對齊。\n' +
+                            '核心系統與指令發射器已就緒，隨時待命。」\n\n' +
+                            '輸入 `!help` 查看全部指令。'
+                        )
+                        .setTimestamp(),
+                ],
+            });
         }
     } catch (err) {
-        console.error('❌ 上線報告發送失敗:', err.message);
+        console.error('❌ 上線報告失敗:', err.message);
     }
 
     await announceCurrentRateUps(client);
 
-    if (typeof startNewsCheckLoop === 'function') {
-        console.log('📡 [排程激活] 正在啟動 Newscheck 每分鐘自動觀測任務...');
-        startNewsCheckLoop(client);
-    }
+    startNewsCheckLoop(client);
+    console.log('📡 [排程] Newscheck 循環已啟動');
 });
 
-const TOKEN = process.env.DISCORD_TOKEN || 'DISCORD_TOKEN';
+// ─── 錯誤保護（避免 uncaught exception 讓 bot 整個掛掉）──────
+client.on('error', err => console.error('Discord 客戶端錯誤:', err.message));
+process.on('unhandledRejection', err => console.error('未捕捉的 Promise 拒絕:', err));
+
+// ─── 登入 ─────────────────────────────────────────────────────
+const TOKEN = process.env.DISCORD_TOKEN;
+if (!TOKEN || TOKEN === 'DISCORD_TOKEN') {
+    console.error('❌ 請設定環境變數 DISCORD_TOKEN');
+    process.exit(1);
+}
 client.login(TOKEN);
