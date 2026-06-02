@@ -3,10 +3,11 @@ const identities = {
     "［漆黑噤默］羅蘭 / The Black Silence Roland",
   ],
    'Special': [
+    "［黃金迪］索爾茲 / Gold of The Dih Solzc",
     "[NULL] 這裡沒有任何東西 / theres nothing"
   ],
   '0000': [
-    "［黃金迪］索爾茲 / Gold of The Dih Solzc",
+    " [su31j4u/ e9 d042l45k4ke72k7.] ... ",
   ],
   '000': [
     "［蜘蛛巢：食指 父輩］李箱 / The House of Spiders: Index Nursefather Yi Sang",
