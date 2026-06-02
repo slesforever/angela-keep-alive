@@ -1,63 +1,88 @@
 // Functions/GameSystem/Pulls/PullSystem.js
 const { EmbedBuilder } = require('discord.js');
 const identitiesData = require('./identitiesData.js');
+const { loadUserInventory, saveUserInventory } = require('../PacksAndData.js');
 
-async function executePull(client, message) {
-    // 【關鍵】動態引入 PacksAndData.js 的雲端讀寫工具
-    const { loadUserInventory, saveUserInventory } = require('../PacksAndData.js');
-    
-    const msg = message.content.trim();
-    const userId = message.author.id;
-    
-    let pullCount = 1;
-    if (msg === '!十連' || msg.includes('10')) {
-        pullCount = 10;
+// 各稀有度機率（累計）
+const RATES = {
+    EGOS: 1.5,
+    S3:   4.5,   // 000 (1.5 + 3)
+    S2:   20.0,  // 00  (4.5 + 15.5)
+    // S1: 剩餘 80%
+};
+
+function pickRandom(arr) {
+    return arr[Math.floor(Math.random() * arr.length)];
+}
+
+function drawOnce() {
+    const r = Math.random() * 100;
+    const pool000    = identitiesData.pool['000']  || [];
+    const pool00     = identitiesData.pool['00']   || [];
+    const pool0      = identitiesData.pool['0']    || [];
+    const poolEgos   = identitiesData.pool['Egos'] || [];
+    const rateUp000  = identitiesData.upTargets['000'] || [];
+
+    if (r < RATES.EGOS) {
+        return { item: pickRandom(poolEgos), tier: 'egos' };
     }
-
-    // Step 1. 先從指定頻道資料庫撈出玩家以前存下來的舊背包
-    const userInventory = await loadUserInventory(client, userId);
-
-    const results = [];
-    const all000 = identitiesData.pool["000"];
-    const all00 = identitiesData.pool["00"];
-    const all0 = identitiesData.pool["0"];
-    const allEgos = identitiesData.pool["Egos"];
-    const rateUp000 = identitiesData.upTargets["000"] || [];
-
-    // Step 2. 開始抽卡演算法
-    for (let i = 0; i < pullCount; i++) {
-        const rate = Math.random() * 100;
-        let reward = "";
-
-        if (rate < 1.5) { 
-            reward = allEgos[Math.floor(Math.random() * allEgos.length)];
-        } else if (rate < 4.5) { 
-            if (rateUp000.length && Math.random() > 0.5) {
-                reward = `✨ [★3 RateUp] ${rateUp000[Math.floor(Math.random() * rateUp000.length)]}`;
-            } else {
-                reward = `★3 ${all000[Math.floor(Math.random() * all000.length)]}`;
-            }
-        } else if (rate < 20) { 
-            reward = `★2 ${all00[Math.floor(Math.random() * all00.length)]}`;
-        } else { 
-            reward = `★1 ${all0[Math.floor(Math.random() * all0.length)]}`;
+    if (r < RATES.S3) {
+        // 有 Rate Up：50% 機率出 Rate Up 對象
+        if (rateUp000.length && Math.random() < 0.5) {
+            return { item: `✨ [★★★ Rate Up] ${pickRandom(rateUp000)}`, tier: 's3_up' };
         }
-        
-        results.push(reward);
-        userInventory.push(reward); // 將新獎勵源源不絕地塞進歷史背包陣列中
+        return { item: `★★★ ${pickRandom(pool000)}`, tier: 's3' };
     }
+    if (r < RATES.S2) {
+        return { item: `★★ ${pickRandom(pool00)}`, tier: 's2' };
+    }
+    return { item: `★ ${pickRandom(pool0)}`, tier: 's1' };
+}
 
-    // Step 3. 將融合了新獎勵的完整背包，當場打包成 JSON 發射回 1510947300212477972 頻道
-    await saveUserInventory(client, userId, userInventory);
+function tierEmoji(tier) {
+    if (tier === 'egos')   return '🔮';
+    if (tier === 's3_up')  return '🌟';
+    if (tier === 's3')     return '✨';
+    if (tier === 's2')     return '⭐';
+    return '▫️';
+}
 
-    // Step 4. 回報前端玩家
+async function executePull(client, message, pullCount = 1) {
+    const userId = message.author.id;
+
+    // 先發「處理中」訊息，讓使用者感受即時回饋
+    const typing = message.channel.sendTyping();
+
+    const draws = Array.from({ length: pullCount }, () => drawOnce());
+    const resultLines = draws.map((d, i) => `${tierEmoji(d.tier)} \`${i + 1}.\` ${d.item}`);
+
+    // 統計本次稀有
+    const s3Count = draws.filter(d => d.tier === 's3' || d.tier === 's3_up').length;
+    const egoCount = draws.filter(d => d.tier === 'egos').length;
+
+    const summaryParts = [];
+    if (egoCount) summaryParts.push(`🔮 E.G.O ×${egoCount}`);
+    if (s3Count)  summaryParts.push(`✨ ★★★ ×${s3Count}`);
+
     const pullEmbed = new EmbedBuilder()
         .setAuthor({ name: message.author.username, iconURL: message.author.displayAvatarURL() })
-        .setTitle(pullCount === 10 ? '🚂 腦葉物資梅菲斯特號 - 十連抽取報告' : '🚂 腦葉物資梅菲斯特號 - 單次抽取報告')
-        .setColor(pullCount === 10 ? 0xff4757 : 0xeccc68)
-        .setDescription(`### 🎁 抽取結果如下：\n${results.map((r, idx) => `${idx + 1}. ${r}`).join('\n')}\n\n💾 *「數據已成功同步備份至指定核心觀測頻道。」*`)
-        .setFooter({ text: '「主管，每一次人格提取，都是在向平行世界借調可能性。」— Angela' })
+        .setTitle(pullCount === 1 ? '🚂 腦葉物資梅菲斯特號 — 單抽報告' : '🚂 腦葉物資梅菲斯特號 — 十連報告')
+        .setColor(egoCount ? 0xa55eea : s3Count ? 0xffd166 : 0xeccc68)
+        .setDescription(resultLines.join('\n'))
+        .setFooter({
+            text: summaryParts.length
+                ? `✨ 本次高稀有：${summaryParts.join('、')}`
+                : '「每一次提取，都是向平行世界借調可能性。」',
+        })
         .setTimestamp();
+
+    await typing;
+
+    // 非同步存檔（不阻塞回覆）
+    const newItems = draws.map(d => d.item);
+    loadUserInventory(client, userId)
+        .then(inv => saveUserInventory(client, userId, [...inv, ...newItems]))
+        .catch(err => console.error('背包儲存失敗:', err.message));
 
     return message.reply({ embeds: [pullEmbed] });
 }
