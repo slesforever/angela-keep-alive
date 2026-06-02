@@ -22,7 +22,7 @@ async function handleGiveAway(client, message) {
             return message.reply('❌ 報告主管，發放格式錯誤。請使用：`!givelunacy @玩家 數量` (例如：`!givelunacy @Angela 1300`)');
         }
 
-        // 動態載入資料庫模組，直接將狂氣打入該玩家的頻道存檔中
+        // 動態載入資料庫模組，將狂氣寫入該玩家的頻道存檔中
         const { loadUserInventory, saveUserInventory } = require('./PacksAndData.js');
         
         const loadingMsg = await message.reply(`「正在連線至核心通道，嘗試為 <@${targetUser.id}> 進行精神物資對齊...」`);
@@ -42,16 +42,23 @@ async function handleGiveAway(client, message) {
         return loadingMsg.edit({ content: null, embeds: [giveUserEmbed] });
     }
 
-    // =================【 2. 全服獎勵公告：!updaterewards (絕不 @everyone) 】=================
+    // =================【 2. 全服動態獎勵公告：!updaterewards 數量 (不 @everyone) 】=================
     if (command === '!updaterewards') {
+        const amount = parseInt(args[1]);
+
+        // 防呆機制：如果後面沒輸入數字或輸入錯了，立刻攔截
+        if (isNaN(amount) || amount <= 0) {
+            return message.reply('❌ 報告主管，發放格式錯誤。請使用：`!updaterewards 數量` (例如：`!updaterewards 1500`)');
+        }
+
         const rewardEmbed = new EmbedBuilder()
             .setTitle('🎁 邊獄公司 - 全伺服器特別補償發放')
             .setColor(0xffa502)
-            .setDescription(`### **全體發放項目：**\n• 📦 **狂氣 (Lunacy) x1300**\n• 🚂 **特別提取券 x1**\n\n「因應精神監測脈衝不穩進行的架構重組，補償已正式下發。請各位主管抽空檢視個人倉庫。」`)
+            .setDescription(`### **全體發放項目：**\n• 📦 **狂氣 (Lunacy) x${amount}**\n• 🚂 **特別提取券 x1**\n\n「因應精神監測脈衝不穩進行的架構重組，全服維護補償已正式下發。請各位主管抽空檢視個人倉庫。」`)
             .setFooter({ text: '發放人：核心管理 AI 安潔拉' })
             .setTimestamp();
 
-        // 遵照主管吩咐，移除了所有 @everyone 字眼，乾淨俐落發送
+        // 遵照主管吩咐，絕不夾帶 @everyone 文本，純內嵌發送
         return message.channel.send({ embeds: [rewardEmbed] });
     }
 
@@ -75,7 +82,6 @@ async function handleGiveAway(client, message) {
     }
 }
 
-// 導出函數與動態獲取倍率的閉包，供 Stages.js 讀取
 module.exports = { 
     handleGiveAway, 
     getBuffMultiplier: () => currentBuffMultiplier 
