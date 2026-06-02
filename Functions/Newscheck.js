@@ -127,7 +127,7 @@ async function checkTwitterUpdates(client, isManual = false, messageContext = nu
         return; 
     }
 
-    // 更新最新快取快照
+    // 更新最新快取快
     if (!isManual) lastFetchedId = uniqueId;
 
     // 建立通知 Embed
