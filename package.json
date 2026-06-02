@@ -2,9 +2,9 @@
   "name": "angela-bot",
   "version": "1.1.0",
   "description": "Angela Bot for Discord - Stream & Twitter Feature Version",
-  "main": "index.js",
+  "main": "Function/Startup",
   "scripts": {
-    "start": "node index.js"
+    "start": "node Functions/Startup.js"
   },
   "dependencies": {
     "discord.js": "^14.14.1",
