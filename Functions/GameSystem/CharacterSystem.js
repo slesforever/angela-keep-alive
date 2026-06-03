@@ -1,195 +1,145 @@
 // Functions/GameSystem/CharacterSystem.js
-// 角色等級、連結提升(Uptie)、絲線(Thread)管理
+// 罪人詳細資訊、連結提升(Uptie)、紡錘查詢
+const { EmbedBuilder } = require('discord.js');
+const { SINNERS, SINNER_NAMES, UPTIE_COSTS, getSkillList } = require('./Data/SinnersData.js');
+const { getOrCreatePlayer, savePlayerData } = require('./PacksAndData.js');
 
-const { EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder } = require('discord.js');
-const { SINNERS, SINNER_NAMES, UPTIE_COSTS } = require('./Data/SinnersData.js');
-
-const CHAR_CHANNEL_ID = process.env.CHAR_CHANNEL_ID || process.env.NOTIFY_CHANNEL_ID || '1402282604165730348';
-const charCache = new Map();
-const CACHE_TTL = 5 * 60 * 1000;
-
-// ─── 資料格式 ─────────────────────────────────────────────────
-function defaultCharData() {
-    const sinners = {};
-    for (const name of SINNER_NAMES) {
-        sinners[name] = {
-            level: 1,
-            uptie: 1,
-            equippedIdentity: `［邊獄公司 罪人］${name}`,
-            exp: 0,
-        };
-    }
-    return {
-        sinners,
-        threads: 0,
-        ego_coupons: 0,
-        totalBattles: 0,
-        totalWins: 0,
-    };
+function getSinnerUptie(player, sinnerName) {
+    return player.sinners?.[sinnerName]?.uptie || 1;
+}
+function getSinnerEquipped(player, sinnerName) {
+    return player.sinners?.[sinnerName]?.equippedIdentity || `LCB ${sinnerName}`;
 }
 
-async function loadCharData(client, userId) {
-    const cached = charCache.get(userId);
-    if (cached && Date.now() - cached.time < CACHE_TTL) return JSON.parse(JSON.stringify(cached.data));
+// ─── 顯示罪人詳細 Embed ────────────────────────────────────────
+function buildSinnerEmbed(sinnerName, player) {
+    const s     = SINNERS[sinnerName];
+    const uptie = getSinnerUptie(player, sinnerName);
+    const lv    = player.identityLevels?.[`LCB ${sinnerName}`] || player.identityLevels?.[sinnerName] || 1;
+    const tierStars = '◆'.repeat(uptie) + '◇'.repeat(4 - uptie);
+    const skills    = getSkillList(s);
 
-    try {
-        const channel = await client.channels.fetch(CHAR_CHANNEL_ID);
-        if (!channel) return defaultCharData();
-        const msgs = await channel.messages.fetch({ limit: 100 });
-        const found = msgs.find(m => m.author.bot && m.content.startsWith(`⚔️ CHAR_SAVE || ${userId} ||`));
-        if (found) {
-            const data = JSON.parse(found.content.split(' || ')[2]);
-            charCache.set(userId, { data, time: Date.now() });
-            return JSON.parse(JSON.stringify(data));
-        }
-    } catch (e) {
-        console.error(`[CharSystem] 讀取失敗 ${userId}:`, e.message);
-    }
-    return defaultCharData();
-}
-
-async function saveCharData(client, userId, data) {
-    charCache.set(userId, { data: JSON.parse(JSON.stringify(data)), time: Date.now() });
-    try {
-        const channel = await client.channels.fetch(CHAR_CHANNEL_ID);
-        if (!channel) return;
-        await channel.send(`⚔️ CHAR_SAVE || ${userId} || ${JSON.stringify(data)}`);
-    } catch (e) {
-        console.error(`[CharSystem] 儲存失敗 ${userId}:`, e.message);
-    }
-}
-
-// ─── 顯示罪人狀態 ─────────────────────────────────────────────
-function buildSinnerEmbed(sinner, sinnerData) {
-    const uptieStars = '◆'.repeat(sinnerData.uptie) + '◇'.repeat(4 - sinnerData.uptie);
-    const nextUptie = sinnerData.uptie < 4 ? UPTIE_COSTS[sinnerData.uptie] : null;
-    const skills = sinner.skills.map((sk, i) =>
-        `\`${i + 1}.\` **${sk.name}** [${sk.type}/${sk.sin}] 幣×${sk.coins} 基礎:${sk.base} 硬幣:+${sk.coin}` +
+    const skillLines = skills.map((sk, i) =>
+        `**${i + 1}.${sk.name}** [${sk.type}/${sk.sin}]\n` +
+        `　 基礎:${sk.clashbase} 硬幣:${sk.coins}×+${sk.clashpower} 攻擊:${sk.attack}` +
         (sk.effect ? ` → ${sk.effect.name}×${sk.effect.stacks}` : '')
     ).join('\n');
 
+    const nextUptie = uptie < 4 ? UPTIE_COSTS[uptie] : null;
+
     return new EmbedBuilder()
-        .setTitle(`👤 ${sinner.name} / ${sinner.nameEn}`)
+        .setTitle(`👤 ${s.name} / ${s.nameEn}`)
         .setColor(0x5865f2)
         .addFields(
-            { name: '📊 狀態', value: `Lv.**${sinnerData.level}** ｜ 連結提升：${uptieStars}`, inline: true },
-            { name: '❤️ 基礎HP', value: `${sinner.hp}`, inline: true },
-            { name: '⚡ 速度', value: `${sinner.minSpd}~${sinner.maxSpd}`, inline: true },
-            { name: '⚔️ 技能（主動）', value: skills, inline: false },
-            { name: '🌟 被動', value: `**${sinner.passive.name}**：${sinner.passive.desc}`, inline: false },
-            { name: '🔧 裝備身分', value: sinnerData.equippedIdentity, inline: false },
+            { name: '📊 等級 / 連結提升', value: `Lv.**${lv}** ｜ ${tierStars}`, inline: true },
+            { name: '❤️ 基礎HP',  value: `${s.hp}`, inline: true },
+            { name: '⚡ 速度',     value: `${s.minSpd}~${s.maxSpd}`, inline: true },
+            { name: '⚔️ 主動技能', value: skillLines, inline: false },
+            { name: '🛡️ 防禦',    value: `防禦力: ${s.defense.defense} ｜ 碰撞: ${s.defense.clashpower}×${s.defense.coins}硬幣`, inline: true },
+            { name: '💨 迴避',    value: `碰撞: ${s.evade.clashpower}×${s.evade.coins}硬幣 ｜ 防禦力: ${s.evade.defense}`, inline: true },
+            { name: '🌟 被動',    value: `**${s.passive.name}**：${s.passive.desc}`, inline: false },
+            { name: '🔧 裝備身分', value: getSinnerEquipped(player, sinnerName), inline: false },
             nextUptie
-                ? { name: '🔗 下一階連結提升費用', value: `🧵 絲線 ×${nextUptie}`, inline: true }
-                : { name: '🔗 連結提升', value: '已達最高等級（T4）', inline: true }
+                ? { name: '🔗 下次連結提升費用', value: `🧵 紡錘 ×${nextUptie}`, inline: true }
+                : { name: '🔗 連結提升', value: '已達最高 T4', inline: true },
         )
-        .setFooter({ text: `主要罪業：${sinner.primarySin} | 防禦等級：${sinner.defLevel}` });
+        .setFooter({ text: `主要罪業：${s.primarySin} | 防禦等級：${s.defLevel}` });
 }
 
-// ─── 指令：!sinner [罪人名] ────────────────────────────────────
+// ─── !sinner ──────────────────────────────────────────────────
 async function handleSinner(client, message) {
     const args = message.content.trim().split(/\s+/);
     const name = args.slice(1).join(' ');
 
+    const player = await getOrCreatePlayer(client, message.author.id, message.author.username);
+
     if (!name) {
-        const { loadCharData: lcd } = require('./CharacterSystem.js');
-        const data = await loadCharData(client, message.author.id);
         const lines = SINNER_NAMES.map(n => {
-            const sd = data.sinners[n] || { level: 1, uptie: 1 };
-            return `• **${n}** Lv.${sd.level} T${sd.uptie}`;
+            const uptie = getSinnerUptie(player, n);
+            const lv    = player.identityLevels?.[`LCB ${n}`] || player.identityLevels?.[n] || 1;
+            return `• **${n}** Lv.${lv} T${uptie}`;
         });
-        const embed = new EmbedBuilder()
-            .setTitle('📋 所有罪人狀態')
-            .setColor(0x74b9ff)
-            .setDescription(lines.join('\n'))
-            .addFields({ name: '🧵 絲線', value: `${data.threads}`, inline: true })
-            .setFooter({ text: '使用 !sinner [罪人名] 查看詳細資訊' });
-        return message.reply({ embeds: [embed] });
+        return message.reply({
+            embeds: [new EmbedBuilder()
+                .setTitle('📋 所有罪人狀態')
+                .setColor(0x74b9ff)
+                .setDescription(lines.join('\n'))
+                .addFields({ name: '🧵 紡錘', value: `${player.thread}`, inline: true })
+                .setFooter({ text: '使用 !sinner [罪人名] 查看詳細資訊' })]
+        });
     }
 
-    const sinner = SINNERS[name];
-    if (!sinner) {
-        return message.reply(`❌ 找不到罪人「${name}」。\n可用名稱：${SINNER_NAMES.join('、')}`);
-    }
-    const charData = await loadCharData(client, message.author.id);
-    const sinnerData = charData.sinners[name] || { level: 1, uptie: 1, equippedIdentity: `LCB ${name}` };
-    return message.reply({ embeds: [buildSinnerEmbed(sinner, sinnerData)] });
+    if (!SINNERS[name]) return message.reply(`❌ 找不到「${name}」\n可用名稱：${SINNER_NAMES.join('、')}`);
+    return message.reply({ embeds: [buildSinnerEmbed(name, player)] });
 }
 
-// ─── 指令：!uptie [罪人名] ─────────────────────────────────────
+// ─── !uptie ───────────────────────────────────────────────────
 async function handleUptie(client, message) {
     const args = message.content.trim().split(/\s+/);
     const name = args.slice(1).join(' ');
     if (!name) return message.reply('❌ 用法：`!uptie [罪人名]`');
+    if (!SINNERS[name]) return message.reply(`❌ 找不到「${name}」`);
 
-    const sinner = SINNERS[name];
-    if (!sinner) return message.reply(`❌ 找不到罪人「${name}」`);
+    const player = await getOrCreatePlayer(client, message.author.id, message.author.username);
+    if (!player.sinners) player.sinners = {};
+    if (!player.sinners[name]) player.sinners[name] = { uptie: 1, equippedIdentity: `LCB ${name}` };
 
-    const charData = await loadCharData(client, message.author.id);
-    const sd = charData.sinners[name];
-
+    const sd = player.sinners[name];
     if (sd.uptie >= 4) return message.reply(`「${name}」已達最高連結等級 T4。`);
 
     const cost = UPTIE_COSTS[sd.uptie];
-    if (charData.threads < cost) {
-        return message.reply(`❌ 絲線不足！需要 🧵×${cost}，目前擁有 🧵×${charData.threads}`);
-    }
+    if (player.thread < cost) return message.reply(`❌ 紡錘不足！需要 🧵×${cost}，目前 🧵×${player.thread}`);
 
-    charData.threads -= cost;
-    sd.uptie += 1;
-    await saveCharData(client, message.author.id, charData);
+    player.thread -= cost;
+    sd.uptie      += 1;
+    await savePlayerData(client, message.author.id, player);
 
-    const tierStars = '◆'.repeat(sd.uptie) + '◇'.repeat(4 - sd.uptie);
-    const embed = new EmbedBuilder()
-        .setTitle(`🔗 連結提升成功！`)
-        .setColor(0xffd166)
-        .setDescription(`**${name}** 的連結等級提升至 **T${sd.uptie}** ${tierStars}\n消耗：🧵 絲線 ×${cost}\n剩餘：🧵 ${charData.threads}`)
-        .setTimestamp();
-    return message.reply({ embeds: [embed] });
+    const stars = '◆'.repeat(sd.uptie) + '◇'.repeat(4 - sd.uptie);
+    return message.reply({
+        embeds: [new EmbedBuilder()
+            .setTitle('🔗 連結提升成功！')
+            .setColor(0xffd166)
+            .setDescription(`**${name}** → T${sd.uptie} ${stars}\n消耗：🧵 ×${cost}　剩餘：🧵 ×${player.thread}`)
+            .setTimestamp()]
+    });
 }
 
-// ─── 指令：!equip [罪人名] [身分名] ───────────────────────────
+// ─── !equip ───────────────────────────────────────────────────
 async function handleEquip(client, message) {
-    const content = message.content.trim();
-    const match = content.match(/^!equip\s+(.+?)\s*\|\s*(.+)$/);
-    if (!match) {
-        return message.reply('❌ 用法：`!equip [罪人名] | [身分名稱]`\n例：`!equip 李箱 | ［劍契 殺手］李箱`');
-    }
-    const [, sinnerName, identityName] = match;
-    if (!SINNERS[sinnerName]) return message.reply(`❌ 找不到罪人「${sinnerName}」`);
+    const m = message.content.trim().match(/^!equip\s+(.+?)\s*\|\s*(.+)$/);
+    if (!m) return message.reply('❌ 用法：`!equip [罪人名] | [身分名稱]`\n例：`!equip 李箱 | ［劍契 殺手］李箱`');
+    const [, sinnerName, identityName] = m;
+    if (!SINNERS[sinnerName]) return message.reply(`❌ 找不到「${sinnerName}」`);
 
-    const charData = await loadCharData(client, message.author.id);
-    charData.sinners[sinnerName].equippedIdentity = identityName.trim();
-    await saveCharData(client, message.author.id, charData);
+    const player = await getOrCreatePlayer(client, message.author.id, message.author.username);
+    if (!player.sinners) player.sinners = {};
+    if (!player.sinners[sinnerName]) player.sinners[sinnerName] = { uptie: 1, equippedIdentity: `LCB ${sinnerName}` };
+    player.sinners[sinnerName].equippedIdentity = identityName.trim();
+    await savePlayerData(client, message.author.id, player);
 
-    const embed = new EmbedBuilder()
-        .setTitle('🔧 裝備更新')
-        .setColor(0x2ed573)
-        .setDescription(`**${sinnerName}** 現在裝備：\n${identityName.trim()}`)
-        .setTimestamp();
-    return message.reply({ embeds: [embed] });
+    return message.reply({
+        embeds: [new EmbedBuilder()
+            .setTitle('🔧 裝備更新')
+            .setColor(0x2ed573)
+            .setDescription(`**${sinnerName}** 現在裝備：\n${identityName.trim()}`)
+            .setTimestamp()]
+    });
 }
 
-// ─── 指令：!threads ────────────────────────────────────────────
+// ─── !threads ─────────────────────────────────────────────────
 async function handleThreads(client, message) {
-    const charData = await loadCharData(client, message.author.id);
-    const embed = new EmbedBuilder()
-        .setTitle('🧵 絲線持有量')
-        .setColor(0xa55eea)
-        .setDescription(
-            `目前擁有：**🧵 ${charData.threads} 絲線**\n\n` +
-            `**連結提升消耗：**\n` +
-            `T1→T2：🧵×20\nT2→T3：🧵×40\nT3→T4：🧵×80\nT4 最高：🧵×150 (已滿)\n\n` +
-            `_絲線可透過戰鬥勝利或完成鏡光迷宮樓層獲得。_`
-        )
-        .setTimestamp();
-    return message.reply({ embeds: [embed] });
+    const player = await getOrCreatePlayer(client, message.author.id, message.author.username);
+    return message.reply({
+        embeds: [new EmbedBuilder()
+            .setTitle('🧵 紡錘持有量')
+            .setColor(0xa55eea)
+            .setDescription(
+                `目前擁有：**🧵 ${player.thread} 紡錘**\n\n` +
+                `**連結提升費用：**\nT1→T2：×20　T2→T3：×40　T3→T4：×80\n\n` +
+                `_透過戰鬥勝利或完成鏡光迷宮獲得紡錘_`
+            )
+            .setTimestamp()]
+    });
 }
 
-module.exports = {
-    loadCharData,
-    saveCharData,
-    handleSinner,
-    handleUptie,
-    handleEquip,
-    handleThreads,
-};
+module.exports = { handleSinner, handleUptie, handleEquip, handleThreads };
