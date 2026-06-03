@@ -1,5 +1,8 @@
 // Functions/GameSystem/PacksAndData.js
-// 統一玩家資料存取 + !pack UI + !list 翻頁機率清單
+// 玩家資料存取（JSON 檔案，無 Discord 頻道限制）+ LC 主頁風格 !pack UI
+'use strict';
+const fs   = require('fs');
+const path = require('path');
 const {
     EmbedBuilder,
     ButtonBuilder,
@@ -7,425 +10,505 @@ const {
     ActionRowBuilder,
     StringSelectMenuBuilder,
 } = require('discord.js');
-const identitiesData = require('./Pulls/identitiesData.js');
 
-const STORAGE_CHANNEL_ID = process.env.STORAGE_CHANNEL_ID || '1510947300212477972';
+// ─── 資料目錄 ─────────────────────────────────────────────────
+const DATA_DIR = path.join(process.cwd(), 'data', 'players');
+try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch {}
 
-// ── 機率常數（與 PullSystem 保持一致）─────────────────────────
-const BASE_RATES = {
-    '0':           0.8359857,
-    '00':          0.12,
-    '000':         0.029,
-    'Egos':        0.013,
-    '0000':        0.001,
-    'Special':     0.001,
-    'Color Fixer': 0.0000143,
-};
-const RATE_UP_MULT = 5;
-const RARITY_ORDER = ['0', '00', '000', '0000', 'Color Fixer', 'Special', 'Egos'];
+// ─── 稀有度設定 ───────────────────────────────────────────────
+const RARITY_ORDER  = ['0', '00', '000', '0000', 'Color Fixer', 'Special', 'Egos'];
+const RARITY_LABEL  = { '0':'★','00':'★★','000':'★★★','0000':'★★★★','Color Fixer':'👑CF','Special':'🌀SP','Egos':'🔮EGO' };
+const RARITY_COLOR  = { '0':0x57606f,'00':0x74b9ff,'000':0xffd166,'0000':0xff6b6b,'Color Fixer':0xffffff,'Special':0x2ed573,'Egos':0xa55eea };
 
-// ─── 快取 ────────────────────────────────────────────────────
-const playerCache = new Map();
-const CACHE_TTL   = 5 * 60 * 1000;
+// ─── 等級費用表 ───────────────────────────────────────────────
+// Lv 1-20: 碎片 lv×5
+// Lv 21-40: 碎片 lv×8 + 經驗卷 ×1
+// Lv 41-60: 碎片 lv×12 + 經驗卷 ×3
+function calcLevelCost(curLv, steps = 1) {
+    let frags = 0, scrolls = 0;
+    for (let l = curLv; l < Math.min(curLv + steps, 60); l++) {
+        if      (l <= 20) { frags += l * 5; }
+        else if (l <= 40) { frags += l * 8;  scrolls += 1; }
+        else              { frags += l * 12; scrolls += 3; }
+    }
+    return { frags, scrolls };
+}
 
-// ── 輔助 ─────────────────────────────────────────────────────
+// ─── 工具 ─────────────────────────────────────────────────────
+let identitiesData;
+function getIdData() {
+    if (!identitiesData) identitiesData = require('./Pulls/identitiesData.js');
+    return identitiesData;
+}
 function findRarity(name) {
-    const pool = identitiesData.pool || identitiesData.identities || {};
-    for (const r of Object.keys(pool)) {
+    const pool = getIdData().pool || {};
+    for (const r of RARITY_ORDER) {
         if ((pool[r] || []).includes(name)) return r;
     }
     return '0';
 }
-function rarityLabel(r) {
-    return ({ '0': '★', '00': '★★', '000': '★★★', '0000': '★★★★', 'Color Fixer': '👑CF', 'Special': '🌀SP', 'Egos': '🔮EGO' })[r] || r;
-}
-function rarityColor(r) {
-    return ({ '0': 0x57606f, '00': 0x74b9ff, '000': 0xffd166, '0000': 0xff6b6b, 'Color Fixer': 0xffffff, 'Special': 0x2ed573, 'Egos': 0xa55eea })[r] || 0x5865f2;
-}
-function normalizeUpList(r) {
-    const src = identitiesData.upTargets || identitiesData.rateUpIds || {};
-    const v = src[r];
-    if (!v) return [];
-    if (Array.isArray(v)) return v.filter(Boolean);
-    if (typeof v === 'string') return [v];
-    if (v?.names) return v.names.filter(Boolean);
-    return [];
+function getShortName(name) {
+    const m = name.match(/[）\]](.+?)(?:\s*\/|$)/);
+    return m ? m[1].trim().slice(0, 14) : name.slice(0, 14);
 }
 
-// ─── 玩家資料預設值 ──────────────────────────────────────────
+// ─── 玩家資料存取 ─────────────────────────────────────────────
 function defaultPlayer(username) {
-    const pool = identitiesData.pool || identitiesData.identities || {};
+    const pool = getIdData().pool || {};
     const base = (pool['0'] || []).slice(0, 4);
     return {
         username,
         lunacy:         1300,
         identities:     [...base],
         egos:           [],
-        team:           [...base],
-        level:          1,
-        exp:            0,
-        thread:         0,
-        stageProgress:  1,
+        team:           [...base].slice(0, 4),
         identityLevels: {},
+        fragments:      0,     // 人格碎片
+        expScrolls:     0,     // 經驗卷
+        thread:         0,
         sinners:        {},
         party:          [],
+        totalPulls:     0,
+        level:          1,
+        exp:            0,
+        stageProgress:  1,
     };
 }
 
-// ─── Discord 頻道存取 ─────────────────────────────────────────
-async function loadPlayerData(client, userId) {
-    const cached = playerCache.get(userId);
-    if (cached && Date.now() - cached.time < CACHE_TTL) return JSON.parse(JSON.stringify(cached.data));
-
+function loadPlayerData(_client, userId) {
+    const file = path.join(DATA_DIR, `${userId}.json`);
     try {
-        const ch = await client.channels.fetch(STORAGE_CHANNEL_ID);
-        if (!ch) return null;
-        const msgs = await ch.messages.fetch({ limit: 100 });
-        const found = msgs.find(m => m.author.bot && m.content.startsWith(`📥 DATA_SAVE || ${userId} ||`));
-        if (found) {
-            const data = JSON.parse(found.content.split(' || ')[2]);
-            playerCache.set(userId, { data, time: Date.now() });
-            return JSON.parse(JSON.stringify(data));
-        }
-    } catch (e) {
-        console.error(`[PacksAndData] 讀取失敗 ${userId}:`, e.message);
-    }
+        if (fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, 'utf8'));
+    } catch (e) { console.error(`[Pack] 讀取失敗 ${userId}:`, e.message); }
     return null;
 }
 
-async function savePlayerData(client, userId, data) {
-    playerCache.set(userId, { data: JSON.parse(JSON.stringify(data)), time: Date.now() });
-    try {
-        const ch = await client.channels.fetch(STORAGE_CHANNEL_ID);
-        if (ch) await ch.send(`📥 DATA_SAVE || ${userId} || ${JSON.stringify(data)}`);
-    } catch (e) {
-        console.error(`[PacksAndData] 儲存失敗 ${userId}:`, e.message);
-    }
+function savePlayerData(_client, userId, data) {
+    const file = path.join(DATA_DIR, `${userId}.json`);
+    try { fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf8'); }
+    catch (e) { console.error(`[Pack] 儲存失敗 ${userId}:`, e.message); }
 }
 
-async function getOrCreatePlayer(client, userId, username) {
-    let p = await loadPlayerData(client, userId);
+function getOrCreatePlayer(_client, userId, username) {
+    let p = loadPlayerData(null, userId);
     if (!p) {
         p = defaultPlayer(username || 'Player');
-        await savePlayerData(client, userId, p);
+        savePlayerData(null, userId, p);
     }
-    // 補齊舊玩家缺失的欄位
     p.level          ??= 1;
     p.exp            ??= 0;
     p.thread         ??= 0;
+    p.fragments      ??= 0;
+    p.expScrolls     ??= 0;
     p.team           ??= [];
     p.egos           ??= [];
     p.identityLevels ??= {};
-    p.stageProgress  ??= 1;
     p.sinners        ??= {};
     p.party          ??= [];
+    p.totalPulls     ??= 0;
     return p;
 }
 
-// ─── 向下相容舊版 API（PullSystem / GiveAwaySystem 使用）────────
-async function loadUserInventory(client, userId) {
-    const p = await loadPlayerData(client, userId);
-    return p?.identities || [];
+// 向下相容（PullSystem / GiveAwaySystem 使用）
+function loadUserInventory(_client, userId) {
+    return (loadPlayerData(null, userId) || {}).identities || [];
 }
-
-async function saveUserInventory(client, userId, items) {
-    const p = await getOrCreatePlayer(client, userId, 'Player');
+function saveUserInventory(_client, userId, items) {
+    const p = getOrCreatePlayer(null, userId, 'Player');
     p.identities = items;
-    await savePlayerData(client, userId, p);
+    savePlayerData(null, userId, p);
 }
 
-// ─── !pack ────────────────────────────────────────────────────
-async function showPack(client, message) {
-    const waitMsg = await message.reply('「主管，正在遠端對齊您的個人收容數據...」');
-    const player  = await getOrCreatePlayer(client, message.author.id, message.author.username);
+// ─── UI 元件 ──────────────────────────────────────────────────
+function lobbyEmbed(player) {
+    const team = player.team.length
+        ? player.team.map(n => `• **${getShortName(n)}** Lv.${player.identityLevels[n]||1}`).join('\n')
+        : '（尚未編成）';
+    return new EmbedBuilder()
+        .setTitle('🚂 腦葉公司邊獄巴士 — 管理員主控台')
+        .setColor(0x1a1a2e)
+        .addFields(
+            { name: '👤 主管',     value: player.username, inline: true },
+            { name: '⭐ 等級',     value: `Lv.${player.level}`, inline: true },
+            { name: '🎰 提取次數', value: `${player.totalPulls||0} 次`, inline: true },
+            { name: '💎 狂氣',     value: `${player.lunacy}`,  inline: true },
+            { name: '🧵 紡錘',     value: `${player.thread}`,  inline: true },
+            { name: '\u200b',      value: '\u200b',            inline: true },
+            { name: '📦 人格碎片', value: `${player.fragments}`, inline: true },
+            { name: '📜 經驗卷',   value: `${player.expScrolls}`, inline: true },
+            { name: '\u200b',      value: '\u200b',            inline: true },
+            { name: `⚔️ 出擊編成 (${player.team.length}/6)`, value: team, inline: false },
+        )
+        .setFooter({ text: `持有人格：${player.identities.length} 件 ／ E.G.O：${player.egos.length} 件` })
+        .setTimestamp();
+}
 
-    const allItems = [
-        ...player.identities,
-        ...player.egos.map(e => `[E.G.O] ${e}`),
-    ];
-    const PAGE_SIZE  = 8;
-    const totalPages = Math.max(1, Math.ceil(allItems.length / PAGE_SIZE));
-    let page = 0;
+function lobbyRows() {
+    return [new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('pk_lib').setLabel('📋 人格庫').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('pk_form').setLabel('⚔️ 出擊編成').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('pk_cult').setLabel('🔼 人格培育').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('pk_ego').setLabel('🔮 E.G.O').setStyle(ButtonStyle.Secondary),
+    )];
+}
 
-    function makeEmbed(p) {
-        const start  = p * PAGE_SIZE;
-        const slice  = allItems.slice(start, start + PAGE_SIZE);
+function backToLobbyRow() {
+    return new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('pk_home').setLabel('🏠 返回主頁').setStyle(ButtonStyle.Danger),
+    );
+}
 
-        const teamLines = (player.team || []).map(name => {
-            const r  = findRarity(name);
-            const lv = player.identityLevels[name] || 1;
-            return `• **${name}** Lv.${lv} [${rarityLabel(r)}]`;
-        }).join('\n') || '（尚未編制隊伍，點擊👥按鈕編制）';
+// ─── !pack 主路由 ──────────────────────────────────────────────
+async function showPack(_client, message) {
+    const player = getOrCreatePlayer(null, message.author.id, message.author.username);
+    const reply  = await message.reply({ embeds: [lobbyEmbed(player)], components: lobbyRows() });
 
-        const itemLines = slice.map((v, i) => {
-            const isEgo  = v.startsWith('[E.G.O] ');
-            const clean  = isEgo ? v.replace('[E.G.O] ', '') : v;
-            const r      = findRarity(clean);
-            const lv     = player.identityLevels[clean] || 1;
-            const lvStr  = isEgo ? '' : ` Lv.${lv}`;
-            return `**${start + i + 1}.** ${v}${lvStr} \`[${rarityLabel(r)}]\``;
-        }).join('\n') || '背包空空如一，請執行 `!pull` 提取人格。';
-
-        return new EmbedBuilder()
-            .setTitle(`🎒 ${message.author.username} 的收容倉庫`)
-            .setColor(0x4cc9f0)
-            .addFields(
-                { name: '💎 狂氣',    value: `${player.lunacy}`,       inline: true },
-                { name: '🧵 紡錘',    value: `${player.thread}`,       inline: true },
-                { name: '⭐ 核心等級', value: `Lv.${player.level}`,   inline: true },
-                { name: '👥 出擊戰隊', value: teamLines,                inline: false },
-            )
-            .setDescription(`### 持有清單 (${start + 1}~${Math.min(start + PAGE_SIZE, allItems.length)} / ${allItems.length} 件)\n${itemLines}`)
-            .setFooter({ text: `分頁 ${p + 1}/${totalPages} | 點擊「👥編制隊伍」或「🔼人格升等」進行管理` });
-    }
-
-    function makeRow(p) {
-        return [new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('pack_prev').setLabel('◀').setStyle(ButtonStyle.Primary).setDisabled(p === 0),
-            new ButtonBuilder().setCustomId('pack_next').setLabel('▶').setStyle(ButtonStyle.Primary).setDisabled(p >= totalPages - 1),
-            new ButtonBuilder().setCustomId('pack_team').setLabel('👥 編制隊伍').setStyle(ButtonStyle.Success).setDisabled(allItems.length === 0),
-            new ButtonBuilder().setCustomId('pack_upgrade').setLabel('🔼 人格升等').setStyle(ButtonStyle.Secondary).setDisabled(player.identities.length === 0),
-        )];
-    }
-
-    const packMsg = await waitMsg.edit({ content: null, embeds: [makeEmbed(page)], components: makeRow(page) });
-    const col = packMsg.createMessageComponentCollector({
+    const col = reply.createMessageComponentCollector({
         filter: i => {
             if (i.user.id !== message.author.id) {
-                i.reply({ content: '❌ 操作阻斷：此非您的儲藏庫。', ephemeral: true });
+                i.reply({ content: '❌ 這不是您的控制台。', ephemeral: true });
                 return false;
             }
             return true;
         },
-        time: 120_000
+        time: 10 * 60_000,
     });
 
-    col.on('collect', async interaction => {
-        const id = interaction.customId;
+    // ── 共用 helper ──────────────────────────────────────────
+    function refresh() {
+        return getOrCreatePlayer(null, message.author.id, message.author.username);
+    }
+    function save(p) { savePlayerData(null, message.author.id, p); }
 
-        if (id === 'pack_prev') {
-            page = Math.max(0, page - 1);
-            return interaction.update({ embeds: [makeEmbed(page)], components: makeRow(page) });
-        }
-        if (id === 'pack_next') {
-            page = Math.min(totalPages - 1, page + 1);
-            return interaction.update({ embeds: [makeEmbed(page)], components: makeRow(page) });
+    col.on('collect', async ix => {
+        const id = ix.customId;
+
+        // ═══ 主頁 ════════════════════════════════════════════
+        if (id === 'pk_home') {
+            const p = refresh();
+            return ix.update({ embeds: [lobbyEmbed(p)], components: lobbyRows() });
         }
 
-        if (id === 'pack_team') {
-            const opts = player.identities.slice(0, 25).map(name => ({
-                label:       `${name.slice(0, 25)} (Lv.${player.identityLevels[name] || 1})`,
-                description: `階級：${rarityLabel(findRarity(name))}`,
-                value:       name,
+        // ═══ 人格庫 ══════════════════════════════════════════
+        if (id === 'pk_lib') {
+            const pool = getIdData().pool || {};
+            const rarityOpts = RARITY_ORDER
+                .filter(r => (pool[r]||[]).length > 0)
+                .map(r => ({ label:`${RARITY_LABEL[r]} (${pool[r].length}件)`, value: r }));
+            const menu = new StringSelectMenuBuilder()
+                .setCustomId('pk_lib_rarity')
+                .setPlaceholder('🔍 選擇稀有度查詢人格...')
+                .addOptions(rarityOpts);
+            return ix.update({
+                embeds: [new EmbedBuilder()
+                    .setTitle('📋 人格庫 — 稀有度選擇').setColor(0x3a0ca3)
+                    .setDescription('請選擇稀有度，查看該稀有度的所有人格資料。')],
+                components: [new ActionRowBuilder().addComponents(menu), new ActionRowBuilder().addComponents(backToLobbyRow().components)],
+            });
+        }
+
+        if (id === 'pk_lib_rarity') {
+            const rarity  = ix.values[0];
+            const pool    = getIdData().pool || {};
+            const items   = (pool[rarity] || []).slice(0, 25);
+            const idData  = getIdData();
+            const opts = items.map(name => ({
+                label:       getShortName(name).padEnd(2) || name.slice(0,25),
+                description: `${RARITY_LABEL[rarity]} ${idData.getIdentityData ? (idData.getIdentityData(name)?.skill1?.skillname||'') : ''}`,
+                value:       name.slice(0, 100),
             }));
-            if (!opts.length) return interaction.reply({ content: '❌ 背包內無人格可編制。', ephemeral: true });
             const menu = new StringSelectMenuBuilder()
-                .setCustomId('team_select')
-                .setPlaceholder('挑選欲派上戰場的人格（最多 7 人）...')
-                .setMinValues(1).setMaxValues(Math.min(7, opts.length))
+                .setCustomId('pk_lib_id')
+                .setPlaceholder(`${RARITY_LABEL[rarity]} 人格列表...`)
                 .addOptions(opts);
-            return interaction.update({
-                content: '💡 **配置模式：** 請在選單中選擇 1~7 位人格：',
-                embeds: [],
+            return ix.update({
+                embeds: [new EmbedBuilder()
+                    .setTitle(`📋 人格庫 — ${RARITY_LABEL[rarity]}`).setColor(RARITY_COLOR[rarity])
+                    .setDescription(`共 ${(pool[rarity]||[]).length} 件人格（顯示前 25 件）`)],
                 components: [
                     new ActionRowBuilder().addComponents(menu),
                     new ActionRowBuilder().addComponents(
-                        new ButtonBuilder().setCustomId('pack_back').setLabel('↩ 返回背包').setStyle(ButtonStyle.Secondary)
+                        new ButtonBuilder().setCustomId('pk_lib').setLabel('↩ 返回稀有度').setStyle(ButtonStyle.Secondary),
+                        backToLobbyRow().components[0],
                     ),
                 ],
             });
         }
 
-        if (id === 'pack_upgrade') {
-            const opts = player.identities.slice(0, 25).map(name => {
-                const lv   = player.identityLevels[name] || 1;
-                const cost = lv * 10;
-                return {
-                    label:       `${name.slice(0, 25)} (當前 Lv.${lv})`,
-                    description: `${rarityLabel(findRarity(name))} | 升級費用：紡錘 ×${cost}`,
-                    value:       name,
-                };
-            });
-            const menu = new StringSelectMenuBuilder()
-                .setCustomId('upgrade_select')
-                .setPlaceholder('挑選想要提升等級的罪人人格...')
-                .addOptions(opts);
-            return interaction.update({
-                content: `🔼 **核心人格突破模組**\n您當前共持有：**${player.thread}** 個紡錘。\n請在下方選單選取目標執行同步化升級：`,
-                embeds: [],
-                components: [
-                    new ActionRowBuilder().addComponents(menu),
-                    new ActionRowBuilder().addComponents(
-                        new ButtonBuilder().setCustomId('pack_back').setLabel('↩ 返回背包').setStyle(ButtonStyle.Secondary)
-                    ),
-                ],
-            });
+        if (id === 'pk_lib_id') {
+            const name    = ix.values[0];
+            const idData  = getIdData();
+            const data    = idData.getIdentityData ? idData.getIdentityData(name) : null;
+            const rarity  = findRarity(name);
+            const p       = refresh();
+            const lv      = p.identityLevels[name] || 1;
+            const owned   = p.identities.includes(name);
+
+            function skillLine(sk, label) {
+                if (!sk) return '';
+                const sn = sk.skillname || '—';
+                return `**${label}** ${sn} ｜ 基礎:${sk.clashbase} 硬幣:${sk.coins}×+${sk.clashpower} 攻:${sk.attack} 防:${sk.defense}`;
+            }
+
+            const skillText = data
+                ? [skillLine(data.skill1, 'S1'), skillLine(data.skill2, 'S2'), skillLine(data.skill3, 'S3')].filter(Boolean).join('\n') || '（待補）'
+                : '（資料待補）';
+            const evadeText = data?.evade ? `硬幣:${data.evade.coins}×+${data.evade.clashpower} 防:${data.evade.defense} _${data.evade.skillname||''}_` : '（待補）';
+            const ctrText   = data?.counter?.map(c =>
+                `${c.canclash?'🔵可碰撞':'🔴不可碰撞'} ${c.skillname||''} 硬幣:${c.coins}×+${c.clashpower} 攻:${c.attack} 防:${c.defense}`
+            ).join('\n') || '（待補）';
+
+            const embed = new EmbedBuilder()
+                .setTitle(`${RARITY_LABEL[rarity]} ${getShortName(name)}`)
+                .setColor(RARITY_COLOR[rarity])
+                .setDescription(`\`${name}\``)
+                .addFields(
+                    { name: '🎯 技能', value: skillText, inline: false },
+                    { name: '💨 迴避', value: evadeText, inline: true },
+                    { name: '⚡ 反擊', value: ctrText, inline: false },
+                    { name: '📊 狀態', value: owned ? `已持有 ｜ Lv.**${lv}** / 60` : '未持有', inline: true },
+                )
+                .setFooter({ text: owned ? `升等費用 Lv${lv}→${lv+1}: 碎片×${calcLevelCost(lv).frags} + 卷×${calcLevelCost(lv).scrolls}` : '透過 !pull 提取此人格' });
+
+            const actionBtns = [
+                new ButtonBuilder().setCustomId('pk_lib').setLabel('↩ 返回').setStyle(ButtonStyle.Secondary),
+                backToLobbyRow().components[0],
+            ];
+            if (owned) {
+                actionBtns.splice(1, 0,
+                    new ButtonBuilder().setCustomId(`pk_cult_do_${name.slice(0,60)}`).setLabel('🔼 升等此人格').setStyle(ButtonStyle.Primary),
+                );
+            }
+            return ix.update({ embeds: [embed], components: [new ActionRowBuilder().addComponents(actionBtns)] });
         }
 
-        if (id === 'team_select') {
-            player.team = interaction.values;
-            await savePlayerData(client, message.author.id, player);
-            return interaction.update({
-                content: '✅ **戰隊編制完畢！核心精神同步已儲存。**',
-                embeds:  [makeEmbed(page)],
-                components: makeRow(page)
-            });
-        }
-
-        if (id === 'upgrade_select') {
-            const targetName   = interaction.values[0];
-            const currentLvl   = player.identityLevels[targetName] || 1;
-            const requiredThread = currentLvl * 10;
-
-            if (player.thread < requiredThread) {
-                return interaction.reply({
-                    content: `❌ **同步突破失敗：** 升級 \`${targetName}\` 需要 **${requiredThread}** 個紡錘，您目前僅持有 **${player.thread}** 個。`,
-                    ephemeral: true
+        // ═══ 出擊編成 ════════════════════════════════════════
+        if (id === 'pk_form') {
+            const p   = refresh();
+            const all = p.identities.slice(0, 25);
+            if (!all.length) {
+                return ix.update({
+                    embeds: [new EmbedBuilder().setTitle('⚔️ 出擊編成').setColor(0x57606f).setDescription('您尚未持有任何人格，請先 `!pull` 提取。')],
+                    components: [new ActionRowBuilder().addComponents(backToLobbyRow().components)],
                 });
             }
-            player.thread -= requiredThread;
-            player.identityLevels[targetName] = currentLvl + 1;
-            await savePlayerData(client, message.author.id, player);
+            const opts = all.map(name => ({
+                label:       getShortName(name).padEnd(2) || name.slice(0,25),
+                description: `${RARITY_LABEL[findRarity(name)]} Lv.${p.identityLevels[name]||1}`,
+                value:       name.slice(0,100),
+                default:     p.team.includes(name),
+            }));
+            const menu = new StringSelectMenuBuilder()
+                .setCustomId('pk_form_select')
+                .setPlaceholder('選擇出戰人格（最多 6 名）...')
+                .setMinValues(1).setMaxValues(Math.min(6, all.length))
+                .addOptions(opts);
+            return ix.update({
+                embeds: [new EmbedBuilder()
+                    .setTitle('⚔️ 出擊編成').setColor(0x2ed573)
+                    .setDescription('從已持有人格中選出 1~6 名出擊。\n> 💡 深色標示為當前編成')],
+                components: [new ActionRowBuilder().addComponents(menu), new ActionRowBuilder().addComponents(backToLobbyRow().components)],
+            });
+        }
 
-            // 重新整理選單讓使用者繼續升等
-            const nextOpts = player.identities.slice(0, 25).map(name => {
-                const lv   = player.identityLevels[name] || 1;
-                const cost = lv * 10;
+        if (id === 'pk_form_select') {
+            const p    = refresh();
+            p.team     = ix.values;
+            p.party    = ix.values.map(name => {
+                const m = name.match(/[）\]](.+?)(?:\s*\/|$)/);
+                return m ? m[1].trim() : name;
+            });
+            save(p);
+            return ix.update({
+                embeds: [new EmbedBuilder()
+                    .setTitle('✅ 編成儲存成功').setColor(0x2ed573)
+                    .setDescription(ix.values.map(n => `• **${getShortName(n)}**`).join('\n'))
+                    .setFooter({ text: '返回主頁可查看新編成' })],
+                components: [new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setCustomId('pk_home').setLabel('🏠 返回主頁').setStyle(ButtonStyle.Success),
+                )],
+            });
+        }
+
+        // ═══ 人格培育 ════════════════════════════════════════
+        if (id === 'pk_cult') {
+            const p   = refresh();
+            const all = p.identities.slice(0, 25);
+            if (!all.length) {
+                return ix.update({
+                    embeds: [new EmbedBuilder().setTitle('🔼 人格培育').setColor(0x57606f).setDescription('尚未持有任何人格。')],
+                    components: [new ActionRowBuilder().addComponents(backToLobbyRow().components)],
+                });
+            }
+            const opts = all.map(name => {
+                const lv   = p.identityLevels[name] || 1;
+                const cost = calcLevelCost(lv);
                 return {
-                    label:       `${name.slice(0, 25)} (當前 Lv.${lv})`,
-                    description: `${rarityLabel(findRarity(name))} | 突破至下一級所需紡錘: ${cost} 個`,
-                    value:       name
+                    label:       `${getShortName(name).slice(0,20)} (Lv.${lv}/60)`,
+                    description: `升一級需碎片×${cost.frags}${cost.scrolls?` + 卷×${cost.scrolls}`:''}`,
+                    value:       name.slice(0,100),
                 };
             });
-            const nextMenu = new StringSelectMenuBuilder()
-                .setCustomId('upgrade_select')
-                .setPlaceholder('繼續升等或選擇其他人格...')
-                .addOptions(nextOpts);
-            return interaction.update({
-                content: `🎉 **人格資料重構成功！**\n\`${targetName}\` 已成功晉升至 **Lv.${currentLvl + 1}**！\n本次消耗紡錘: **${requiredThread}** 個。剩餘持有: **${player.thread}** 個。`,
-                components: [
-                    new ActionRowBuilder().addComponents(nextMenu),
-                    new ActionRowBuilder().addComponents(
-                        new ButtonBuilder().setCustomId('pack_back').setLabel('↩ 返回背包').setStyle(ButtonStyle.Secondary)
-                    ),
-                ],
+            const menu = new StringSelectMenuBuilder()
+                .setCustomId('pk_cult_select')
+                .setPlaceholder('選擇要培育的人格...')
+                .addOptions(opts);
+            return ix.update({
+                embeds: [new EmbedBuilder()
+                    .setTitle('🔼 人格培育').setColor(0xffd166)
+                    .setDescription(`📦 人格碎片：**${p.fragments}** ／ 📜 經驗卷：**${p.expScrolls}**`)],
+                components: [new ActionRowBuilder().addComponents(menu), new ActionRowBuilder().addComponents(backToLobbyRow().components)],
             });
         }
 
-        if (id === 'pack_back') {
-            return interaction.update({ content: null, embeds: [makeEmbed(page)], components: makeRow(page) });
+        if (id === 'pk_cult_select' || id.startsWith('pk_cult_do_')) {
+            const name = id.startsWith('pk_cult_do_') ? id.slice('pk_cult_do_'.length) : ix.values[0];
+            return showCultivation(ix, name, refresh, save);
+        }
+
+        if (id.startsWith('pk_lvup_')) {
+            const parts = id.split('_');
+            const steps = parseInt(parts[2]) || 1;
+            const name  = parts.slice(3).join('_');
+            const p     = refresh();
+            const lv    = p.identityLevels[name] || 1;
+            if (lv >= 60) return ix.reply({ content: '⛔ 已達最高等級 Lv.60。', ephemeral: true });
+            const realSteps = Math.min(steps, 60 - lv);
+            const cost = calcLevelCost(lv, realSteps);
+            if (p.fragments < cost.frags) return ix.reply({ content: `❌ 碎片不足！需要 ${cost.frags}，持有 ${p.fragments}。`, ephemeral: true });
+            if (p.expScrolls < cost.scrolls) return ix.reply({ content: `❌ 經驗卷不足！需要 ${cost.scrolls}，持有 ${p.expScrolls}。`, ephemeral: true });
+            p.fragments -= cost.frags;
+            p.expScrolls -= cost.scrolls;
+            p.identityLevels[name] = lv + realSteps;
+            save(p);
+            return showCultivation(ix, name, refresh, save);
+        }
+
+        // ═══ E.G.O ═══════════════════════════════════════════
+        if (id === 'pk_ego') {
+            const p   = refresh();
+            const desc = p.egos.length
+                ? p.egos.map((e, i) => `${i+1}. 🔮 ${e}`).join('\n')
+                : '您尚未持有任何 E.G.O。';
+            return ix.update({
+                embeds: [new EmbedBuilder()
+                    .setTitle('🔮 E.G.O 庫').setColor(0xa55eea)
+                    .setDescription(desc)
+                    .setFooter({ text: `共 ${p.egos.length} 件 E.G.O` })],
+                components: [new ActionRowBuilder().addComponents(backToLobbyRow().components)],
+            });
         }
     });
 
-    col.on('end', () => packMsg.edit({ components: [] }).catch(() => {}));
+    col.on('end', () => reply.edit({ components: [] }).catch(() => {}));
 }
 
-// ─── !list（翻頁 + 每項個別機率）────────────────────────────────
-const ITEMS_PER_PAGE = 12;
+async function showCultivation(ix, name, refresh, save) {
+    const p    = refresh();
+    const lv   = p.identityLevels[name] || 1;
+    const cost1  = calcLevelCost(lv, 1);
+    const cost10 = calcLevelCost(lv, 10);
+    const maxCost = calcLevelCost(lv, 60 - lv);
+    const rarity  = findRarity(name);
 
-// 視覺寬度計算（全形字=2、半形=1）
-function getVisualWidth(str) {
-    let width = 0;
-    for (let i = 0; i < str.length; i++) {
-        width += str.charCodeAt(i) > 128 ? 2 : 1;
-    }
-    return width;
+    const embed = new EmbedBuilder()
+        .setTitle(`🔼 人格培育 — ${getShortName(name)}`)
+        .setColor(RARITY_COLOR[rarity])
+        .addFields(
+            { name: '📊 等級', value: `Lv.**${lv}** / 60`, inline: true },
+            { name: '📦 持有碎片', value: `${p.fragments}`, inline: true },
+            { name: '📜 持有卷', value: `${p.expScrolls}`, inline: true },
+            lv < 60
+                ? { name: '💰 升1級費用',  value: `碎片×${cost1.frags}${cost1.scrolls?` + 卷×${cost1.scrolls}`:''}`, inline: true }
+                : { name: '🏆 狀態', value: '**最高等級**', inline: true },
+            lv + 10 <= 60
+                ? { name: '💰 升10級費用', value: `碎片×${cost10.frags}${cost10.scrolls?` + 卷×${cost10.scrolls}`:''}`, inline: true }
+                : { name: '\u200b', value: '\u200b', inline: true },
+        )
+        .setFooter({ text: `${RARITY_LABEL[rarity]} ｜ 升到滿級需: 碎片×${maxCost.frags}${maxCost.scrolls?` + 卷×${maxCost.scrolls}`:''}` });
+
+    const btnKey = name.slice(0, 55);
+    const buttons = [
+        new ButtonBuilder().setCustomId(`pk_lvup_1_${btnKey}`).setLabel('+1 級').setStyle(ButtonStyle.Primary).setDisabled(lv >= 60),
+        new ButtonBuilder().setCustomId(`pk_lvup_10_${btnKey}`).setLabel('+10 級').setStyle(ButtonStyle.Primary).setDisabled(lv + 10 > 60),
+        new ButtonBuilder().setCustomId('pk_cult').setLabel('↩ 返回培育').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('pk_home').setLabel('🏠 主頁').setStyle(ButtonStyle.Danger),
+    ];
+    return ix.update({ embeds: [embed], components: [new ActionRowBuilder().addComponents(buttons)] });
 }
+
+// ─── !list（翻頁機率清單）─────────────────────────────────────
+const BASE_RATES = {
+    '0':0.8359857,'00':0.12,'000':0.029,'Egos':0.013,'0000':0.001,'Special':0.001,'Color Fixer':0.0000143
+};
+const RATE_UP_MULT = 5;
 
 function buildListPages() {
-    const pages = [];
-    const pool  = identitiesData.pool || identitiesData.identities || {};
+    const pages   = [];
+    const pool    = getIdData().pool || {};
+    const up      = getIdData().upTargets || {};
 
-    // 第 0 頁：機率總覽
-    const overviewLines = RARITY_ORDER.map(r => {
-        const count = (pool[r] || []).length;
-        const pct   = ((BASE_RATES[r] || 0) * 100).toFixed(4);
-        const up    = normalizeUpList(r);
-        return `${rarityLabel(r).padEnd(8)} 機率：\`${pct}%\` 共 \`${count}\` 項${up.length ? ` ⬆️ UP×${up.length}` : ''}`;
+    pages.push({
+        type: 'summary',
+        title: '🗂️ 核心控制室 — 扭蛋池機率清單',
+        desc: RARITY_ORDER.map(r => {
+            const cnt = (pool[r]||[]).length;
+            const pct = ((BASE_RATES[r]||0)*100).toFixed(4);
+            const upItems = up[r] || [];
+            return `${RARITY_LABEL[r].padEnd(8)} 機率：\`${pct}%\` 共 \`${cnt}\` 件${upItems.length?` ⬆️ UP×${upItems.length}`:''}`;
+        }).join('\n')
     });
-    pages.push({ type: 'summary', title: '🗂️ 核心控制室 — 扭蛋池機率清單', color: 0x3a0ca3, desc: overviewLines.join('\n') });
 
-    // 各稀有度（0 → 00 → 000 → 0000 → CF → SP → EGO）
     for (const r of RARITY_ORDER) {
-        const items = pool[r] || [];
+        const items  = pool[r] || [];
         if (!items.length) continue;
-
-        const upList     = normalizeUpList(r);
-        const totalWeight = items.reduce((s, n) => s + (upList.includes(n) ? RATE_UP_MULT : 1), 0);
-        const chunks     = [];
-        for (let i = 0; i < items.length; i += ITEMS_PER_PAGE) chunks.push(items.slice(i, i + ITEMS_PER_PAGE));
-
-        chunks.forEach((chunk, ci) => {
-            pages.push({ type: 'pool', r, chunk, ci, ct: chunks.length, total: items.length, upList, totalWeight });
-        });
+        const upList = up[r] || [];
+        const totalW = items.reduce((s, n) => s + (upList.includes(n) ? RATE_UP_MULT : 1), 0);
+        const SZ     = 12;
+        for (let c = 0; c < items.length; c += SZ) {
+            pages.push({ type:'pool', r, chunk: items.slice(c, c+SZ), ci: Math.floor(c/SZ), ct: Math.ceil(items.length/SZ), total: items.length, upList, totalW });
+        }
     }
     return pages;
 }
 
-function renderListPage(pages, idx) {
+function renderPage(pages, idx) {
     const p    = pages[idx];
-    const foot = `總分頁：${idx + 1}/${pages.length} | 使用下方按鈕切換觀測頁面`;
-
+    const foot = `分頁 ${idx+1}/${pages.length}`;
     if (p.type === 'summary') {
-        return new EmbedBuilder()
-            .setTitle(p.title).setColor(p.color)
-            .setDescription(p.desc)
-            .setFooter({ text: foot });
+        return new EmbedBuilder().setTitle(p.title).setColor(0x3a0ca3).setDescription(p.desc).setFooter({text:foot});
     }
-
-    const base  = BASE_RATES[p.r] || 0;
+    const base  = BASE_RATES[p.r]||0;
     const lines = p.chunk.map(name => {
-        const isUp  = p.upList.includes(name);
-        const w     = isUp ? RATE_UP_MULT : 1;
-        const pct   = ((base * (w / p.totalWeight)) * 100).toFixed(4);
-        const prefix = isUp ? `🔼 [UP] ${name}` : `• ${name}`;
-        const dotCount = Math.max(2, 52 - getVisualWidth(prefix));
-        const dots  = '.'.repeat(dotCount);
-        return `\`${prefix} ${dots} [${pct}%]\``;
+        const isUp = p.upList.includes(name);
+        const pct  = ((base*(isUp?RATE_UP_MULT:1)/p.totalW)*100).toFixed(4);
+        return `\`${isUp?'🔼 ':'• '}${getShortName(name).padEnd(14)} .....[${pct}%]\``;
     });
-
-    const header = `• 階級總獲取概率: \`${(base * 100).toFixed(4)}%\`\n• 該階級總計實體: \`${p.total}\` 名\n\n`;
-
     return new EmbedBuilder()
         .setTitle('🗂️ 核心控制室 — 扭蛋池機率清單')
-        .setColor(rarityColor(p.r))
-        .setDescription(`### ${rarityLabel(p.r)} (第 ${p.ci + 1}/${p.ct} 頁)\n${header}${lines.join('\n')}`)
-        .setFooter({ text: foot });
-}
-
-function makeNavRow(idx, total, disabled = false) {
-    return [new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('list_prev').setLabel('◀ 上一頁').setStyle(ButtonStyle.Primary).setDisabled(disabled || idx === 0),
-        new ButtonBuilder().setCustomId('list_next').setLabel('下一頁 ▶').setStyle(ButtonStyle.Primary).setDisabled(disabled || idx >= total - 1),
-    )];
+        .setColor(RARITY_COLOR[p.r])
+        .setDescription(`### ${RARITY_LABEL[p.r]} (${p.ci+1}/${p.ct})\n共 ${p.total} 件 ｜ 總機率 \`${(base*100).toFixed(4)}%\`\n\n${lines.join('\n')}`)
+        .setFooter({text:foot});
 }
 
 async function showList(message) {
     const pages = buildListPages();
     let idx = 0;
-    const reply = await message.reply({ embeds: [renderListPage(pages, idx)], components: makeNavRow(idx, pages.length) });
-
-    const col = reply.createMessageComponentCollector({
-        filter: i => {
-            if (i.user.id !== message.author.id) {
-                i.reply({ content: '❌ 請輸入 `!list` 創立您獨立的觀測面板。', ephemeral: true });
-                return false;
-            }
-            return true;
-        },
-        time: 120_000
-    });
-
+    const navRow = (i) => [new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('ls_prev').setLabel('◀').setStyle(ButtonStyle.Primary).setDisabled(i===0),
+        new ButtonBuilder().setCustomId('ls_next').setLabel('▶').setStyle(ButtonStyle.Primary).setDisabled(i>=pages.length-1),
+    )];
+    const rep = await message.reply({ embeds:[renderPage(pages,idx)], components: navRow(idx) });
+    const col = rep.createMessageComponentCollector({ filter: i=>i.user.id===message.author.id, time:120_000 });
     col.on('collect', async i => {
-        if (i.customId === 'list_prev') idx = Math.max(0, idx - 1);
-        if (i.customId === 'list_next') idx = Math.min(pages.length - 1, idx + 1);
-        await i.update({ embeds: [renderListPage(pages, idx)], components: makeNavRow(idx, pages.length) });
+        if (i.customId==='ls_prev') idx=Math.max(0,idx-1);
+        if (i.customId==='ls_next') idx=Math.min(pages.length-1,idx+1);
+        await i.update({ embeds:[renderPage(pages,idx)], components: navRow(idx) });
     });
-
-    col.on('end', () => reply.edit({ components: makeNavRow(idx, pages.length, true) }).catch(() => {}));
+    col.on('end', () => rep.edit({components:[]}).catch(()=>{}));
 }
 
-// ─── 主路由 ──────────────────────────────────────────────────
+// ─── 主路由 ───────────────────────────────────────────────────
 async function handleInventory(client, message) {
     const raw = message.content.trim();
     if (raw === '!list' || raw === '!清單') return showList(message);
@@ -437,8 +520,8 @@ module.exports = {
     loadPlayerData,
     savePlayerData,
     getOrCreatePlayer,
-    // ↓↓↓ 向下相容 PullSystem / GiveAwaySystem 的舊 API ↓↓↓
     loadUserInventory,
     saveUserInventory,
     findRarity,
+    calcLevelCost,
 };
