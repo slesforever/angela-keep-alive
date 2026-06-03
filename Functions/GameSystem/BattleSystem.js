@@ -1,344 +1,297 @@
 // Functions/GameSystem/BattleSystem.js
-// 戰鬥引擎：碰撞系統 / 技能 / 狀態效果
+// 戰鬥引擎（碰撞系統，仿 Limbus Company）
+const { EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder } = require('discord.js');
+const { SINNERS, getSkillList }    = require('./Data/SinnersData.js');
+const { randomEnemy }              = require('./Data/EnemyData.js');
+const { getOrCreatePlayer }        = require('./PacksAndData.js');
 
-const {
-    EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder
-} = require('discord.js');
-const { SINNERS } = require('./Data/SinnersData.js');
-const { randomEnemy } = require('./Data/EnemyData.js');
-const { getPartyWithData, calcHP } = require('./PartySystem.js');
-const { loadCharData, saveCharData } = require('./CharacterSystem.js');
+const SKILL_TIMEOUT  = 45_000;  // 45秒技能選擇
+const TYPE_EMOJI     = { 斬: '⚔️', 刺: '🗡️', 鈍: '🔨' };
+const STATUS_EMOJI   = { 流血: '🩸', 燃燒: '🔥', 震顫: '🌀', 沉沒: '🌊', 破裂: '💥', 束縛: '⛓️', 倒地: '💫' };
+const THREAD_REWARD  = { normal: 5, elite: 15, boss: 40 };
 
-const THREAD_REWARDS = { normal: 5, elite: 15, boss: 40 };
-const EXP_REWARDS    = { normal: 10, elite: 30, boss: 80 };
-const SKILL_TIMEOUT  = 20_000;
-
-const SIN_EMOJI = { 憤: '🔴', 情: '🟠', 怠: '🟡', 貪: '🟢', 幽: '🔵', 傲: '🟣', 嫉: '⚫' };
-const TYPE_EMOJI = { 斬: '⚔️', 刺: '🗡️', 鈍: '🔨' };
-const STATUS_EMOJI = { 流血: '🩸', 燃燒: '🔥', 震顫: '🌀', 沉沒: '🌊', 破裂: '💥', 束縛: '⛓️', 倒地: '💫' };
-
-// ─── 工具 ─────────────────────────────────────────────────────
+// ─── 工具函式 ─────────────────────────────────────────────────
 function rollCoins(count) {
     let heads = 0;
-    const results = [];
+    const icons = [];
     for (let i = 0; i < count; i++) {
-        const h = Math.random() < 0.5;
-        if (h) heads++;
-        results.push(h ? '🟡' : '⚫');
+        if (Math.random() < 0.5) { heads++; icons.push('🟡'); }
+        else                       icons.push('⚫');
     }
-    return { heads, results };
+    return { heads, icons };
 }
 
-function calcSkillPower(skill, level = 1, uptie = 1) {
-    const bonus = Math.floor((level - 1) * 0.5) + (uptie - 1);
+function calcClashPower(skill, identityLv = 1) {
+    const lvBonus = Math.floor((identityLv - 1) * 0.5);
     const { heads } = rollCoins(skill.coins);
-    return skill.base + heads * skill.coin + bonus;
+    return skill.clashbase + heads * skill.clashpower + lvBonus;
 }
 
-function applyStatus(target, statusName, stacks) {
+function applyStatus(target, name, stacks) {
     if (!target.statuses) target.statuses = {};
-    target.statuses[statusName] = (target.statuses[statusName] || 0) + stacks;
+    target.statuses[name] = (target.statuses[name] || 0) + stacks;
 }
 
-function processEndOfTurn(unit) {
-    if (!unit.statuses) return '';
+function processEoT(unit) {
     const effects = [];
-    if (unit.statuses['流血'] > 0) {
+    if (!unit.statuses) return '';
+    if ((unit.statuses['流血'] || 0) > 0) {
         const dmg = Math.floor(unit.statuses['流血'] * 1.5);
         unit.hp = Math.max(0, unit.hp - dmg);
         unit.statuses['流血'] = Math.max(0, unit.statuses['流血'] - 1);
-        effects.push(`🩸 流血造成 ${dmg} 傷害`);
+        effects.push(`🩸 流血 → **${unit.name}** 受到 ${dmg} 傷害`);
     }
-    if (unit.statuses['燃燒'] > 0) {
+    if ((unit.statuses['燃燒'] || 0) > 0) {
         const dmg = unit.statuses['燃燒'] * 2;
         unit.hp = Math.max(0, unit.hp - dmg);
         unit.statuses['燃燒'] = Math.max(0, unit.statuses['燃燒'] - 1);
-        effects.push(`🔥 燃燒造成 ${dmg} 傷害`);
+        effects.push(`🔥 燃燒 → **${unit.name}** 受到 ${dmg} 傷害`);
     }
     return effects.join('\n');
 }
 
-function calcDamage(winPower, losePower, defLevel) {
-    const base = Math.max(1, winPower - losePower);
-    const effective = Math.max(0, base - Math.floor(defLevel * 0.3));
-    return Math.max(1, effective + Math.floor(Math.random() * 3));
+function buildHPBar(cur, max, len = 10) {
+    const f = Math.max(0, Math.round((cur / max) * len));
+    return '█'.repeat(f) + '░'.repeat(len - f);
 }
 
-function buildHPBar(current, max, len = 10) {
-    const filled = Math.round((current / max) * len);
-    return '█'.repeat(filled) + '░'.repeat(Math.max(0, len - filled));
+function formatStatuses(s = {}) {
+    return Object.entries(s).filter(([, v]) => v > 0).map(([k, v]) => `${STATUS_EMOJI[k] || ''}${k}×${v}`).join(' ') || '無';
 }
 
-function formatStatuses(statuses = {}) {
-    return Object.entries(statuses)
-        .filter(([, v]) => v > 0)
-        .map(([k, v]) => `${STATUS_EMOJI[k] || ''}${k}×${v}`)
-        .join(' ') || '無';
-}
-
-// ─── 建立戰鬥嵌入 ──────────────────────────────────────────────
+// ─── 建立戰況 Embed ────────────────────────────────────────────
 function buildBattleEmbed(state, log = '') {
-    const ally = state.ally;
-    const enemy = state.enemy;
-
-    const allyLines = ally.units.map((u, i) => {
-        const alive = u.hp > 0;
+    const allyLines = state.ally.map(u => {
         const bar = buildHPBar(u.hp, u.maxHp);
-        const st = formatStatuses(u.statuses);
-        return `${alive ? '🟢' : '💀'} **${u.name}** ${bar} ${u.hp}/${u.maxHp} ｜ ${st}`;
+        return `${u.hp > 0 ? '🟢' : '💀'} **${u.name}** \`${bar}\` ${u.hp}/${u.maxHp} | ${formatStatuses(u.statuses)}`;
     });
-
+    const e = state.enemy;
     const embed = new EmbedBuilder()
         .setTitle(`⚔️ 戰鬥中 — 第 ${state.turn} 回合`)
-        .setColor(enemy.hp <= enemy.maxHp * 0.3 ? 0x2ed573 : ally.units.every(u => u.hp <= 0) ? 0xff4757 : 0x5865f2)
+        .setColor(e.hp <= 0 ? 0x2ed573 : state.ally.every(u => u.hp <= 0) ? 0xff4757 : 0x5865f2)
         .addFields(
-            { name: `👹 敵人：${enemy.name} [${enemy.tier === 'boss' ? 'BOSS' : enemy.tier === 'elite' ? '精英' : '一般'}]`, value: `${buildHPBar(enemy.hp, enemy.maxHp)} ${enemy.hp}/${enemy.maxHp} HP\n狀態：${formatStatuses(enemy.statuses)}`, inline: false },
-            { name: '👥 我方', value: allyLines.join('\n'), inline: false }
+            { name: `👹 ${e.name} [${e.tier === 'boss' ? 'BOSS' : e.tier === 'elite' ? '精英' : '一般'}]`,
+              value: `\`${buildHPBar(e.hp, e.maxHp)}\` ${e.hp}/${e.maxHp} HP | ${formatStatuses(e.statuses)}`, inline: false },
+            { name: '👥 我方隊伍', value: allyLines.join('\n'), inline: false }
         );
-
-    if (log) embed.addFields({ name: '📜 戰鬥記錄', value: log.slice(-1000), inline: false });
-    embed.setFooter({ text: `回合 ${state.turn} | 選擇技能或等待 ${SKILL_TIMEOUT / 1000}s 自動出擊` });
+    if (log) embed.addFields({ name: '📜 本回合記錄', value: log.slice(-900), inline: false });
+    embed.setFooter({ text: `第 ${state.turn} 回合 ｜ 請在 ${SKILL_TIMEOUT / 1000} 秒內選擇技能` });
     return embed;
 }
 
-// ─── 建立技能選擇列 ────────────────────────────────────────────
-function buildSkillRow(unit, disabled = false) {
-    const sinner = SINNERS[unit.sinnerName];
-    const buttons = sinner.skills.map((sk, i) =>
+// ─── 技能按鈕（選擇主動出擊的罪人）─────────────────────────────
+function buildSkillRow(activeUnit, disabled = false) {
+    if (!activeUnit || activeUnit.hp <= 0) return null;
+    const sinner = SINNERS[activeUnit.sinnerName];
+    if (!sinner) return null;
+    const skills = getSkillList(sinner);
+    const buttons = skills.map((sk, i) =>
         new ButtonBuilder()
-            .setCustomId(`battle_skill_${unit.sinnerName}_${i}`)
-            .setLabel(`${i + 1}.${sk.name} [${sk.coins}幣 基:${sk.base}]`)
+            .setCustomId(`bs_${activeUnit.sinnerName}_${i}`)
+            .setLabel(`${i + 1}.${sk.name}`)
+            .setEmoji(TYPE_EMOJI[sk.type] || '⚔️')
             .setStyle(ButtonStyle.Primary)
-            .setDisabled(disabled || unit.hp <= 0)
+            .setDisabled(disabled)
     );
     buttons.push(
         new ButtonBuilder()
-            .setCustomId(`battle_skill_${unit.sinnerName}_defend`)
+            .setCustomId(`bs_${activeUnit.sinnerName}_defend`)
             .setLabel('🛡️ 防禦')
             .setStyle(ButtonStyle.Secondary)
-            .setDisabled(disabled || unit.hp <= 0)
+            .setDisabled(disabled)
     );
     return new ActionRowBuilder().addComponents(buttons.slice(0, 4));
 }
 
-// ─── 執行一次碰撞 ─────────────────────────────────────────────
-function doClash(attacker, attackerSkill, defender, defenderSkill, atkData, defData) {
-    const atkPow = calcSkillPower(attackerSkill, atkData?.level || 1, atkData?.uptie || 1);
-    const defPow = defenderSkill ? calcSkillPower(defenderSkill, defData?.level || 1, defData?.uptie || 1) : 0;
-
-    const atkWins = atkPow >= defPow;
-    const winner = atkWins ? attacker : defender;
-    const loser  = atkWins ? defender : attacker;
-    const winSkill = atkWins ? attackerSkill : defenderSkill;
-    const loseSkill = atkWins ? defenderSkill : attackerSkill;
-    const winPow = atkWins ? atkPow : defPow;
-    const losePow = atkWins ? defPow : atkPow;
-
-    const damage = calcDamage(winPow, losePow, loser.defLevel || 0);
-    loser.hp = Math.max(0, loser.hp - damage);
-
-    if (winSkill?.effect && Math.random() < 0.6) {
-        applyStatus(loser, winSkill.effect.name, winSkill.effect.stacks);
-    }
-
-    const atkCoins = rollCoins(attackerSkill.coins).results.join('');
-    const defCoins = defenderSkill ? rollCoins(defenderSkill.coins).results.join('') : '──';
-
-    return {
-        atkWins,
-        log: `${TYPE_EMOJI[attackerSkill.type] || ''}**${attacker.name}** ${attackerSkill.name} [${atkPow}] ${atkCoins}\n` +
-             `    ${atkWins ? '◀ 勝' : '▶ 敗'} vs **${defender.name}** ${defenderSkill?.name || '防禦'} [${defPow}] ${defCoins}\n` +
-             `    💥 ${loser.name} 受到 ${damage} 傷害` +
-             (winSkill?.effect ? ` ＋ ${winSkill.effect.name}×${winSkill.effect.stacks}` : ''),
-    };
-}
-
 // ─── 主戰鬥入口 ───────────────────────────────────────────────
 async function startBattle(client, message, tier = 'normal') {
-    const { party, charData } = await getPartyWithData(client, message.author.id);
-    const aliveParty = party.filter(n => SINNERS[n]).slice(0, 4);
+    const player = await getOrCreatePlayer(client, message.author.id, message.author.username);
+    const partyNames = (player.party && player.party.length) ? player.party : Object.keys(SINNERS).slice(0, 4);
+    const aliveParty = partyNames.filter(n => SINNERS[n]).slice(0, 4);
 
-    if (aliveParty.length === 0) {
-        return message.reply('❌ 隊伍是空的！先用 `!party add [罪人名]` 組建隊伍。');
+    if (!aliveParty.length) {
+        return message.reply('❌ 隊伍是空的！先用 `!party add [罪人名]` 組建隊伍，或 `!pack` 編制戰隊。');
     }
 
     const enemy = randomEnemy(tier);
 
     const state = {
         userId: message.author.id,
-        turn: 1,
-        ally: {
-            units: aliveParty.map(name => {
-                const s = SINNERS[name];
-                const sd = charData.sinners[name] || { level: 1, uptie: 1 };
-                const maxHp = calcHP(s, sd);
-                return {
-                    sinnerName: name,
-                    name,
-                    hp: maxHp,
-                    maxHp,
-                    defLevel: s.defLevel,
-                    statuses: {},
-                    sd,
-                };
-            }),
-        },
+        turn:   1,
+        ally:   aliveParty.map(name => {
+            const s  = SINNERS[name];
+            const lv = player.identityLevels?.[`LCB ${name}`] || player.identityLevels?.[name] || 1;
+            const hp = s.hp + (lv - 1) * 3;
+            return { sinnerName: name, name, hp, maxHp: hp, defLevel: s.defLevel, statuses: {}, lv };
+        }),
         enemy: { ...enemy, maxHp: enemy.hp, statuses: {} },
     };
 
-    let battleLog = `🔔 **戰鬥開始！** 遭遇 **${enemy.name}**\n`;
-
-    const embed = buildBattleEmbed(state, battleLog);
-    const skillRows = aliveParty.slice(0, 2).map(name =>
-        buildSkillRow(state.ally.units.find(u => u.sinnerName === name))
-    );
-
-    const battleMsg = await message.reply({
-        embeds: [embed],
-        components: skillRows.slice(0, 1),
+    const firstAlive = state.ally.find(u => u.hp > 0);
+    const battleMsg  = await message.reply({
+        embeds:     [buildBattleEmbed(state, `🔔 **戰鬥開始！** 遭遇 **${enemy.name}**`)],
+        components: [buildSkillRow(firstAlive)].filter(Boolean),
     });
 
-    const pendingSkills = {};
+    const pendingSkills = {}; // sinnerName → skillIndex | 'defend'
+    let turnTimer;
 
-    const collector = battleMsg.createMessageComponentCollector({
-        filter: i => i.user.id === message.author.id && i.customId.startsWith('battle_skill_'),
-        time: 5 * 60_000,
-    });
-
+    // ── 處理回合 ────────────────────────────────────────────────
     async function processTurn() {
-        const turnLogs = [];
+        const logs = [];
 
-        // 決定回合順序（按速度降序）
-        const allUnits = [
-            ...state.ally.units.filter(u => u.hp > 0).map(u => ({ ...u, side: 'ally' })),
-            { ...state.enemy, side: 'enemy' }
-        ].sort((a, b) => {
-            const spdA = a.side === 'ally' ? SINNERS[a.sinnerName].minSpd + Math.random() * (SINNERS[a.sinnerName].maxSpd - SINNERS[a.sinnerName].minSpd) : state.enemy.minSpd + Math.random() * (state.enemy.maxSpd - state.enemy.minSpd);
-            const spdB = b.side === 'ally' ? SINNERS[b.sinnerName].minSpd + Math.random() * (SINNERS[b.sinnerName].maxSpd - SINNERS[b.sinnerName].minSpd) : state.enemy.minSpd + Math.random() * (state.enemy.maxSpd - state.enemy.minSpd);
-            return spdB - spdA;
-        });
+        // 按速度排序
+        const order = state.ally
+            .filter(u => u.hp > 0)
+            .map(u => {
+                const s = SINNERS[u.sinnerName];
+                return { unit: u, spd: s.minSpd + Math.random() * (s.maxSpd - s.minSpd) };
+            })
+            .sort((a, b) => b.spd - a.spd)
+            .map(o => o.unit);
 
-        for (const unit of allUnits) {
+        for (const u of order) {
             if (state.enemy.hp <= 0) break;
-            const aliveAllies = state.ally.units.filter(u => u.hp > 0);
-            if (!aliveAllies.length) break;
 
-            if (unit.side === 'ally') {
-                const allyUnit = state.ally.units.find(u => u.sinnerName === unit.sinnerName);
-                if (!allyUnit || allyUnit.hp <= 0) continue;
-                const sinner = SINNERS[allyUnit.sinnerName];
+            const sinner    = SINNERS[u.sinnerName];
+            const skills    = getSkillList(sinner);
+            const skillIdx  = pendingSkills[u.sinnerName];
+            const isDefend  = skillIdx === 'defend' || skillIdx === undefined;
+            const mySkill   = isDefend ? null : skills[skillIdx];
 
-                const skillIdx = pendingSkills[allyUnit.sinnerName] ?? Math.floor(Math.random() * sinner.skills.length);
-                const skill = typeof skillIdx === 'number' ? sinner.skills[skillIdx] : null;
+            if (isDefend) {
+                const healed = Math.min(u.maxHp - u.hp, 5);
+                u.hp += healed;
+                logs.push(`🛡️ **${u.name}** 防禦${healed > 0 ? `，回復 ${healed} HP` : ''}`);
+                continue;
+            }
 
-                if (!skill) {
-                    allyUnit.hp = Math.min(allyUnit.maxHp, allyUnit.hp + 5);
-                    turnLogs.push(`🛡️ **${allyUnit.name}** 防禦，回復 5 HP`);
-                    continue;
-                }
+            // 敵方出技
+            const eSkill = state.enemy.skills[Math.floor(Math.random() * state.enemy.skills.length)];
+            const myPow  = calcClashPower(mySkill, u.lv);
+            const ePow   = calcClashPower({ clashbase: eSkill.base, coins: eSkill.coins, clashpower: eSkill.coin }, 1);
 
-                const enemySkill = state.enemy.skills[Math.floor(Math.random() * state.enemy.skills.length)];
-                const clash = doClash(allyUnit, skill, state.enemy, enemySkill, allyUnit.sd, null);
-                turnLogs.push(clash.log);
+            const { icons: myIcons } = rollCoins(mySkill.coins);
+            const { icons: eIcons  } = rollCoins(eSkill.coins);
+            const myWins = myPow >= ePow;
+
+            logs.push(`${TYPE_EMOJI[mySkill.type] || ''}**${u.name}** ${mySkill.name} \`[${myPow}]\` ${myIcons.join('')}`);
+            logs.push(`    ${myWins ? '◀勝▶' : '◀敗▶'} **${state.enemy.name}** ${eSkill.name} \`[${ePow}]\` ${eIcons.join('')}`);
+
+            if (myWins) {
+                const dmg = Math.max(1, mySkill.attack - Math.floor(state.enemy.defLevel * 0.2) + Math.floor(Math.random() * 3));
+                state.enemy.hp = Math.max(0, state.enemy.hp - dmg);
+                logs.push(`    💥 ${state.enemy.name} 受到 **${dmg}** 傷害`);
+                if (mySkill.effect) { applyStatus(state.enemy, mySkill.effect.name, mySkill.effect.stacks); logs.push(`    ${STATUS_EMOJI[mySkill.effect.name] || ''} 附加 ${mySkill.effect.name}×${mySkill.effect.stacks}`); }
             } else {
-                const target = aliveAllies[Math.floor(Math.random() * aliveAllies.length)];
-                const enemySkill = state.enemy.skills[Math.floor(Math.random() * state.enemy.skills.length)];
-                const sinner = SINNERS[target.sinnerName];
-                const defSkill = sinner.skills[0];
-                const clash = doClash(state.enemy, enemySkill, target, defSkill, null, target.sd);
-                turnLogs.push(clash.log);
+                const dmg = Math.max(1, eSkill.base - Math.floor(u.defLevel * 0.2) + Math.floor(Math.random() * 3));
+                u.hp = Math.max(0, u.hp - dmg);
+                logs.push(`    💥 ${u.name} 受到 **${dmg}** 傷害`);
+            }
+        }
+
+        // 敵方主動攻擊未被碰撞的我方
+        if (state.enemy.hp > 0) {
+            const target  = state.ally.filter(u => u.hp > 0 && !pendingSkills[u.sinnerName])[0]
+                         || state.ally.filter(u => u.hp > 0)[0];
+            if (target) {
+                const eSkill = state.enemy.skills[Math.floor(Math.random() * state.enemy.skills.length)];
+                const dmg    = Math.max(1, eSkill.base - Math.floor(target.defLevel * 0.2) + Math.floor(Math.random() * 3));
+                target.hp    = Math.max(0, target.hp - dmg);
+                logs.push(`👹 **${state.enemy.name}** 對 **${target.name}** 發動 ${eSkill.name}，造成 **${dmg}** 傷害`);
             }
         }
 
         // 回合結束狀態效果
-        for (const u of state.ally.units) {
-            const eot = processEndOfTurn(u);
-            if (eot) turnLogs.push(eot);
-        }
-        const eotEnemy = processEndOfTurn(state.enemy);
-        if (eotEnemy) turnLogs.push(eotEnemy);
+        state.ally.forEach(u => { const r = processEoT(u); if (r) logs.push(r); });
+        const er = processEoT(state.enemy);
+        if (er) logs.push(er);
 
         Object.keys(pendingSkills).forEach(k => delete pendingSkills[k]);
         state.turn++;
-        battleLog = turnLogs.join('\n');
 
-        // 檢查勝負
-        const aliveAllies = state.ally.units.filter(u => u.hp > 0);
-        if (state.enemy.hp <= 0) {
-            return endBattle(true);
-        }
-        if (!aliveAllies.length) {
-            return endBattle(false);
-        }
+        const aliveAllies = state.ally.filter(u => u.hp > 0);
+        if (state.enemy.hp <= 0) return endBattle(true, logs.join('\n'));
+        if (!aliveAllies.length) return endBattle(false, logs.join('\n'));
 
+        const nextUnit = aliveAllies[0];
         await battleMsg.edit({
-            embeds: [buildBattleEmbed(state, battleLog)],
-            components: [buildSkillRow(aliveAllies[0])],
+            embeds:     [buildBattleEmbed(state, logs.join('\n'))],
+            components: [buildSkillRow(nextUnit)].filter(Boolean),
         }).catch(() => {});
     }
 
-    async function endBattle(win) {
+    async function endBattle(win, lastLog = '') {
+        clearTimeout(turnTimer);
         collector.stop();
-        const charData2 = await loadCharData(client, message.author.id);
-        charData2.totalBattles = (charData2.totalBattles || 0) + 1;
 
-        let resultDesc = '';
+        const player2 = await getOrCreatePlayer(client, message.author.id, message.author.username);
+        player2.totalBattles = (player2.totalBattles || 0) + 1;
+
+        let desc = '';
         if (win) {
-            charData2.totalWins = (charData2.totalWins || 0) + 1;
-            const threads = THREAD_REWARDS[tier];
-            charData2.threads = (charData2.threads || 0) + threads;
-            resultDesc = `🎉 **勝利！**\n獲得 🧵 絲線 ×${threads}`;
+            player2.totalWins = (player2.totalWins || 0) + 1;
+            const t = THREAD_REWARD[tier] || 5;
+            player2.thread = (player2.thread || 0) + t;
+            desc = `🎉 **勝利！** 獲得 🧵 紡錘 ×${t}\n\n${lastLog.slice(-600)}`;
         } else {
-            resultDesc = '💀 **失敗...**\n全員倒下，戰鬥結束。';
+            desc = `💀 **失敗...** 全員倒下，戰鬥結束。\n\n${lastLog.slice(-600)}`;
         }
 
-        await saveCharData(client, message.author.id, charData2);
+        const { savePlayerData } = require('./PacksAndData.js');
+        await savePlayerData(client, message.author.id, player2);
 
-        const endEmbed = new EmbedBuilder()
-            .setTitle(win ? '🏆 戰鬥勝利' : '💀 戰鬥失敗')
-            .setColor(win ? 0x2ed573 : 0xff4757)
-            .setDescription(resultDesc + '\n\n' + battleLog.slice(-800))
-            .setTimestamp();
-
-        await battleMsg.edit({ embeds: [endEmbed], components: [] }).catch(() => {});
+        await battleMsg.edit({
+            embeds: [new EmbedBuilder()
+                .setTitle(win ? '🏆 戰鬥勝利' : '💀 戰鬥失敗')
+                .setColor(win ? 0x2ed573 : 0xff4757)
+                .setDescription(desc)
+                .setTimestamp()],
+            components: [],
+        }).catch(() => {});
     }
 
-    let turnTimer = setTimeout(processTurn, SKILL_TIMEOUT);
+    // ── 按鈕收集器 ────────────────────────────────────────────
+    const collector = battleMsg.createMessageComponentCollector({
+        filter: i => i.user.id === message.author.id && i.customId.startsWith('bs_'),
+        time:   10 * 60_000,
+    });
+
+    // 啟動自動回合計時器
+    turnTimer = setTimeout(() => processTurn().catch(console.error), SKILL_TIMEOUT);
 
     collector.on('collect', async interaction => {
         const parts = interaction.customId.split('_');
-        const sinnerName = parts[2];
-        const skillIdx = parts[3] === 'defend' ? null : parseInt(parts[3]);
-
-        pendingSkills[sinnerName] = skillIdx;
+        const sinnerName = parts[1];
+        const skillPart  = parts[2];
+        pendingSkills[sinnerName] = skillPart === 'defend' ? 'defend' : parseInt(skillPart);
 
         await interaction.deferUpdate().catch(() => {});
 
-        const allAlive = state.ally.units.filter(u => u.hp > 0);
-        const allSelected = allAlive.every(u => pendingSkills[u.sinnerName] !== undefined);
+        const aliveAllies   = state.ally.filter(u => u.hp > 0);
+        const allSelected   = aliveAllies.every(u => pendingSkills[u.sinnerName] !== undefined);
 
         if (allSelected) {
             clearTimeout(turnTimer);
-            await processTurn();
-            if (state.enemy.hp > 0 && state.ally.units.some(u => u.hp > 0)) {
-                turnTimer = setTimeout(processTurn, SKILL_TIMEOUT);
+            await processTurn().catch(console.error);
+            if (state.enemy.hp > 0 && state.ally.some(u => u.hp > 0)) {
+                turnTimer = setTimeout(() => processTurn().catch(console.error), SKILL_TIMEOUT);
             }
         } else {
+            // 讓使用者知道還要為其他罪人選技能
+            const remaining = aliveAllies.filter(u => pendingSkills[u.sinnerName] === undefined);
+            const nextUnit  = remaining[0];
             await battleMsg.edit({
-                embeds: [buildBattleEmbed(state, `✅ ${sinnerName} 已選擇技能，等待其他成員...`)],
-                components: [buildSkillRow(allAlive.find(u => !pendingSkills[u.sinnerName]) || allAlive[0])],
+                embeds:     [buildBattleEmbed(state, `✅ **${sinnerName}** 已選擇技能（${aliveAllies.length - remaining.length}/${aliveAllies.length}）\n⏳ 請為 **${nextUnit?.name}** 選擇技能...`)],
+                components: [buildSkillRow(nextUnit)].filter(Boolean),
             }).catch(() => {});
         }
     });
 
-    collector.on('end', () => {
+    collector.on('end', (_, reason) => {
         clearTimeout(turnTimer);
-        const aliveAllies = state.ally.units.filter(u => u.hp > 0);
-        if (state.enemy.hp > 0 && aliveAllies.length > 0) {
-            battleMsg.edit({
-                embeds: [buildBattleEmbed(state, '⏰ 戰鬥超時，已自動結束。')],
-                components: [],
-            }).catch(() => {});
+        if (reason !== 'user') {
+            battleMsg.edit({ components: [] }).catch(() => {});
         }
     });
 }
