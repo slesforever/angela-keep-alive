@@ -1,4 +1,5 @@
 // Functions/GameSystem/CharacterSystem.js
+//update
 'use strict';
 
 const { EmbedBuilder } = require('discord.js');
