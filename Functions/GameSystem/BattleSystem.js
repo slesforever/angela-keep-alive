@@ -1,4 +1,4 @@
-// Functions/GameSystem/BattleSystem.js
+// Functions/GameSystem/BattleSystem.js 
 'use strict';
 
 // 戰鬥引擎（碰撞系統，偏 Limbus 風格）
