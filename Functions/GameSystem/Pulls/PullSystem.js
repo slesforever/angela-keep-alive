@@ -81,7 +81,7 @@ async function executePull(client, message, pullCount = 1) {
     const cost = PULL_COST_PER_DRAW * count;
 
     const player = getOrCreatePlayer(client, userId, message.author.username);
-    player.lunacy ??= 1300;
+    player.lunacy ??= 0;
 
     if (player.lunacy < cost) {
         return message.reply(`❌ 狂氣不足！\n本次需要 **${cost}** lunacy，你目前只有 **${player.lunacy}**。`);
