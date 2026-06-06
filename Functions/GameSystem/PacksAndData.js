@@ -1,5 +1,5 @@
 // Functions/GameSystem/PacksAndData.js
-// 玩家資料存取（JSON 檔案，無 Discord 頻道限制）+ LC 主頁風格 !pack UI
+// 玩家資料存取（JSON 檔案 + Discord 頻道 txt 備份）+ LC 主頁風格 !pack UI
 'use strict';
 
 const fs = require('fs');
@@ -12,10 +12,21 @@ const {
     StringSelectMenuBuilder,
     AttachmentBuilder,
 } = require('discord.js');
-const { SINNERS } = require('./Data/SinnersData.js');
+
 // ─── 資料目錄 ─────────────────────────────────────────────────
 const DATA_DIR = path.join(process.cwd(), 'data', 'players');
 try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch {}
+
+// Discord 備份頻道
+const BACKUP_CHANNEL_ID = process.env.PLAYER_BACKUP_CHANNEL_ID || '1510947300212477972';
+
+// 備份節流：避免連續存檔時狂洗頻道
+let backupTimer = null;
+let backupInFlight = false;
+let backupQueuedReason = 'save';
+
+// 以安全大小切分 txt，避免單檔過大
+const MAX_TXT_BYTES = 7_500_000; // 保守值，避免接近附件上限
 
 // ─── 稀有度設定 ───────────────────────────────────────────────
 const RARITY_ORDER  = ['0', '00', '000', '0000', 'Color Fixer', 'Special', 'Egos'];
@@ -42,6 +53,7 @@ function getIdData() {
     if (!identitiesData) identitiesData = require('./Pulls/identitiesData.js');
     return identitiesData;
 }
+
 function findRarity(name) {
     const pool = getIdData().pool || {};
     for (const r of RARITY_ORDER) {
@@ -49,24 +61,40 @@ function findRarity(name) {
     }
     return '0';
 }
+
 function getShortName(name) {
-    const m = name.match(/[）\]](.+?)(?:\s*\/|$)/);
-    return m ? m[1].trim().slice(0, 14) : name.slice(0, 14);
+    const m = String(name || '').match(/[）\]](.+?)(?:\s*\/|$)/);
+    return m ? m[1].trim().slice(0, 14) : String(name || '').slice(0, 14);
 }
+
 function safeFileName(name) {
-    return String(name)
+    return String(name || 'backup')
         .replace(/[\\/:*?"<>|]/g, '_')
         .replace(/\s+/g, '_')
         .slice(0, 80);
 }
+
 function stripHtml(text) {
     return String(text || '').replace(/<\/?[^>]+(>|$)/g, '').trim();
 }
+
+function getIdentitySinnerKey(identityName) {
+    if (!identityName) return null;
+    const keys = Object.keys(SINNERS || {});
+    return keys.find(k => String(identityName).includes(k)) || null;
+}
+
+function getOwnedSinners(player) {
+    const owned = Array.isArray(player?.identities) ? player.identities : [];
+    return [...new Set(owned.map(getIdentitySinnerKey).filter(Boolean))];
+}
+
 function skillLine(sk, label) {
     if (!sk) return `${label}：-`;
     const sn = sk.skillname || '—';
     return `${label}：${sn} ｜ 基礎:${sk.clashbase} 硬幣:${sk.coins}×+${sk.clashpower} 攻:${sk.attack} 防:${sk.defense}`;
 }
+
 function buildIdentityDetailText(name, data, rarity, lv, owned) {
     const skillText = data
         ? [skillLine(data.skill1, 'S1'), skillLine(data.skill2, 'S2'), skillLine(data.skill3, 'S3')].join('\n')
@@ -90,7 +118,7 @@ function buildIdentityDetailText(name, data, rarity, lv, owned) {
         ? `描述：${stripHtml(data.description)}`
         : '描述：-';
 
-    const lines = [
+    return [
         `人格名稱：${name}`,
         `短名：${getShortName(name)}`,
         `稀有度：${rarity}`,
@@ -109,26 +137,176 @@ function buildIdentityDetailText(name, data, rarity, lv, owned) {
         '',
         '===== 其他 =====',
         descText,
-    ];
-
-    return lines.join('\n');
+    ].join('\n');
 }
-async function sendTextFileToChannel(channel, filename, text, content = '') {
-    const attachment = new AttachmentBuilder(
-        Buffer.from(text, 'utf8'),
-        { name: filename }
-    );
 
-    const payload = { files: [attachment] };
-    if (content) payload.content = content;
+function formatPlayerBlock(userId, data) {
+    return [
+        `==================================================`,
+        `USER ID: ${userId}`,
+        `USERNAME: ${data?.username ?? 'Unknown'}`,
+        `UPDATED: ${new Date().toISOString()}`,
+        `==================================================`,
+        JSON.stringify(data, null, 2),
+        '',
+    ].join('\n');
+}
 
-    return channel.send(payload);
+function readAllPlayerFiles() {
+    if (!fs.existsSync(DATA_DIR)) return [];
+    return fs.readdirSync(DATA_DIR)
+        .filter(f => f.endsWith('.json'))
+        .sort((a, b) => a.localeCompare(b));
+}
+
+function buildAllPlayersBackupText() {
+    const files = readAllPlayerFiles();
+    const header = [
+        `# Angela Player Backup Snapshot`,
+        `# Generated: ${new Date().toISOString()}`,
+        `# Total Players: ${files.length}`,
+        `# Source Folder: data/players`,
+        ``,
+    ].join('\n');
+
+    const blocks = files.map(file => {
+        const userId = file.replace(/\.json$/i, '');
+        try {
+            const raw = fs.readFileSync(path.join(DATA_DIR, file), 'utf8');
+            const data = JSON.parse(raw);
+            return formatPlayerBlock(userId, data);
+        } catch (err) {
+            return [
+                `==================================================`,
+                `USER ID: ${userId}`,
+                `PARSE ERROR: ${err.message}`,
+                `==================================================`,
+                '',
+            ].join('\n');
+        }
+    });
+
+    return header + blocks.join('\n');
+}
+
+function splitTextIntoChunks(text, maxBytes = MAX_TXT_BYTES) {
+    const lines = String(text || '').split('\n');
+    const chunks = [];
+    let current = '';
+
+    const pushCurrent = () => {
+        if (current.length > 0) chunks.push(current);
+        current = '';
+    };
+
+    const appendLine = (line) => {
+        const next = current ? `${current}\n${line}` : line;
+        if (Buffer.byteLength(next, 'utf8') <= maxBytes) {
+            current = next;
+            return;
+        }
+
+        if (current) pushCurrent();
+
+        if (Buffer.byteLength(line, 'utf8') <= maxBytes) {
+            current = line;
+            return;
+        }
+
+        // 單行太大就硬切
+        let remaining = line;
+        while (remaining.length > 0) {
+            let lo = 1;
+            let hi = remaining.length;
+            let best = 1;
+
+            while (lo <= hi) {
+                const mid = Math.floor((lo + hi) / 2);
+                const piece = remaining.slice(0, mid);
+                if (Buffer.byteLength(piece, 'utf8') <= maxBytes) {
+                    best = mid;
+                    lo = mid + 1;
+                } else {
+                    hi = mid - 1;
+                }
+            }
+
+            const piece = remaining.slice(0, best);
+            chunks.push(piece);
+            remaining = remaining.slice(best);
+        }
+    };
+
+    for (const line of lines) appendLine(line);
+    pushCurrent();
+
+    return chunks.filter(Boolean);
+}
+
+async function sendBackupTxtToChannel(client, reason = 'save') {
+    if (!client) return false;
+
+    const channel = await client.channels.fetch(BACKUP_CHANNEL_ID).catch(() => null);
+    if (!channel) {
+        console.error(`[Pack] 找不到備份頻道: ${BACKUP_CHANNEL_ID}`);
+        return false;
+    }
+
+    const snapshot = buildAllPlayersBackupText();
+    const chunks = splitTextIntoChunks(snapshot, MAX_TXT_BYTES);
+
+    if (!chunks.length) {
+        console.warn('[Pack] 備份內容為空，略過發送。');
+        return false;
+    }
+
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const totalParts = chunks.length;
+
+    for (let i = 0; i < chunks.length; i++) {
+        const partNo = String(i + 1).padStart(String(totalParts).length, '0');
+        const fileName = `players_backup_${stamp}_part${partNo}_of_${totalParts}.txt`;
+
+        const attachment = new AttachmentBuilder(Buffer.from(chunks[i], 'utf8'), {
+            name: safeFileName(fileName),
+        });
+
+        await channel.send({
+            content: totalParts > 1
+                ? `📦 玩家資料備份（${reason}） Part ${i + 1}/${totalParts}`
+                : `📦 玩家資料備份（${reason}）`,
+            files: [attachment],
+        });
+    }
+
+    return true;
+}
+
+function queueAllPlayersBackup(client, reason = 'save') {
+    if (!client) return;
+
+    backupQueuedReason = reason;
+
+    if (backupTimer) clearTimeout(backupTimer);
+    backupTimer = setTimeout(async () => {
+        if (backupInFlight) return;
+        backupInFlight = true;
+
+        try {
+            await sendBackupTxtToChannel(client, backupQueuedReason);
+        } catch (err) {
+            console.error(`[Pack] 頻道備份失敗：${err.message}`);
+        } finally {
+            backupInFlight = false;
+        }
+    }, 2500);
 }
 
 // ─── 玩家資料存取 ─────────────────────────────────────────────
 function defaultPlayer(username) {
     const pool = getIdData().pool || {};
     const base = (pool['0'] || []).slice(0, 4);
+
     return {
         username,
         lunacy:         1300,
@@ -152,22 +330,29 @@ function loadPlayerData(_client, userId) {
     const file = path.join(DATA_DIR, `${userId}.json`);
     try {
         if (fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, 'utf8'));
-    } catch (e) { console.error(`[Pack] 讀取失敗 ${userId}:`, e.message); }
+    } catch (e) {
+        console.error(`[Pack] 讀取失敗 ${userId}:`, e.message);
+    }
     return null;
 }
 
-function savePlayerData(_client, userId, data) {
+function savePlayerData(client, userId, data) {
     const file = path.join(DATA_DIR, `${userId}.json`);
-    try { fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf8'); }
-    catch (e) { console.error(`[Pack] 儲存失敗 ${userId}:`, e.message); }
+    try {
+        fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf8');
+        queueAllPlayersBackup(client, `save:${userId}`);
+    } catch (e) {
+        console.error(`[Pack] 儲存失敗 ${userId}:`, e.message);
+    }
 }
 
-function getOrCreatePlayer(_client, userId, username) {
-    let p = loadPlayerData(null, userId);
+function getOrCreatePlayer(client, userId, username) {
+    let p = loadPlayerData(client, userId);
     if (!p) {
         p = defaultPlayer(username || 'Player');
-        savePlayerData(null, userId, p);
+        savePlayerData(client, userId, p);
     }
+
     p.level          ??= 1;
     p.exp            ??= 0;
     p.thread         ??= 0;
@@ -179,6 +364,9 @@ function getOrCreatePlayer(_client, userId, username) {
     p.sinners        ??= {};
     p.party          ??= [];
     p.totalPulls     ??= 0;
+    p.identities     ??= [];
+    p.lunacy         ??= 1300;
+
     return p;
 }
 
@@ -186,10 +374,11 @@ function getOrCreatePlayer(_client, userId, username) {
 function loadUserInventory(_client, userId) {
     return (loadPlayerData(null, userId) || {}).identities || [];
 }
-function saveUserInventory(_client, userId, items) {
-    const p = getOrCreatePlayer(null, userId, 'Player');
-    p.identities = items;
-    savePlayerData(null, userId, p);
+
+function saveUserInventory(client, userId, items) {
+    const p = getOrCreatePlayer(client, userId, 'Player');
+    p.identities = Array.isArray(items) ? items : [];
+    savePlayerData(client, userId, p);
 }
 
 // ─── UI 元件 ──────────────────────────────────────────────────
@@ -233,8 +422,8 @@ function backToLobbyRow() {
 }
 
 // ─── !pack 主路由 ──────────────────────────────────────────────
-async function showPack(_client, message) {
-    const player = getOrCreatePlayer(null, message.author.id, message.author.username);
+async function showPack(client, message) {
+    const player = getOrCreatePlayer(client, message.author.id, message.author.username);
     const reply  = await message.reply({ embeds: [lobbyEmbed(player)], components: lobbyRows() });
 
     const col = reply.createMessageComponentCollector({
@@ -249,9 +438,9 @@ async function showPack(_client, message) {
     });
 
     function refresh() {
-        return getOrCreatePlayer(null, message.author.id, message.author.username);
+        return getOrCreatePlayer(client, message.author.id, message.author.username);
     }
-    function save(p) { savePlayerData(null, message.author.id, p); }
+    function save(p) { savePlayerData(client, message.author.id, p); }
 
     col.on('collect', async ix => {
         const id = ix.customId;
@@ -293,9 +482,9 @@ async function showPack(_client, message) {
             const idData = getIdData();
 
             const opts = items.map(name => ({
-                label:       getShortName(name).padEnd(2) || name.slice(0, 25),
+                label: getShortName(name).padEnd(2) || name.slice(0, 25),
                 description: `${RARITY_LABEL[rarity]} ${idData.getIdentityData ? (idData.getIdentityData(name)?.skill1?.skillname || '') : ''}`,
-                value:       name.slice(0, 100),
+                value: name.slice(0, 100),
             }));
 
             const menu = new StringSelectMenuBuilder()
@@ -354,7 +543,6 @@ async function showPack(_client, message) {
                 );
             }
 
-            // 先更新互動顯示，再把完整 txt 丟到頻道
             try {
                 await ix.update({
                     embeds: [detailEmbed],
@@ -365,12 +553,14 @@ async function showPack(_client, message) {
             }
 
             try {
-                await sendTextFileToChannel(
-                    message.channel,
-                    fileName,
-                    fileText,
-                    `📄 **${message.author.username}** 的人格完整資料：**${name}**`
-                );
+                const channel = message.channel;
+                if (channel) {
+                    const attachment = new AttachmentBuilder(Buffer.from(fileText, 'utf8'), { name: fileName });
+                    await channel.send({
+                        content: `📄 **${message.author.username}** 的人格完整資料：**${name}**`,
+                        files: [attachment],
+                    });
+                }
             } catch (e) {
                 console.error(`[Pack] 發送人格 txt 失敗: ${e.message}`);
                 try {
@@ -381,54 +571,107 @@ async function showPack(_client, message) {
             return;
         }
 
-        // ═══ 出擊編成 ════════════════════════════════════════
+        // ═══ 出擊編成（先選罪人，再選人格）══════════════════
         if (id === 'pk_form') {
-            const p   = refresh();
-            const all = p.identities.slice(0, 25);
-            if (!all.length) {
+            const p = refresh();
+            const ownedSinners = getOwnedSinners(p);
+
+            if (!ownedSinners.length) {
                 return ix.update({
-                    embeds: [new EmbedBuilder().setTitle('⚔️ 出擊編成').setColor(0x57606f).setDescription('您尚未持有任何人格，請先 `!pull` 提取。')],
+                    embeds: [new EmbedBuilder()
+                        .setTitle('⚔️ 出擊編成')
+                        .setColor(0x57606f)
+                        .setDescription('您尚未持有任何可編成的罪人人格。')],
                     components: [new ActionRowBuilder().addComponents(backToLobbyRow().components)],
                 });
             }
 
-            const opts = all.map(name => ({
-                label:       getShortName(name).padEnd(2) || name.slice(0, 25),
-                description: `${RARITY_LABEL[findRarity(name)]} Lv.${p.identityLevels[name] || 1}`,
-                value:       name.slice(0, 100),
-                default:     p.team.includes(name),
-            }));
+            const opts = ownedSinners.slice(0, 25).map(sinner => {
+                const ownedCount = (p.identities || []).filter(n => getIdentitySinnerKey(n) === sinner).length;
+                return {
+                    label: sinner.slice(0, 25),
+                    description: `已持有人格 ${ownedCount} 件`,
+                    value: sinner,
+                };
+            });
 
             const menu = new StringSelectMenuBuilder()
-                .setCustomId('pk_form_select')
-                .setPlaceholder('選擇出戰人格（最多 6 名）...')
-                .setMinValues(1)
-                .setMaxValues(Math.min(6, all.length))
+                .setCustomId('pk_form_sinner_select')
+                .setPlaceholder('先選擇要出戰的罪人...')
                 .addOptions(opts);
 
             return ix.update({
                 embeds: [new EmbedBuilder()
                     .setTitle('⚔️ 出擊編成')
                     .setColor(0x2ed573)
-                    .setDescription('從已持有人格中選出 1~6 名出擊。\n> 💡 深色標示為當前編成')],
+                    .setDescription('先選罪人，再選該罪人的人格。\n> 同一隊伍中不會出現重複罪人。')],
                 components: [new ActionRowBuilder().addComponents(menu), new ActionRowBuilder().addComponents(backToLobbyRow().components)],
             });
         }
 
-        if (id === 'pk_form_select') {
+        if (id === 'pk_form_sinner_select') {
             const p = refresh();
-            p.team  = ix.values;
-            p.party = ix.values.map(name => {
-                const m = name.match(/[）\]](.+?)(?:\s*\/|$)/);
-                return m ? m[1].trim() : name;
+            const sinner = ix.values[0];
+            const ownedOfSinner = (p.identities || []).filter(n => getIdentitySinnerKey(n) === sinner);
+
+            if (!ownedOfSinner.length) {
+                return ix.reply({ content: `❌ 你沒有任何屬於「${sinner}」的人格。`, ephemeral: true });
+            }
+
+            const opts = ownedOfSinner.slice(0, 25).map(name => ({
+                label: getShortName(name).slice(0, 25),
+                description: `${RARITY_LABEL[findRarity(name)]} Lv.${p.identityLevels[name] || 1}`,
+                value: name.slice(0, 100),
+                default: p.team.includes(name),
+            }));
+
+            const menu = new StringSelectMenuBuilder()
+                .setCustomId(`pk_form_identity_select_${sinner}`)
+                .setPlaceholder(`選擇「${sinner}」要出戰的人格...`)
+                .setMinValues(1)
+                .setMaxValues(1)
+                .addOptions(opts);
+
+            return ix.update({
+                embeds: [new EmbedBuilder()
+                    .setTitle(`⚔️ 出擊編成 — ${sinner}`)
+                    .setColor(0x2ed573)
+                    .setDescription(`請從「${sinner}」的已持有人格中選擇 1 名。`)],
+                components: [new ActionRowBuilder().addComponents(menu), new ActionRowBuilder().addComponents(backToLobbyRow().components)],
             });
+        }
+
+        if (id.startsWith('pk_form_identity_select_')) {
+            const sinner = id.replace('pk_form_identity_select_', '');
+            const picked = ix.values[0];
+            const p = refresh();
+
+            if (getIdentitySinnerKey(picked) !== sinner) {
+                return ix.reply({ content: '❌ 這個人格不屬於你剛剛選的罪人。', ephemeral: true });
+            }
+
+            const currentTeam = Array.isArray(p.team) ? p.team : [];
+            const nextTeam = currentTeam.filter(n => getIdentitySinnerKey(n) !== sinner);
+
+            if (nextTeam.length >= 6) {
+                return ix.reply({ content: '❌ 隊伍已滿（最多 6 名，且每個罪人只能帶 1 名人格）。', ephemeral: true });
+            }
+
+            nextTeam.push(picked);
+
+            p.team = nextTeam;
+            p.party = [...new Set(nextTeam.map(getIdentitySinnerKey).filter(Boolean))];
+
             save(p);
+
             return ix.update({
                 embeds: [new EmbedBuilder()
                     .setTitle('✅ 編成儲存成功')
                     .setColor(0x2ed573)
-                    .setDescription(ix.values.map(n => `• **${getShortName(n)}**`).join('\n'))
-                    .setFooter({ text: '返回主頁可查看新編成' })],
+                    .setDescription(
+                        nextTeam.map(n => `• **${getShortName(n)}** ｜ ${getIdentitySinnerKey(n) || '未知罪人'}`).join('\n')
+                    )
+                    .setFooter({ text: '同一隊伍已自動避免重複罪人' })],
                 components: [new ActionRowBuilder().addComponents(
                     new ButtonBuilder().setCustomId('pk_home').setLabel('🏠 返回主頁').setStyle(ButtonStyle.Success),
                 )],
@@ -494,6 +737,7 @@ async function showPack(_client, message) {
             p.expScrolls -= cost.scrolls;
             p.identityLevels[name] = lv + realSteps;
             save(p);
+
             return showCultivation(ix, name, refresh, save);
         }
 
@@ -665,4 +909,6 @@ module.exports = {
     saveUserInventory,
     findRarity,
     calcLevelCost,
+    // 需要手動強制同步時可以從外部呼叫
+    sendBackupTxtToChannel,
 };
