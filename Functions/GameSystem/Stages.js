@@ -1,4 +1,4 @@
-// Functions/GameSystem/Stages.js
+// Functions/GameSystem/Stages.js 
 'use strict';
 
 const { EmbedBuilder } = require('discord.js');
