@@ -5,7 +5,7 @@ const { EmbedBuilder } = require('discord.js');
 const identitiesData = require('./identitiesData.js');
 const { getOrCreatePlayer, savePlayerData, loadUserInventory, saveUserInventory } = require('../PacksAndData.js');
 
-const PULL_COST_PER_DRAW = 130;
+const PULL_COST_PER_DRAW = 0;
 
 // 各稀有度機率（累計）
 const RATES = {
