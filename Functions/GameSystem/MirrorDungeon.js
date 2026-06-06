@@ -1,4 +1,5 @@
 // Functions/GameSystem/MirrorDungeon.js 
+//update
 'use strict';
 
 // 鏡光迷宮（鏡牢）完整模擬
