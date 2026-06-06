@@ -305,7 +305,7 @@ function queueAllPlayersBackup(client, reason = 'save') {
 // ─── 玩家資料存取 ─────────────────────────────────────────────
 function defaultPlayer(username) {
     const pool = getIdData().pool || {};
-    const base = (pool['0'] || []).slice(0, 4);
+    const base = (pool['0'] || []).slice(0, 12);
 
     return {
         username,
