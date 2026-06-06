@@ -12,7 +12,7 @@ const {
     StringSelectMenuBuilder,
     AttachmentBuilder,
 } = require('discord.js');
-
+const { SINNERS } = require('./Data/SinnersData.js');
 // ─── 資料目錄 ─────────────────────────────────────────────────
 const DATA_DIR = path.join(process.cwd(), 'data', 'players');
 try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch {}
