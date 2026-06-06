@@ -1,4 +1,4 @@
-// Functions/GameSystem/PartySystem.js d
+// Functions/GameSystem/PartySystem.js
 'use strict';
 
 const {
