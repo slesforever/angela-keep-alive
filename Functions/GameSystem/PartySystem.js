@@ -14,10 +14,21 @@ function cleanName(name) {
         .trim();
 }
 
+function inferSinnerKey(name) {
+    const text = cleanName(name);
+    if (!text) return null;
+    if (SINNERS[text]) return text;
+    return SINNER_NAMES.find(n => text.includes(n)) || null;
+}
+
 function calcHP(sinner, player, sinnerName) {
     const lv = player.identityLevels?.[`LCB ${sinnerName}`] || player.identityLevels?.[sinnerName] || 1;
     const uptie = player.sinners?.[sinnerName]?.uptie || 1;
     return sinner.hp + (lv - 1) * 3 + (uptie - 1) * 5;
+}
+
+function getEquippedIdentity(player, sinnerName) {
+    return player.sinners?.[sinnerName]?.equippedIdentity || `LCB ${sinnerName}`;
 }
 
 async function handleParty(client, message) {
@@ -34,11 +45,7 @@ async function handleParty(client, message) {
 
     if (sub === 'set' || sub === '設定') {
         const raw = args.slice(2).join(' ');
-        const names = raw
-            .split(/[,，]/)
-            .map(cleanName)
-            .filter(Boolean);
-
+        const names = raw.split(/[,，]/).map(cleanName).filter(Boolean);
         return setParty(client, message, names);
     }
 
@@ -48,13 +55,14 @@ async function handleParty(client, message) {
 async function showParty(client, message) {
     const player = getOrCreatePlayer(client, message.author.id, message.author.username);
     const party = Array.isArray(player.party) ? player.party : [];
-    const valid = party.filter(n => SINNERS[n]);
+    const valid = party.map(inferSinnerKey).filter(Boolean);
 
-    const lines = valid.map((name, i) => {
-        const s = SINNERS[name];
-        const hp = calcHP(s, player, name);
-        const ut = player.sinners?.[name]?.uptie || 1;
-        return `${i + 1}. **${name}** ｜ ❤️${hp} ⚡${s.minSpd}-${s.maxSpd} ｜ T${ut}`;
+    const lines = valid.map((sinnerName, i) => {
+        const s = SINNERS[sinnerName];
+        const hp = calcHP(s, player, sinnerName);
+        const ut = player.sinners?.[sinnerName]?.uptie || 1;
+        const identity = getEquippedIdentity(player, sinnerName);
+        return `${i + 1}. **${sinnerName}** ｜ 裝備：${identity}\n　❤️${hp} ⚡${s.minSpd}-${s.maxSpd} ｜ T${ut}`;
     });
 
     if (!lines.length) {
@@ -82,26 +90,27 @@ async function addToParty(client, message, name) {
         return message.reply(`❌ 請輸入罪人名。\n可用：${SINNER_NAMES.join('、')}`);
     }
 
-    if (!SINNERS[name]) {
+    const sinnerName = inferSinnerKey(name);
+    if (!sinnerName) {
         return message.reply(`❌ 找不到「${name}」\n可用：${SINNER_NAMES.join('、')}`);
     }
 
     const player = getOrCreatePlayer(client, message.author.id, message.author.username);
     const party = Array.isArray(player.party) ? player.party : [];
 
-    if (party.includes(name)) {
-        return message.reply(`「${name}」已在隊伍中。`);
+    if (party.map(inferSinnerKey).includes(sinnerName)) {
+        return message.reply(`「${sinnerName}」已在隊伍中。`);
     }
 
     if (party.length >= MAX_PARTY) {
         return message.reply(`❌ 隊伍已滿（${MAX_PARTY}人上限）。`);
     }
 
-    party.push(name);
+    party.push(sinnerName);
     player.party = party;
     savePlayerData(client, message.author.id, player);
 
-    return message.reply(`✅ 「**${name}**」已加入隊伍！（${party.length}/${MAX_PARTY}）`);
+    return message.reply(`✅ 「**${sinnerName}**」已加入隊伍！（${party.length}/${MAX_PARTY}）`);
 }
 
 async function removeFromParty(client, message, name) {
@@ -109,19 +118,24 @@ async function removeFromParty(client, message, name) {
         return message.reply(`❌ 請輸入要移除的罪人名。`);
     }
 
+    const sinnerName = inferSinnerKey(name);
+    if (!sinnerName) {
+        return message.reply(`❌ 找不到「${name}」`);
+    }
+
     const player = getOrCreatePlayer(client, message.author.id, message.author.username);
     const party = Array.isArray(player.party) ? player.party : [];
-    const idx = party.indexOf(name);
+    const idx = party.map(inferSinnerKey).indexOf(sinnerName);
 
     if (idx === -1) {
-        return message.reply(`「${name}」不在隊伍中。`);
+        return message.reply(`「${sinnerName}」不在隊伍中。`);
     }
 
     party.splice(idx, 1);
     player.party = party;
     savePlayerData(client, message.author.id, player);
 
-    return message.reply(`✅ 「**${name}**」已移出隊伍。`);
+    return message.reply(`✅ 「**${sinnerName}**」已移出隊伍。`);
 }
 
 async function setParty(client, message, names) {
@@ -129,13 +143,14 @@ async function setParty(client, message, names) {
         return message.reply(`❌ 請輸入隊伍名單。\n格式：\`!party set 李箱,浮士德,...\``);
     }
 
-    const invalid = names.filter(n => !SINNERS[n]);
+    const parsed = names.map(inferSinnerKey).filter(Boolean);
+    const invalid = names.filter((n, i) => !parsed[i]);
     if (invalid.length) {
         return message.reply(`❌ 找不到：${invalid.join('、')}\n可用：${SINNER_NAMES.join('、')}`);
     }
 
-    const unique = [...new Set(names)];
-    if (unique.length !== names.length) {
+    const unique = [...new Set(parsed)];
+    if (unique.length !== parsed.length) {
         return message.reply('❌ 不能有重複的罪人！');
     }
 
