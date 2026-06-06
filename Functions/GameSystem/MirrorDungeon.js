@@ -1,4 +1,4 @@
-// Functions/GameSystem/MirrorDungeon.js
+// Functions/GameSystem/MirrorDungeon.js 
 'use strict';
 
 // 鏡光迷宮（鏡牢）完整模擬
