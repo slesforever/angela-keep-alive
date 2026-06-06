@@ -1,5 +1,6 @@
 // Functions/GameSystem/PacksAndData.js
 // 玩家資料存取（JSON 檔案 + Discord 頻道 txt 備份）+ LC 主頁風格 !pack UI
+//update
 'use strict';
 
 const fs = require('fs');
