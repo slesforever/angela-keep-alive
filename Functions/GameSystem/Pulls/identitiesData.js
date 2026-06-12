@@ -19,6 +19,50 @@ function T() {
     };
 }
 
+function Ego() {
+    return {
+        buff: {
+            attack: [],
+            defense: [],
+            status: [],
+        },
+        passive: [],
+        awakening: {
+            skillname: '',
+            coins: 0,
+            clashpower: 0,
+            attack: 0,
+            defense: 0,
+            cost: {
+                wrath: 0,
+                lust: 0,
+                sloth: 0,
+                gluttony: 0,
+                gloom: 0,
+                pride: 0,
+                envy: 0,
+            },
+        },
+        corrosion: {
+            skillname: '',
+            coins: 0,
+            clashpower: 0,
+            attack: 0,
+            defense: 0,
+            cost: {
+                wrath: 0,
+                lust: 0,
+                sloth: 0,
+                gluttony: 0,
+                gloom: 0,
+                pride: 0,
+                envy: 0,
+            },
+        },
+        notes: '',
+    };
+}
+
 // ─── 覆蓋區（有數值的人格在這裡填入，其餘保持 T() 預設）────
 // 用法：在下方 identityDetails 中覆蓋該人格的 T() 屬性
 // 例：'［漆黑噤默］羅蘭': { ...T(), skill1:{ skillname:'銀沉默', clashbase:5, coins:3, clashpower:4, attack:12, defense:0 } }
@@ -51,7 +95,9 @@ const identityDetails = {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // ★ 000 (★★★)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-'000': [
+'000': 
+    [ name:" LCD現場推理小隊 以實瑪麗 / LCD OSIR Team Ishmael", ...T() },
+    { name:"［蜘蛛巢：食指 父輩］李箱 / The House of Spiders: Index Nursefather Yi Sang", ...T() },
     { name:"［蜘蛛巢：食指 父輩］李箱 / The House of Spiders: Index Nursefather Yi Sang", ...T() },
     { name:"［蜘蛛巢：中指 父輩］奧提斯 / The House of Spiders: Middle Nursefather Outis", ...T() },
     { name:"［蜘蛛巢：環指 父輩］鴻璐 / The House of Spiders: Ring Nursefather Hong Lu", ...T() },
@@ -243,26 +289,928 @@ const identityDetails = {
 // ★ Egos
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 'Egos': [
-    { name:"[ZAYIN] 緋色眼睛 / Scarlet Eyes - 羅秀", ...T() },
-    { name:"[HE] 表皮 / Shrewd Skinny - 奧提斯", ...T() },
-    { name:"[WAW] 盲目 / Blind Obsession - 以實瑪利", ...T() },
-    { name:"[ALEPH] 失樂園 / Paradise Lost - 白夜", ...T() },
-],
+// Yi Sang
+    {
+        id: "ego_yi_sang_crows_eye_view",
+        sinner: "Yi Sang",
+        risk: "ZAYIN",
+        name: "[ZAYIN] 烏鴉之眼 / Crow's Eye View - 李箱",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_yi_sang_bygone_days",
+        sinner: "Yi Sang",
+        risk: "ZAYIN",
+        name: "[ZAYIN] 往昔歲月 / Bygone Days - 李箱",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_yi_sang_4th_match_flame",
+        sinner: "Yi Sang",
+        risk: "TETH",
+        name: "[TETH] 第四火焰 / 4th Match Flame - 李箱",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_yi_sang_wishing_cairn",
+        sinner: "Yi Sang",
+        risk: "TETH",
+        name: "[TETH] 願望石冢 / Wishing Cairn - 李箱",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_yi_sang_dimension_shredder",
+        sinner: "Yi Sang",
+        risk: "HE",
+        name: "[HE] 次元撕裂者 / Dimension Shredder - 李箱",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_yi_sang_fell_bullet",
+        sinner: "Yi Sang",
+        risk: "HE",
+        name: "[HE] 墮彈 / Fell Bullet - 李箱",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_yi_sang_sunshower",
+        sinner: "Yi Sang",
+        risk: "WAW",
+        name: "[WAW] 太陽雨 / Sunshower - 李箱",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_yi_sang_great_trichiliocosm",
+        sinner: "Yi Sang",
+        risk: "WAW",
+        name: "[WAW] 三千大世界 / Great Trichiliocosm - 李箱",
+        owned: false,
+        ...Ego()
+    },
 
-};
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Faust
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    {
+        id: "ego_faust_representation_emitter",
+        sinner: "Faust",
+        risk: "ZAYIN",
+        name: "[ZAYIN] 表象放射器 / Representation Emitter - 浮士德",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_faust_hex_nail",
+        sinner: "Faust",
+        risk: "TETH",
+        name: "[TETH] 咒釘 / Hex Nail - 浮士德",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_faust_9_2",
+        sinner: "Faust",
+        risk: "TETH",
+        name: "[TETH] 9:2 - 浮士德",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_faust_lasso",
+        sinner: "Faust",
+        risk: "TETH",
+        name: "[TETH] 套索 / Lasso - 浮士德",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_faust_fluid_sac",
+        sinner: "Faust",
+        risk: "HE",
+        name: "[HE] 液囊 / Fluid Sac - 浮士德",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_faust_telepole",
+        sinner: "Faust",
+        risk: "HE",
+        name: "[HE] 電線桿 / Telepole - 浮士德",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_faust_thoracalgia",
+        sinner: "Faust",
+        risk: "HE",
+        name: "[HE] 胸痛 / Thoracalgia - 浮士德",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_faust_command_meltdown",
+        sinner: "Faust",
+        risk: "HE",
+        name: "[HE] 熔毀指令 / Command : Meltdown - 浮士德",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_faust_ardor_blossom_star",
+        sinner: "Faust",
+        risk: "HE",
+        name: "[HE] 熾花星 / Ardor Blossom Star - 浮士德",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_faust_everlasting",
+        sinner: "Faust",
+        risk: "WAW",
+        name: "[WAW] 永恆 / Everlasting - 浮士德",
+        owned: false,
+        ...Ego()
+    },
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Don Quixote
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    {
+        id: "ego_don_quixote_la_sangre_de_sancho",
+        sinner: "Don Quixote",
+        risk: "ZAYIN",
+        name: "[ZAYIN] 桑丘之血 / La Sangre de Sancho - 唐吉訶德",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_don_quixote_lifetime_stew",
+        sinner: "Don Quixote",
+        risk: "TETH",
+        name: "[TETH] 一生燉湯 / Lifetime Stew - 唐吉訶德",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_don_quixote_wishing_cairn",
+        sinner: "Don Quixote",
+        risk: "TETH",
+        name: "[TETH] 願望石冢 / Wishing Cairn - 唐吉訶德",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_don_quixote_electric_screaming",
+        sinner: "Don Quixote",
+        risk: "TETH",
+        name: "[TETH] 電擊尖叫 / Electric Screaming - 唐吉訶德",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_don_quixote_fluid_sac",
+        sinner: "Don Quixote",
+        risk: "HE",
+        name: "[HE] 液囊 / Fluid Sac - 唐吉訶德",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_don_quixote_telepole",
+        sinner: "Don Quixote",
+        risk: "HE",
+        name: "[HE] 電線桿 / Telepole - 唐吉訶德",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_don_quixote_red_sheet",
+        sinner: "Don Quixote",
+        risk: "HE",
+        name: "[HE] 紅紙片 / Red Sheet - 唐吉訶德",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_don_quixote_yearning_mircalla",
+        sinner: "Don Quixote",
+        risk: "WAW",
+        name: "[WAW] 渴望-米爾卡拉 / Yearning-Mircalla - 唐吉訶德",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_don_quixote_in_the_name_of_love_and_hate",
+        sinner: "Don Quixote",
+        risk: "WAW",
+        name: "[WAW] 愛與恨之名 / In the Name of Love and Hate - 唐吉訶德",
+        owned: false,
+        ...Ego()
+    },
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Ryoshu
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    {
+        id: "ego_ryoshu_forest_for_the_flames",
+        sinner: "Ryoshu",
+        risk: "ZAYIN",
+        name: "[ZAYIN] 森林與火焰 / Forest for the Flames - 良秀",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_ryoshu_soda",
+        sinner: "Ryoshu",
+        risk: "ZAYIN",
+        name: "[ZAYIN] 蘇打 / Soda - 良秀",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_ryoshu_red_eyes",
+        sinner: "Ryoshu",
+        risk: "TETH",
+        name: "[TETH] 紅眼 / Red Eyes - 良秀",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_ryoshu_blind_obsession",
+        sinner: "Ryoshu",
+        risk: "TETH",
+        name: "[TETH] 盲目痴迷 / Blind Obsession - 良秀",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_ryoshu_4th_match_flame",
+        sinner: "Ryoshu",
+        risk: "HE",
+        name: "[HE] 第四火焰 / 4th Match Flame - 良秀",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_ryoshu_red_eyes_open",
+        sinner: "Ryoshu",
+        risk: "HE",
+        name: "[HE] 紅眼開 / Red Eyes (Open) - 良秀",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_ryoshu_thoracalgia",
+        sinner: "Ryoshu",
+        risk: "HE",
+        name: "[HE] 胸痛 / Thoracalgia - 良秀",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_ryoshu_contempt_awe",
+        sinner: "Ryoshu",
+        risk: "WAW",
+        name: "[WAW] 輕蔑，敬畏 / Contempt, Awe - 良秀",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_ryoshu_great_trichiliocosm",
+        sinner: "Ryoshu",
+        risk: "WAW",
+        name: "[WAW] 三千大世界 / Great Trichiliocosm - 良秀",
+        owned: false,
+        ...Ego()
+    },
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Meursault
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    {
+        id: "ego_meursault_chains_of_others",
+        sinner: "Meursault",
+        risk: "ZAYIN",
+        name: "[ZAYIN] 他人之繩 / Chains of Others - 默爾索",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_meursault_screwloose_wallop",
+        sinner: "Meursault",
+        risk: "TETH",
+        name: "[TETH] 亂槍亂打 / Screwloose Wallop - 默爾索",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_meursault_regret",
+        sinner: "Meursault",
+        risk: "TETH",
+        name: "[TETH] 悔恨 / Regret - 默爾索",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_meursault_electric_screaming",
+        sinner: "Meursault",
+        risk: "TETH",
+        name: "[TETH] 電擊尖叫 / Electric Screaming - 默爾索",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_meursault_pursuance",
+        sinner: "Meursault",
+        risk: "HE",
+        name: "[HE] 執行 / Pursuance - 默爾索",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_meursault_capote",
+        sinner: "Meursault",
+        risk: "HE",
+        name: "[HE] 卡波特 / Capote - 默爾索",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_meursault_yearning_mircalla",
+        sinner: "Meursault",
+        risk: "WAW",
+        name: "[WAW] 渴望-米爾卡拉 / Yearning-Mircalla - 默爾索",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_meursault_crushbound_past",
+        sinner: "Meursault",
+        risk: "WAW",
+        name: "[WAW] 壓裂往昔 / Crushbound Past - 默爾索",
+        owned: false,
+        ...Ego()
+    },
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Hong Lu
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    {
+        id: "ego_hong_lu_land_of_illusion",
+        sinner: "Hong Lu",
+        risk: "ZAYIN",
+        name: "[ZAYIN] 幻境之地 / Land of Illusion - 鴻璐",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_hong_lu_roseate_desire",
+        sinner: "Hong Lu",
+        risk: "TETH",
+        name: "[TETH] 玫瑰慾望 / Roseate Desire - 鴻璐",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_hong_lu_soda",
+        sinner: "Hong Lu",
+        risk: "TETH",
+        name: "[TETH] 蘇打 / Soda - 鴻璐",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_hong_lu_cavernous_wailing",
+        sinner: "Hong Lu",
+        risk: "TETH",
+        name: "[TETH] 空洞哀鳴 / Cavernous Wailing - 鴻璐",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_hong_lu_lasso",
+        sinner: "Hong Lu",
+        risk: "TETH",
+        name: "[TETH] 套索 / Lasso - 鴻璐",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_hong_lu_dimension_shredder",
+        sinner: "Hong Lu",
+        risk: "HE",
+        name: "[HE] 次元撕裂者 / Dimension Shredder - 鴻璐",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_hong_lu_effervescent_corrosion",
+        sinner: "Hong Lu",
+        risk: "HE",
+        name: "[HE] 泡沫腐蝕 / Effervescent Corrosion - 鴻璐",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_hong_lu_to_remain_oneself",
+        sinner: "Hong Lu",
+        risk: "HE",
+        name: "[HE] 留住自我 / To Remain Oneself - 鴻璐",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_hong_lu_tears_of_the_tarnished_blood",
+        sinner: "Hong Lu",
+        risk: "WAW",
+        name: "[WAW] 被玷污的血之淚 / Tears of the Tarnished Blood - 鴻璐",
+        owned: false,
+        ...Ego()
+    },
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Heathcliff
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    {
+        id: "ego_heathcliff_bodysack",
+        sinner: "Heathcliff",
+        risk: "ZAYIN",
+        name: "[ZAYIN] 破布袋 / Bodysack - 希斯克里夫",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_heathcliff_holiday",
+        sinner: "Heathcliff",
+        risk: "ZAYIN",
+        name: "[ZAYIN] 假日 / Holiday - 希斯克里夫",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_heathcliff_aedd",
+        sinner: "Heathcliff",
+        risk: "TETH",
+        name: "[TETH] AEDD - 希斯克里夫",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_heathcliff_fell_bullet",
+        sinner: "Heathcliff",
+        risk: "TETH",
+        name: "[TETH] 墮彈 / Fell Bullet - 希斯克里夫",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_heathcliff_move_in_reg",
+        sinner: "Heathcliff",
+        risk: "TETH",
+        name: "[TETH] 搬入規章 / Move-in Reg. - 希斯克里夫",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_heathcliff_telepole",
+        sinner: "Heathcliff",
+        risk: "HE",
+        name: "[HE] 電線桿 / Telepole - 希斯克里夫",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_heathcliff_ya_shunyata_tad_rupam",
+        sinner: "Heathcliff",
+        risk: "HE",
+        name: "[HE] 那 Śūnyatā 即 Rūpam / Ya Śūnyatā Tad Rūpam - 希斯克里夫",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_heathcliff_asymmetrical_inertia",
+        sinner: "Heathcliff",
+        risk: "HE",
+        name: "[HE] 非對稱慣性 / Asymmetrical Inertia - 希斯克里夫",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_heathcliff_binds",
+        sinner: "Heathcliff",
+        risk: "WAW",
+        name: "[WAW] 束縛 / Binds - 希斯克里夫",
+        owned: false,
+        ...Ego()
+    },
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Ishmael
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    {
+        id: "ego_ishmael_snagharpoon",
+        sinner: "Ishmael",
+        risk: "ZAYIN",
+        name: "[ZAYIN] 魚叉 / Snagharpoon - 以實瑪利",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_ishmael_hundred_footed_death_maggot",
+        sinner: "Ishmael",
+        risk: "ZAYIN",
+        name: "[ZAYIN] 百足死亡蛆 / Hundred-Footed Death Maggot - 以實瑪利",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_ishmael_roseate_desire",
+        sinner: "Ishmael",
+        risk: "TETH",
+        name: "[TETH] 玫瑰慾望 / Roseate Desire - 以實瑪利",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_ishmael_capote",
+        sinner: "Ishmael",
+        risk: "TETH",
+        name: "[TETH] 卡波特 / Capote - 以實瑪利",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_ishmael_bygone_days",
+        sinner: "Ishmael",
+        risk: "TETH",
+        name: "[TETH] 往昔歲月 / Bygone Days - 以實瑪利",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_ishmael_ardor_blossom_star",
+        sinner: "Ishmael",
+        risk: "HE",
+        name: "[HE] 熾花星 / Ardor Blossom Star - 以實瑪利",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_ishmael_wingbeat",
+        sinner: "Ishmael",
+        risk: "HE",
+        name: "[HE] 振翅 / Wingbeat - 以實瑪利",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_ishmael_christmas_nightmare",
+        sinner: "Ishmael",
+        risk: "HE",
+        name: "[HE] 聖誕惡夢 / Christmas Nightmare - 以實瑪利",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_ishmael_tidal_elegy",
+        sinner: "Ishmael",
+        risk: "HE",
+        name: "[HE] 潮汐輓歌 / Tidal Elegy - 以實瑪利",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_ishmael_blind_obsession",
+        sinner: "Ishmael",
+        risk: "WAW",
+        name: "[WAW] 盲目痴迷 / Blind Obsession - 以實瑪利",
+        owned: false,
+        ...Ego()
+    },
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Rodion
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    {
+        id: "ego_rodion_what_is_cast",
+        sinner: "Rodion",
+        risk: "ZAYIN",
+        name: "[ZAYIN] 所謂之物 / What is Cast - 羅佳",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_rodion_into_the_sunset",
+        sinner: "Rodion",
+        risk: "ZAYIN",
+        name: "[ZAYIN] 夕陽之下 / Into the Sunset - 羅佳",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_rodion_rime_shank",
+        sinner: "Rodion",
+        risk: "TETH",
+        name: "[TETH] 霜脊 / Rime Shank - 羅佳",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_rodion_effervescent_corrosion",
+        sinner: "Rodion",
+        risk: "TETH",
+        name: "[TETH] 泡沫腐蝕 / Effervescent Corrosion - 羅佳",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_rodion_4th_match_flame",
+        sinner: "Rodion",
+        risk: "HE",
+        name: "[HE] 第四火焰 / 4th Match Flame - 羅佳",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_rodion_pursuance",
+        sinner: "Rodion",
+        risk: "HE",
+        name: "[HE] 執行 / Pursuance - 羅佳",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_rodion_hex_nail",
+        sinner: "Rodion",
+        risk: "HE",
+        name: "[HE] 咒釘 / Hex Nail - 羅佳",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_rodion_sanguine_desire",
+        sinner: "Rodion",
+        risk: "WAW",
+        name: "[WAW] 血色慾望 / Sanguine Desire - 羅佳",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_rodion_indicants_trial",
+        sinner: "Rodion",
+        risk: "WAW",
+        name: "[WAW] 指引者的試煉 / Indicant's Trial - 羅佳",
+        owned: false,
+        ...Ego()
+    },
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Sinclair
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    {
+        id: "ego_sinclair_branch_of_knowledge",
+        sinner: "Sinclair",
+        risk: "ZAYIN",
+        name: "[ZAYIN] 知識之枝 / Branch of Knowledge - 辛克萊",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_sinclair_cavernous_wailing",
+        sinner: "Sinclair",
+        risk: "ZAYIN",
+        name: "[ZAYIN] 空洞哀鳴 / Cavernous Wailing - 辛克萊",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_sinclair_impending_day",
+        sinner: "Sinclair",
+        risk: "TETH",
+        name: "[TETH] 迫近之日 / Impending Day - 辛克萊",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_sinclair_lifetime_stew",
+        sinner: "Sinclair",
+        risk: "TETH",
+        name: "[TETH] 一生燉湯 / Lifetime Stew - 辛克萊",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_sinclair_hex_nail",
+        sinner: "Sinclair",
+        risk: "TETH",
+        name: "[TETH] 咒釘 / Hex Nail - 辛克萊",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_sinclair_lantern",
+        sinner: "Sinclair",
+        risk: "HE",
+        name: "[HE] 燈籠 / Lantern - 辛克萊",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_sinclair_9_2",
+        sinner: "Sinclair",
+        risk: "HE",
+        name: "[HE] 9:2 - 辛克萊",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_sinclair_harmony",
+        sinner: "Sinclair",
+        risk: "HE",
+        name: "[HE] 和諧 / Harmony - 辛克萊",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_sinclair_tears_of_the_tarnished_blood",
+        sinner: "Sinclair",
+        risk: "WAW",
+        name: "[WAW] 被玷污的血之淚 / Tears of the Tarnished Blood - 辛克萊",
+        owned: false,
+        ...Ego()
+    },
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Outis
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    {
+        id: "ego_outis_to_pathos_mathos",
+        sinner: "Outis",
+        risk: "ZAYIN",
+        name: "[ZAYIN] 知識之路 / To Páthos Máthos - 奧提斯",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_outis_ill_go_fer_scissors_how_bout_you",
+        sinner: "Outis",
+        risk: "ZAYIN",
+        name: "[ZAYIN] 我拿剪刀去，你呢？ / I'll Go fer Scissors. How 'Bout You? - 奧提斯",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_outis_ya_shunyata_tad_rupam",
+        sinner: "Outis",
+        risk: "TETH",
+        name: "[TETH] 那 Śūnyatā 即 Rūpam / Ya Śūnyatā Tad Rūpam - 奧提斯",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_outis_sunshower",
+        sinner: "Outis",
+        risk: "TETH",
+        name: "[TETH] 太陽雨 / Sunshower - 奧提斯",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_outis_ebony_stem",
+        sinner: "Outis",
+        risk: "HE",
+        name: "[HE] 黑檀樹幹 / Ebony Stem - 奧提斯",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_outis_holiday",
+        sinner: "Outis",
+        risk: "HE",
+        name: "[HE] 假日 / Holiday - 奧提斯",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_outis_dimension_shredder",
+        sinner: "Outis",
+        risk: "HE",
+        name: "[HE] 次元撕裂者 / Dimension Shredder - 奧提斯",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_outis_magic_bullet",
+        sinner: "Outis",
+        risk: "HE",
+        name: "[HE] 魔彈 / Magic Bullet - 奧提斯",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_outis_binds",
+        sinner: "Outis",
+        risk: "WAW",
+        name: "[WAW] 束縛 / Binds - 奧提斯",
+        owned: false,
+        ...Ego()
+    },
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Gregor
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    {
+        id: "ego_gregor_suddenly_one_day",
+        sinner: "Gregor",
+        risk: "ZAYIN",
+        name: "[ZAYIN] 突然某日 / Suddenly, One Day - 格里高爾",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_gregor_legerdemain",
+        sinner: "Gregor",
+        risk: "ZAYIN",
+        name: "[ZAYIN] 苟延殘喘 / Legerdemain - 格里高爾",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_gregor_lantern",
+        sinner: "Gregor",
+        risk: "TETH",
+        name: "[TETH] 燈籠 / Lantern - 格里高爾",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_gregor_bygone_days",
+        sinner: "Gregor",
+        risk: "TETH",
+        name: "[TETH] 往昔歲月 / Bygone Days - 格里高爾",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_gregor_aedd",
+        sinner: "Gregor",
+        risk: "HE",
+        name: "[HE] AEDD - 格里高爾",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_gregor_solemn_lament",
+        sinner: "Gregor",
+        risk: "HE",
+        name: "[HE] 莊嚴哀歌 / Solemn Lament - 格里高爾",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_gregor_christmas_nightmare",
+        sinner: "Gregor",
+        risk: "HE",
+        name: "[HE] 聖誕惡夢 / Christmas Nightmare - 格里高爾",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_gregor_garden_of_thorns",
+        sinner: "Gregor",
+        risk: "WAW",
+        name: "[WAW] 荊棘之園 / Garden of Thorns - 格里高爾",
+        owned: false,
+        ...Ego()
+    },
+    {
+        id: "ego_gregor_unbrilliant_glory",
+        sinner: "Gregor",
+        risk: "WAW",
+        name: "[WAW] 無光榮輝 / Unbrilliant Glory - 格里高爾",
+        owned: false,
+        ...Ego()
+    },
+];
+
+module.exports = { Egos, Ego };
+
 
 // ─── Rate Up 對象（Pickup）────────────────────────────────────
 const upTargets = {
     'Special': ["［漆黑噤默］羅蘭 / The Black Silence Roland"],
-    '0000':    ["［黃金迪］索爾茲 / Gold of The Dih Solzc"],
-    'Egos':    ["[WAW] 盲目 / Blind Obsession - 以實瑪利"],
-    '000': [
-        "［蜘蛛巢：中指 父輩］奧提斯 / The House of Spiders: Middle Nursefather Outis",
-        "［中指 幼兄］希斯克里夫 / Middle Big Brother Heathcliff",
-        "［蜘蛛巢：中指 學徒］以實瑪利 / The House of Spiders: Middle Apprentice Ishmael",
-    ],
-    '00': ["［中指 小弟］默爾索 / Middle Brother Meursault"],
-    '0':  ["［邊獄公司 罪人］格里高爾 / LCB Sinner Gregor"],
+    '0000':    [null],
+    'Egos': [null],
+    '000': [null],
+    '00': [null],
+    '0':  [null],
 };
 
 // ─── 輔助函式 ─────────────────────────────────────────────────
