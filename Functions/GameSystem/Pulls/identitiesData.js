@@ -346,7 +346,7 @@ const upTargets = {
     'Color Fixer': ["［漆黑噤默］羅蘭 / The Black Silence Roland"], // 修正稀有度對應標籤
     '0000':    [null],
     'Egos':    ["[HE] 著影揮刀 / Shadow-Vested Bladesinger - 默爾索"],
-    '000':     ["LCD現場推理小隊 以實瑪麗 / LCD OSIR Team Ishmael"],
+    '000':     ["[LCD現場推理小隊] 以實瑪麗 / LCD OSIR Team Ishmael"],
     '00':      [null],
     '0':       [null],
 };
