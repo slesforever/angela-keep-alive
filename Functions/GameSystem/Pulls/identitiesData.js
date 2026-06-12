@@ -402,10 +402,8 @@ const identityDetails = {
     { name: "[HE] 聖誕惡夢 / Christmas Nightmare - 格里高爾", ...T() },
     { name: "[WAW] 荊棘之園 / Garden of Thorns - 格里高爾", ...T() },
     { name: "[WAW] 無光榮輝 / Unbrilliant Glory - 格里高爾", ...T() },
-];
-
-
-module.exports = { Egos, Ego };
+  ];
+},
 
 
 // ─── Rate Up 對象（Pickup）────────────────────────────────────
