@@ -27,7 +27,7 @@ const identityRegistry = {
         { name: " [su31j4u/ e9 d042l45k4ke72k7.] ... " },
     ],
     '000': [
-        { name: " LCD現場推理小隊 以實瑪麗 / LCD OSIR Team Ishmael" },
+        { name: " [LCD現場推理小隊] 以實瑪麗 / LCD OSIR Team Ishmael" },
         { name: "［蜘蛛巢：食指 父輩］李箱 / The House of Spiders: Index Nursefather Yi Sang" },
         { name: "［蜘蛛巢：中指 父輩］奧提斯 / The House of Spiders: Middle Nursefather Outis" },
         { name: "［蜘蛛巢：環指 父輩］鴻璐 / The House of Spiders: Ring Nursefather Hong Lu" },
