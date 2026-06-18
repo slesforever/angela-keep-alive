@@ -344,12 +344,20 @@ const identityDetails = {
 
 // ─── Rate Up 對象（Pickup）────────────────────────────────────
 const upTargets = {
-    'Color Fixer': ["［漆黑噤默］羅蘭 / The Black Silence Roland"], // 修正稀有度對應標籤
-    '0000':    [null],
-    'Egos':    ["[HE] 著影揮刀 / Shadow-Vested Bladesinger - 默爾索"],
-    '000':     ["[LCD現場推理小隊] 以實瑪麗 / LCD OSIR Team Ishmael"],
-    '00':      [null],
-    '0':       [null],
+    'Color Fixer': 
+      ["［漆黑噤默］羅蘭 / The Black Silence Roland"], // 修正稀有度對應標籤
+    '0000':    
+      [null],
+    'Egos':    
+      ["[HE] 著影揮刀 / Shadow-Vested Bladesinger - 默爾索"],
+    '000':     
+      ["[LCD現場推理小隊] 以實瑪麗 / LCD OSIR Team Ishmael"],
+      ["[S公司 推奴人] 鴻路 / S Corp. Ch'unokkun Hong Lu" },
+    '00':      
+      [null],
+    '0':      
+      [null],
+};
 // ─── 自動建構抽卡快取池 ──────────────────────────────────────────
 const pool = {};
 for (const [rarity, arr] of Object.entries(identityRegistry)) {
