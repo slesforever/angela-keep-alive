@@ -351,8 +351,10 @@ const upTargets = {
     'Egos':    
       ["[HE] 著影揮刀 / Shadow-Vested Bladesinger - 默爾索"],
     '000':     
-      ["[LCD現場推理小隊] 以實瑪麗 / LCD OSIR Team Ishmael"],
-      ["[S公司 推奴人] 鴻路 / S Corp. Ch'unokkun Hong Lu"],
+      [
+       "[LCD現場推理小隊] 以實瑪麗 / LCD OSIR Team Ishmael",
+       "[S公司 推奴人] 鴻路 / S Corp. Ch'unokkun Hong Lu"
+      ],
     '00':      
       [null],
     '0':      
