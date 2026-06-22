@@ -1,6 +1,6 @@
 // Functions/Newscheck.js
 // Twitter Nitter RSS + Steam 官方新聞 API + YouTube 頻道監測
-const { EmbedBuilder } = require('discord.js');
+const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 
@@ -16,16 +16,16 @@ const PING_ROLE = process.env.PING_ROLE_MENTION || '<@&1406984068725211177>';
 const STEAM_APP_ID = '1973530';
 const CHECK_INTERVAL = Number(process.env.CHECK_INTERVAL_MS || 20 * 1000);
 
-// 自動監測抓少一點，速度更乾脆；手動測試可以多抓幾則
+// 自動監測預設抓少一點，速度更快；手動測試可多抓
 const STEAM_NEWS_COUNT_AUTO = Number(process.env.STEAM_NEWS_COUNT_AUTO || 3);
 const STEAM_NEWS_COUNT_MANUAL = Number(process.env.STEAM_NEWS_COUNT_MANUAL || 5);
 const STEAM_FETCH_TIMEOUT_MS = Number(process.env.STEAM_FETCH_TIMEOUT_MS || 5000);
 
-const YOUTUBE_HANDLE = (process.env.YOUTUBE_HANDLE || 'ProjectMoonOfficial').replace(/^@/, '');
-const YOUTUBE_PAGE_URL = `https://www.youtube.com/@${YOUTUBE_HANDLE}`;
-
 // Steam 圖片前綴
 const STEAM_CLAN_IMAGE_BASE = 'https://steamcdn-a.akamaihd.net/steamcommunity/public/images/clans/';
+
+const YOUTUBE_HANDLE = (process.env.YOUTUBE_HANDLE || 'ProjectMoonOfficial').replace(/^@/, '');
+const YOUTUBE_PAGE_URL = `https://www.youtube.com/@${YOUTUBE_HANDLE}`;
 
 // Nitter 備援節點
 const NITTER_NODES = [
@@ -130,8 +130,7 @@ function stripHtml(text) {
 }
 
 function normalizeSteamContents(raw = '') {
-    return String(raw)
-        .replace(/\{STEAM_CLAN_IMAGE\}/g, STEAM_CLAN_IMAGE_BASE);
+    return String(raw).replace(/\{STEAM_CLAN_IMAGE\}/g, STEAM_CLAN_IMAGE_BASE);
 }
 
 function extractSteamImages(raw = '') {
@@ -152,6 +151,82 @@ function stripSteamContent(raw = '') {
         .replace(/<\/?[^>]+(>|$)/g, '')
         .replace(/\s+/g, ' ')
         .trim();
+}
+
+function guessFileExtension(contentType = '', url = '') {
+    const ct = String(contentType).toLowerCase();
+    if (ct.includes('image/png')) return 'png';
+    if (ct.includes('image/jpeg')) return 'jpg';
+    if (ct.includes('image/jpg')) return 'jpg';
+    if (ct.includes('image/gif')) return 'gif';
+    if (ct.includes('image/webp')) return 'webp';
+
+    const cleanUrl = String(url).split('?')[0].toLowerCase();
+    const match = cleanUrl.match(/\.([a-z0-9]{3,4})$/);
+    if (match?.[1]) return match[1];
+
+    return 'png';
+}
+
+async function downloadSteamImage(url, itemGid, index) {
+    try {
+        const response = await fetchWithTimeout(url, {}, STEAM_FETCH_TIMEOUT_MS);
+        if (!response.ok) return null;
+
+        const contentType = response.headers.get('content-type') || '';
+        const ext = guessFileExtension(contentType, url);
+        const filename = `steam-${itemGid}-${index + 1}.${ext}`;
+        const buffer = Buffer.from(await response.arrayBuffer());
+
+        return new AttachmentBuilder(buffer, { name: filename });
+    } catch (_) {
+        return null;
+    }
+}
+
+async function buildSteamAnnouncementPayload(item) {
+    const imageUrls = extractSteamImages(item.contents || '');
+    const cleanContent = stripSteamContent(item.contents || '');
+
+    const summary = cleanContent.length > 900
+        ? `${cleanContent.slice(0, 900)}...`
+        : (cleanContent || '（沒有內容）');
+
+    const attachments = [];
+    const downloaded = await Promise.all(
+        imageUrls.slice(0, 10).map((url, idx) => downloadSteamImage(url, item.gid, idx))
+    );
+
+    for (const file of downloaded) {
+        if (file) attachments.push(file);
+    }
+
+    const embeds = [];
+
+    const firstEmbed = new EmbedBuilder()
+        .setTitle(`📢 ${item.title}`)
+        .setURL(item.url)
+        .setDescription(summary)
+        .setColor(0x1a3a6c)
+        .setFooter({ text: `來源: Steam 官方新聞中心 | 識別碼: ${item.gid}` })
+        .setTimestamp();
+
+    if (attachments[0]) {
+        firstEmbed.setImage(`attachment://${attachments[0].name}`);
+    }
+
+    embeds.push(firstEmbed);
+
+    for (let i = 1; i < attachments.length && embeds.length < 10; i++) {
+        embeds.push(
+            new EmbedBuilder()
+                .setColor(0x1a3a6c)
+                .setImage(`attachment://${attachments[i].name}`)
+                .setFooter({ text: `圖片 ${i + 1}/${attachments.length}` })
+        );
+    }
+
+    return { embeds, files: attachments };
 }
 
 function loadState() {
@@ -591,6 +666,7 @@ async function checkSteamUpdates(client, isManual = false, messageContext = null
             return;
         }
 
+        // 依照 API 回傳順序，通常是最新在前
         const newestItem = newsItems[0];
         const currentId = String(newestItem.gid);
 
@@ -637,14 +713,19 @@ async function checkSteamUpdates(client, isManual = false, messageContext = null
                 .setTimestamp();
 
             const latestImages = extractSteamImages(newestItem.contents || '');
-            if (latestImages[0]) {
-                steamEmbed.setImage(latestImages[0]);
+            const latestFiles = (await Promise.all(
+                latestImages.slice(0, 10).map((url, idx) => downloadSteamImage(url, newestItem.gid, idx))
+            )).filter(Boolean);
+
+            if (latestFiles[0]) {
+                steamEmbed.setImage(`attachment://${latestFiles[0].name}`);
             }
 
             if (messageContext) {
                 await messageContext.reply({
                     content: `🔔 ${PING_ROLE} **Steam 手動測試成功**`,
                     embeds: [steamEmbed],
+                    files: latestFiles,
                     allowedMentions: { parse: ['roles'] }
                 });
             }
@@ -660,43 +741,25 @@ async function checkSteamUpdates(client, isManual = false, messageContext = null
         for (const item of uniqueUnseen) rememberRecent(steamState.recentIds, String(item.gid));
         saveState();
 
-        const embeds = uniqueUnseen.slice(0, 10).map((item) => {
-            const images = extractSteamImages(item.contents || '');
-            const cleanContent = stripSteamContent(item.contents || '').substring(0, 450);
-
-            const embed = new EmbedBuilder()
-                .setTitle(`📢 ${item.title}`)
-                .setURL(item.url)
-                .setDescription(cleanContent ? `${cleanContent}${cleanContent.length >= 450 ? '...' : ''}` : '（沒有內容）')
-                .setColor(0x1a3a6c)
-                .setFooter({ text: `來源: Steam 官方新聞中心 | 識別碼: ${item.gid}` })
-                .setTimestamp();
-
-            if (images[0]) {
-                embed.setImage(images[0]);
-            }
-
-            if (images.length > 1) {
-                embed.addFields({
-                    name: '🖼 其他圖片',
-                    value: images
-                        .slice(1, 5)
-                        .map((u, i) => `[圖片 ${i + 2}](${u})`)
-                        .join('\n')
-                });
-            }
-
-            return embed;
-        });
-
         try {
             const channel = await client.channels.fetch(NOTIFY_CHANNEL);
-            if (channel) {
+            if (!channel) return;
+
+            let firstMessage = true;
+
+            for (const item of uniqueUnseen) {
+                const payload = await buildSteamAnnouncementPayload(item);
+
                 await channel.send({
-                    content: `🔔 ${PING_ROLE} **監測到邊獄巴士有 ${uniqueUnseen.length} 則全新 Steam 公告發布！**`,
-                    embeds,
-                    allowedMentions: { parse: ['roles'] }
+                    content: firstMessage
+                        ? `🔔 ${PING_ROLE} **監測到邊獄巴士有 ${uniqueUnseen.length} 則全新 Steam 公告發布！**`
+                        : undefined,
+                    embeds: payload.embeds,
+                    files: payload.files,
+                    allowedMentions: firstMessage ? { parse: ['roles'] } : { parse: [] }
                 });
+
+                firstMessage = false;
             }
         } catch (e) {
             console.error(`[Steam] 發送訊息失敗：${e.message}`);
