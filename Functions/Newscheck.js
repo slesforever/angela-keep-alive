@@ -15,10 +15,17 @@ const NOTIFY_CHANNEL = process.env.NOTIFY_CHANNEL_ID || '1402282604165730348';
 const PING_ROLE = process.env.PING_ROLE_MENTION || '<@&1406984068725211177>';
 const STEAM_APP_ID = '1973530';
 const CHECK_INTERVAL = Number(process.env.CHECK_INTERVAL_MS || 20 * 1000);
-const STEAM_NEWS_COUNT = Number(process.env.STEAM_NEWS_COUNT || 5);
+
+// 自動監測抓少一點，速度更乾脆；手動測試可以多抓幾則
+const STEAM_NEWS_COUNT_AUTO = Number(process.env.STEAM_NEWS_COUNT_AUTO || 3);
+const STEAM_NEWS_COUNT_MANUAL = Number(process.env.STEAM_NEWS_COUNT_MANUAL || 5);
+const STEAM_FETCH_TIMEOUT_MS = Number(process.env.STEAM_FETCH_TIMEOUT_MS || 5000);
 
 const YOUTUBE_HANDLE = (process.env.YOUTUBE_HANDLE || 'ProjectMoonOfficial').replace(/^@/, '');
 const YOUTUBE_PAGE_URL = `https://www.youtube.com/@${YOUTUBE_HANDLE}`;
+
+// Steam 圖片前綴
+const STEAM_CLAN_IMAGE_BASE = 'https://steamcdn-a.akamaihd.net/steamcommunity/public/images/clans/';
 
 // Nitter 備援節點
 const NITTER_NODES = [
@@ -117,6 +124,31 @@ function decodeXmlEntities(text) {
 
 function stripHtml(text) {
     return String(text || '')
+        .replace(/<\/?[^>]+(>|$)/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function normalizeSteamContents(raw = '') {
+    return String(raw)
+        .replace(/\{STEAM_CLAN_IMAGE\}/g, STEAM_CLAN_IMAGE_BASE);
+}
+
+function extractSteamImages(raw = '') {
+    const text = normalizeSteamContents(raw);
+    const images = [];
+
+    for (const m of text.matchAll(/\[img\]([\s\S]*?)\[\/img\]/gi)) {
+        const url = m[1].trim();
+        if (/^https?:\/\//i.test(url)) images.push(url);
+    }
+
+    return [...new Set(images)];
+}
+
+function stripSteamContent(raw = '') {
+    return normalizeSteamContents(raw)
+        .replace(/\[img\][\s\S]*?\[\/img\]/gi, '')
         .replace(/<\/?[^>]+(>|$)/g, '')
         .replace(/\s+/g, ' ')
         .trim();
@@ -534,8 +566,12 @@ async function checkSteamUpdates(client, isManual = false, messageContext = null
     steamLock = true;
 
     try {
+        const newsCount = isManual ? STEAM_NEWS_COUNT_MANUAL : STEAM_NEWS_COUNT_AUTO;
+
         const response = await fetchWithTimeout(
-            `https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/?appid=${STEAM_APP_ID}&count=${STEAM_NEWS_COUNT}`
+            `https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/?appid=${STEAM_APP_ID}&count=${newsCount}&format=json`,
+            {},
+            STEAM_FETCH_TIMEOUT_MS
         );
 
         if (!response.ok) {
@@ -555,7 +591,6 @@ async function checkSteamUpdates(client, isManual = false, messageContext = null
             return;
         }
 
-        // 依照 API 回傳順序，通常是最新在前
         const newestItem = newsItems[0];
         const currentId = String(newestItem.gid);
 
@@ -587,8 +622,10 @@ async function checkSteamUpdates(client, isManual = false, messageContext = null
         // 手動測試：永遠回最新，但不影響自動監測快取
         if (isManual) {
             const preview = newsItems.slice(0, 3).map(item => {
-                const cleanContent = stripHtml(item.contents || '').substring(0, 220);
-                return `**${item.title}**\n${cleanContent}${cleanContent.length >= 220 ? '...' : ''}\n${item.url}`;
+                const images = extractSteamImages(item.contents || '');
+                const cleanContent = stripSteamContent(item.contents || '').substring(0, 220);
+                const imageNote = images.length ? `\n🖼 ${images.length} 張圖片` : '';
+                return `**${item.title}**\n${cleanContent}${cleanContent.length >= 220 ? '...' : ''}${imageNote}\n${item.url}`;
             }).join('\n\n');
 
             const steamEmbed = new EmbedBuilder()
@@ -598,6 +635,11 @@ async function checkSteamUpdates(client, isManual = false, messageContext = null
                 .setColor(0x1a3a6c)
                 .setFooter({ text: `來源: Steam 官方新聞中心 | 最新識別碼: ${newestItem.gid}` })
                 .setTimestamp();
+
+            const latestImages = extractSteamImages(newestItem.contents || '');
+            if (latestImages[0]) {
+                steamEmbed.setImage(latestImages[0]);
+            }
 
             if (messageContext) {
                 await messageContext.reply({
@@ -619,14 +661,32 @@ async function checkSteamUpdates(client, isManual = false, messageContext = null
         saveState();
 
         const embeds = uniqueUnseen.slice(0, 10).map((item) => {
-            const cleanContent = stripHtml(item.contents || '').substring(0, 450);
-            return new EmbedBuilder()
+            const images = extractSteamImages(item.contents || '');
+            const cleanContent = stripSteamContent(item.contents || '').substring(0, 450);
+
+            const embed = new EmbedBuilder()
                 .setTitle(`📢 ${item.title}`)
                 .setURL(item.url)
                 .setDescription(cleanContent ? `${cleanContent}${cleanContent.length >= 450 ? '...' : ''}` : '（沒有內容）')
                 .setColor(0x1a3a6c)
                 .setFooter({ text: `來源: Steam 官方新聞中心 | 識別碼: ${item.gid}` })
                 .setTimestamp();
+
+            if (images[0]) {
+                embed.setImage(images[0]);
+            }
+
+            if (images.length > 1) {
+                embed.addFields({
+                    name: '🖼 其他圖片',
+                    value: images
+                        .slice(1, 5)
+                        .map((u, i) => `[圖片 ${i + 2}](${u})`)
+                        .join('\n')
+                });
+            }
+
+            return embed;
         });
 
         try {
