@@ -17,6 +17,7 @@ function T() {
 // ─── 原始人格清單（按稀有度分類） ──────────────────────────────────
 const identityRegistry = {
     'Color Fixer': [
+        { name: "［殷紅迷霧］卡莉 / The Red Mist Kali" },
         { name: "［漆黑噤默］羅蘭 / The Black Silence Roland" },
     ],
     'Special': [
@@ -24,12 +25,14 @@ const identityRegistry = {
         { name: "[NULL] 這裡沒有任何東西 / theres nothing" },
     ],
     '0000': [
-        { name: " [su31j4u/ e9 d042l45k4ke72k7.] ... " },
+        { name: " [赤月の破片] Fragment of Chaos. " },
+        { name: " [竹帽］Bamboo-hatted Kim " },
     ],
     '000': [
         { name: " [LCD現場推理小隊] 以實瑪麗 / LCD OSIR Team Ishmael" },
         { name: " [S公司 推奴人] 鴻路 / S Corp. Ch'unokkun Hong Lu" },
-        { name: "［蜘蛛巢：食指 父輩］李箱 / The House of Spiders: Index Nursefather Yi Sang" },
+        { name: " [LCD現場推理小隊] 以實瑪麗 / LCD OSIR Team Ishmael" },
+        { name: " [蜘蛛巢：拇指 父輩］羅佳 / The House of Spiders: Thumb Nursefather Rodion" },
         { name: "［蜘蛛巢：中指 父輩］奧提斯 / The House of Spiders: Middle Nursefather Outis" },
         { name: "［蜘蛛巢：環指 父輩］鴻璐 / The House of Spiders: Ring Nursefather Hong Lu" },
         { name: "［蜘蛛巢之刃] 良秀 / Blade of the House of Spiders Ryōshū" },
@@ -41,6 +44,7 @@ const identityRegistry = {
         { name: "［蜘蛛巢：指環 學徒］浮士德 / The House of Spiders: Ring Apprentice Faust" },
         { name: "［蜘蛛巢：中指 學徒］以實瑪利 / The House of Spiders: Middle Apprentice Ishmael" },
         { name: "［蜘蛛巢：小指 學徒］辛克萊 / The House of Spiders: Pinky Apprentice Sinclair" },
+        { name: " [蜘蛛巢：拇指 學徒］希斯克里夫 / The House of Spiders: The Thumb Apprentice Heathcliff" },
         { name: "［食指 傳令：【紙條】］浮士德 / The Index Messenger: Slip Faust" },
         { name: "［中指 幼妹］堂吉訶德 / The Middle Little Sister Don Quixote" },
         { name: "［中指 幼弟］辛克萊 / The Middle Little Brother Sinclair" },
@@ -348,12 +352,12 @@ const upTargets = {
       ["［漆黑噤默］羅蘭 / The Black Silence Roland"], // 修正稀有度對應標籤
     '0000':    
       [null],
-    'Egos':    
-      ["[HE] 著影揮刀 / Shadow-Vested Bladesinger - 默爾索"],
+    'Egos':
+      [null]
     '000':     
       [
-       "[LCD現場推理小隊] 以實瑪麗 / LCD OSIR Team Ishmael",
-       "[S公司 推奴人] 鴻路 / S Corp. Ch'unokkun Hong Lu"
+       "[蜘蛛巢：拇指 父輩］羅佳 / The House of Spiders: Thumb Nursefather Rodion",
+       "[蜘蛛巢：拇指 學徒］希斯克里夫 / The House of Spiders: The Thumb Apprentice Heathcliff" 
       ],
     '00':      
       [null],
