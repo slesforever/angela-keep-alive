@@ -31,7 +31,6 @@ const identityRegistry = {
     '000': [
         { name: " [LCD現場推理小隊] 以實瑪麗 / LCD OSIR Team Ishmael" },
         { name: " [S公司 推奴人] 鴻路 / S Corp. Ch'unokkun Hong Lu" },
-        { name: " [LCD現場推理小隊] 以實瑪麗 / LCD OSIR Team Ishmael" },
         { name: " [蜘蛛巢：拇指 父輩］羅佳 / The House of Spiders: Thumb Nursefather Rodion" },
         { name: "［蜘蛛巢：中指 父輩］奧提斯 / The House of Spiders: Middle Nursefather Outis" },
         { name: "［蜘蛛巢：環指 父輩］鴻璐 / The House of Spiders: Ring Nursefather Hong Lu" },
