@@ -353,11 +353,11 @@ const upTargets = {
     '0000':    
       [null],
     'Egos':
-      [null]
+      [null],
     '000':     
       [
        "[蜘蛛巢：拇指 父輩］羅佳 / The House of Spiders: Thumb Nursefather Rodion",
-       "[蜘蛛巢：拇指 學徒］希斯克里夫 / The House of Spiders: The Thumb Apprentice Heathcliff" 
+       "[蜘蛛巢：拇指 學徒］希斯克里夫 / The House of Spiders: The Thumb Apprentice Heathcliff"
       ],
     '00':      
       [null],
