@@ -125,5 +125,19 @@ async function sendHelp(message) {
             .setFooter({ text: '指令冷卻 3s ｜ !help 再次查看' })]
     });
 }
+// ── Gay Rate ───────────────────────────────────────────────
+if (raw.startsWith('!gayrate')) {
+    const target = message.mentions.users.first();
+
+    if (!target) {
+        return message.reply('請 @ 一位使用者。\n例如：`!gayrate @user`');
+    }
+
+    const rate = target.id === '1330463890122735642'
+        ? 0
+        : 100;
+
+    return message.reply(`${target} is **${rate}% gay** 🌈`);
+}
 
 module.exports = { handleCommands };
