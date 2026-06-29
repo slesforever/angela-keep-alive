@@ -101,7 +101,7 @@ async function handleCommands(client, message) {
         return checkTwitterUpdates(client, true, message);
     }
 // ── Gay Rate ───────────────────────────────────────────────
-if (raw === '!gayrate') {
+if (raw.startsWith('!gayrate')) {
     const target = message.mentions.users.first();
 
     if (!target) {
@@ -113,11 +113,6 @@ if (raw === '!gayrate') {
         : 100;
 
     return message.reply(`${target} is **${rate}% gay** 🌈`);
-}
-    // ── 說明 ─────────────────────────────────────────────────────
-    if (raw === '!help' || raw === '!指令' || raw === '!h') {
-        return sendHelp(message);
-    }
 }
 
 async function sendHelp(message) {
