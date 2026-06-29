@@ -114,6 +114,11 @@ if (raw.startsWith('!gayrate')) {
 
     return message.reply(`${target} is **${rate}% gay** 🌈`);
 }
+    // ── 說明 ─────────────────────────────────────────────────────
+    if (raw === '!help' || raw === '!指令' || raw === '!h') {
+        return sendHelp(message);
+    }
+}
 
 async function sendHelp(message) {
     const { EmbedBuilder } = require('discord.js');
