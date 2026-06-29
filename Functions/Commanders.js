@@ -101,7 +101,7 @@ async function handleCommands(client, message) {
         return checkTwitterUpdates(client, true, message);
     }
 // ── Gay Rate ───────────────────────────────────────────────
-if (raw.startsWith('!gayrate')) {
+if (raw === '!gayrate') {
     const target = message.mentions.users.first();
 
     if (!target) {
