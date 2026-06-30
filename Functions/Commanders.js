@@ -119,6 +119,24 @@ if (raw.startsWith('!gayrate')) {
         return sendHelp(message);
     }
 }
+if (raw.startsWith('!removedih')) {
+    const target = message.mentions.users.first();
+
+    if (!target) {
+        return message.reply('請 @ 一位使用者。\n例如：`!removedih @user`');
+    }
+
+    const rate = target.id === '1330463890122735642'
+        ? 0
+        : 100;
+
+    return message.reply(`${target} dih's **${rate}% GONE** 🌈`);
+}
+    // ── 說明 ─────────────────────────────────────────────────────
+    if (raw === '!help' || raw === '!指令' || raw === '!h') {
+        return sendHelp(message);
+    }
+}
 
 async function sendHelp(message) {
     const { EmbedBuilder } = require('discord.js');
