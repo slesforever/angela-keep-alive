@@ -47,7 +47,7 @@ async function handleCommands(client, message) {
         return BattleSystem.startBattle(client, message, 'normal');
     }
     if (raw === '!battle elite' || raw === '!精英戰') {
-        if (isOnCooldown(uid, 'battle', 5000)) return message.react('⏳');
+m        if (isOnCooldown(uid, 'battle', 5000)) return message.react('⏳');
         return BattleSystem.startBattle(client, message, 'elite');
     }
     if (raw === '!battle boss' || raw === '!boss戰') {
@@ -128,10 +128,10 @@ if (raw.startsWith('!removedih')) {
     }
 
     const rate = target.id === '1330463890122735642'
-        ? 0
-        : 100;
+        ? 'NOT'
+        : 'Absolutely';
 
-    return message.reply(`${target} dih's **${rate}% GONE** 🌈`);
+    return message.reply(`${target} dih's **${rate} GONE** 🌈`);
 }
     // ── 說明 ─────────────────────────────────────────────────────
     if (raw === '!help' || raw === '!指令' || raw === '!h') {
