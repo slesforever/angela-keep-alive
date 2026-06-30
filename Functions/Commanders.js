@@ -47,7 +47,7 @@ async function handleCommands(client, message) {
         return BattleSystem.startBattle(client, message, 'normal');
     }
     if (raw === '!battle elite' || raw === '!精英戰') {
-m        if (isOnCooldown(uid, 'battle', 5000)) return message.react('⏳');
+      if (isOnCooldown(uid, 'battle', 5000)) return message.react('⏳');
         return BattleSystem.startBattle(client, message, 'elite');
     }
     if (raw === '!battle boss' || raw === '!boss戰') {
