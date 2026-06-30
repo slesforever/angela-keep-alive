@@ -118,7 +118,8 @@ if (raw.startsWith('!gayrate')) {
     if (raw === '!help' || raw === '!指令' || raw === '!h') {
         return sendHelp(message);
     }
-}
+
+
 if (raw.startsWith('!removedih')) {
     const target = message.mentions.users.first();
 
