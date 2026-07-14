@@ -75,7 +75,7 @@ const identityRegistry = {
         { name: "［拉曼查·卻領 總督］堂吉訶德 / The Manager of La Manchaland Don Quixote" },
         { name: "［拉曼查·卻領 王子］默爾索 / The Prince of La Manchaland Meursault" },
         { name: "［拉曼查·卻領 公主］羅佳 / The Princess of La Manchaland Rodion" },
-        { name: "［拉曼查·卻領 神父］ㄏ / The Priest of La Manchaland Gregor" },
+        { name: "［拉曼查·卻領 神父］格里高爾 / The Priest of La Manchaland Gregor" },
         { name: "［拉曼查·卻領 理髮師］奧提斯 / The Barber of La Manchaland Outis" },
         { name: "［句點事務所收尾人］希斯克里夫 / Full-Stop Office Fixer Heathcliff" },
         { name: "［句點事務所代表］鴻璐 / Full-Stop Office Rep Hong Lu" },
@@ -360,12 +360,13 @@ const identityDetails = {
 const upTargets = {
     'Color Fixer': 
       [
-      "[紫色眼淚］伊織 / The Purple Tear Iori"
-      "[蒼藍殘響]阿爾加利亞 / The Blue Reverberation Argalia"
+      "[紫色眼淚］伊織 / The Purple Tear Iori",
+      "[蒼藍殘響]阿爾加利亞 / The Blue Reverberation Argalia",
       ], 
     '0000':    
       [null],
     'Egos':
+        [
       "[HE] 莊嚴的哀歌 / Solemn Lament - 李箱",
     ],
     '000':     
