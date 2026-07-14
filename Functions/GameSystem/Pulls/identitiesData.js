@@ -19,19 +19,27 @@ const identityRegistry = {
     'Color Fixer': [
         { name: "［殷紅迷霧］卡莉 / The Red Mist Kali" },
         { name: "［漆黑噤默］羅蘭 / The Black Silence Roland" },
+        { name: "［猩紅凝視］維吉爾 / The Red Gaze Vergilius" },
+        { name: "［金色魚叉］維斯帕 / The Yellow Harpoon Vespa" },
+        { name: "［紫色眼淚］伊織 / The Purple Tear Iori" },
+        { name: "［朱紅十字］??? / The Vermilion Cross ???" },
+        { name: "［靛藍老人］??? / The Indigo Elder ???" },
+        { name: "［蒼藍殘響］阿爾加利亞 / The Blue Reverberation Argalia" },
     ],
     'Special': [
-        { name: "［黃金迪］索爾茲 / Gold of The Dih Solzc" },
+        { name: "[黃金迪］索爾茲 / Gold of The Dih Solzc" },
         { name: "[NULL] 這裡沒有任何東西 / theres nothing" },
+        { name: "[東方Project] 芙蘭朵露·斯卡蕾特 / Flandre Scarlet" },
+        { name: "[東方Project] 芙蘭朵露·蕾米莉亞 / Remilia Scarlet" },
+        { name: "[赤月の破片] Fragment of Chaos." },
     ],
     '0000': [
-        { name: " [赤月の破片] Fragment of Chaos. " },
-        { name: " [竹帽］Bamboo-hatted Kim " },
+        { name: " [竹帽］Bamboo-hatted Kim " }, 
     ],
     '000': [
-        { name: "［黎明事務所 幫手］辛克萊 / Dawn Office Fixer Sinclair" },
+        { name: " [黎明事務所 幫手］辛克萊 / Dawn Office Fixer Sinclair" },
         { name: " [黎明事務所 收尾人] 浮士德 / Dawn Office Fixer Faust" },
-        { name: "［黎明事務所 代表］格里高爾 / Dawn Office Rep Gregor" },
+        { name: " [黎明事務所 代表］格里高爾 / Dawn Office Rep Gregor" },
         { name: " [LCD現場推理小隊] 以實瑪麗 / LCD OSIR Team Ishmael" },
         { name: " [S公司 推奴人] 鴻路 / S Corp. Ch'unokkun Hong Lu" },
         { name: " [蜘蛛巢：拇指 父輩］羅佳 / The House of Spiders: Thumb Nursefather Rodion" },
@@ -222,7 +230,7 @@ const identityRegistry = {
         { name: "[HE] 墮彈 / Fell Bullet - 李箱" },
         { name: "[WAW] 太陽雨 / Sunshower - 李箱" },
         { name: "[WAW] 三千大世界 / Great Trichiliocosm - 李箱" },
-        { name: "[WAW] 莊嚴的哀歌 / Solemn Lament - 李箱" },
+        { name: "[HE] 莊嚴的哀歌 / Solemn Lament - 李箱" },
         // Faust
         { name: "[ZAYIN] 表象放射器 / Representation Emitter - 浮士德" },
         { name: "[TETH] 咒釘 / Hex Nail - 浮士德" },
@@ -351,15 +359,20 @@ const identityDetails = {
 // ─── Rate Up 對象（Pickup）────────────────────────────────────
 const upTargets = {
     'Color Fixer': 
-      ["［漆黑噤默］羅蘭 / The Black Silence Roland"], // 修正稀有度對應標籤
+      [
+      "[紫色眼淚］伊織 / The Purple Tear Iori"
+      "[蒼藍殘響]阿爾加利亞 / The Blue Reverberation Argalia"
+      ], 
     '0000':    
       [null],
     'Egos':
-      [null],
+      "[HE] 莊嚴的哀歌 / Solemn Lament - 李箱",
+    ],
     '000':     
       [
-       "[蜘蛛巢：拇指 父輩］羅佳 / The House of Spiders: Thumb Nursefather Rodion",
-       "[蜘蛛巢：拇指 學徒］希斯克里夫 / The House of Spiders: The Thumb Apprentice Heathcliff"
+       "[黎明事務所 代表］格里高爾 / Dawn Office Rep Gregor",
+       "[黎明事務所 收尾人] 浮士德 / Dawn Office Fixer Faust",
+       "[黎明事務所 幫手］辛克萊 / Dawn Office Fixer Sinclair"
       ],
     '00':      
       [null],
