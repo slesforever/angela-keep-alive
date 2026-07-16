@@ -9,6 +9,9 @@ const PartySystem      = require('./GameSystem/PartySystem.js');
 const BattleSystem     = require('./GameSystem/BattleSystem.js');
 const { checkSteamUpdates, checkTwitterUpdates } = require('./Newscheck.js');
 
+// ── 導入新獨立的清單系統（路徑完全對齊你的實體目錄結構） ─────────
+const ListSystem       = require('./GameSystem/Pulls/ListSystem.js');
+
 // ── 冷卻 ─────────────────────────────────────────────────────
 const COOLDOWNS = new Map();
 function isOnCooldown(userId, cmd, ms = 3000) {
@@ -37,8 +40,9 @@ async function handleCommands(client, message) {
         if (isOnCooldown(uid, 'pack')) return message.react('⏳');
         return PacksAndData.handleInventory(client, message);
     }
+    // 指向 Pulls 資料夾下的全新 ListSystem
     if (raw === '!list' || raw === '!清單') {
-        return PacksAndData.handleList(client, message);
+        return ListSystem.handleList(client, message);
     }
 
     // ── 戰鬥 ────────────────────────────────────────────────────
