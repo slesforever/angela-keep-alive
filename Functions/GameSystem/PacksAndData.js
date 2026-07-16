@@ -63,8 +63,11 @@ function findRarity(name) {
     return '0';
 }
 
+// \uFF3D = ） fullwidth right square bracket (used in ［…）names)
+// \uFF09 = ） fullwidth right parenthesis (used in （…）names)
+// \u005D = ] ASCII right square bracket
 function getShortName(name) {
-    const m = String(name || '').match(/[）\]](.+?)(?:\s*\/|$)/);
+    const m = String(name || '').match(/[\uFF3D\uFF09\u005D](.+?)(?:\s*\/|$)/);
     return m ? m[1].trim().slice(0, 14) : String(name || '').slice(0, 14);
 }
 
@@ -574,10 +577,9 @@ async function showPack(client, message) {
 
         // ═══ 出擊編成（先選罪人，再選人格）══════════════════
         if (id === 'pk_form') {
-    const { showPartyUI } = require('./PartySystem.js');
-    return showPartyUI(client, ix, message.author.id, message.author.username);
-}
-
+            const { showPartyUI } = require('./PartySystem.js');
+            return showPartyUI(client, ix, message.author.id, message.author.username);
+        }
 
         // ═══ 人格培育 ════════════════════════════════════════
         if (id === 'pk_cult') {
