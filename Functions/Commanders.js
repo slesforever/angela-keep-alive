@@ -9,9 +9,6 @@ const PartySystem      = require('./GameSystem/PartySystem.js');
 const BattleSystem     = require('./GameSystem/BattleSystem.js');
 const { checkSteamUpdates, checkTwitterUpdates } = require('./Newscheck.js');
 
-// ── 導入新獨立的清單系統（防止破壞舊有 PacksAndData） ──────────
-const ListSystem       = require('./GameSystem/ListSystem.js');
-
 // ── 冷卻 ─────────────────────────────────────────────────────
 const COOLDOWNS = new Map();
 function isOnCooldown(userId, cmd, ms = 3000) {
@@ -40,9 +37,8 @@ async function handleCommands(client, message) {
         if (isOnCooldown(uid, 'pack')) return message.react('⏳');
         return PacksAndData.handleInventory(client, message);
     }
-    // 這裡完美修正：改為調用全新、防溢出的 ListSystem
     if (raw === '!list' || raw === '!清單') {
-        return ListSystem.handleList(client, message);
+        return PacksAndData.handleList(client, message);
     }
 
     // ── 戰鬥 ────────────────────────────────────────────────────
