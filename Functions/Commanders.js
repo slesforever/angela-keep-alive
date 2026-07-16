@@ -9,6 +9,9 @@ const PartySystem      = require('./GameSystem/PartySystem.js');
 const BattleSystem     = require('./GameSystem/BattleSystem.js');
 const { checkSteamUpdates, checkTwitterUpdates } = require('./Newscheck.js');
 
+// ── 導入新獨立的清單系統（防止破壞舊有 PacksAndData） ──────────
+const ListSystem       = require('./GameSystem/ListSystem.js');
+
 // ── 冷卻 ─────────────────────────────────────────────────────
 const COOLDOWNS = new Map();
 function isOnCooldown(userId, cmd, ms = 3000) {
@@ -37,8 +40,9 @@ async function handleCommands(client, message) {
         if (isOnCooldown(uid, 'pack')) return message.react('⏳');
         return PacksAndData.handleInventory(client, message);
     }
+    // 這裡完美修正：改為調用全新、防溢出的 ListSystem
     if (raw === '!list' || raw === '!清單') {
-        return PacksAndData.handleInventory(client, message);
+        return ListSystem.handleList(client, message);
     }
 
     // ── 戰鬥 ────────────────────────────────────────────────────
@@ -47,7 +51,7 @@ async function handleCommands(client, message) {
         return BattleSystem.startBattle(client, message, 'normal');
     }
     if (raw === '!battle elite' || raw === '!精英戰') {
-      if (isOnCooldown(uid, 'battle', 5000)) return message.react('⏳');
+        if (isOnCooldown(uid, 'battle', 5000)) return message.react('⏳');
         return BattleSystem.startBattle(client, message, 'elite');
     }
     if (raw === '!battle boss' || raw === '!boss戰') {
@@ -100,39 +104,27 @@ async function handleCommands(client, message) {
         await message.channel.sendTyping();
         return checkTwitterUpdates(client, true, message);
     }
-// ── Gay Rate ───────────────────────────────────────────────
-if (raw.startsWith('!gayrate')) {
-    const target = message.mentions.users.first();
 
-    if (!target) {
-        return message.reply('請 @ 一位使用者。\n例如：`!gayrate @user`');
+    // ── Gay Rate ───────────────────────────────────────────────
+    if (raw.startsWith('!gayrate')) {
+        const target = message.mentions.users.first();
+        if (!target) {
+            return message.reply('請 @ 一位使用者。\n例如：`!gayrate @user`');
+        }
+        const rate = target.id === '1330463890122735642' ? 0 : 100;
+        return message.reply(`${target} is **${rate}% gay** 🌈`);
     }
 
-    const rate = target.id === '1330463890122735642'
-        ? 0
-        : 100;
-
-    return message.reply(`${target} is **${rate}% gay** 🌈`);
-}
-    // ── 說明 ─────────────────────────────────────────────────────
-    if (raw === '!help' || raw === '!指令' || raw === '!h') {
-        return sendHelp(message);
+    // ── Remove DIH ─────────────────────────────────────────────
+    if (raw.startsWith('!removedih')) {
+        const target = message.mentions.users.first();
+        if (!target) {
+            return message.reply('請 @ 一位使用者。\n例如：`!removedih @user`');
+        }
+        const rate = target.id === '1330463890122735642' ? 'NOT' : 'Absolutely';
+        return message.reply(`${target} dih's **${rate} GONE** 🌈`);
     }
 
-
-if (raw.startsWith('!removedih')) {
-    const target = message.mentions.users.first();
-
-    if (!target) {
-        return message.reply('請 @ 一位使用者。\n例如：`!removedih @user`');
-    }
-
-    const rate = target.id === '1330463890122735642'
-        ? 'NOT'
-        : 'Absolutely';
-
-    return message.reply(`${target} dih's **${rate} GONE** 🌈`);
-}
     // ── 說明 ─────────────────────────────────────────────────────
     if (raw === '!help' || raw === '!指令' || raw === '!h') {
         return sendHelp(message);
