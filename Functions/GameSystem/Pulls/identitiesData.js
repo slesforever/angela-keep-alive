@@ -3,13 +3,13 @@
 // ─── 預設模板函式 ────────────────────────────────────────────
 function T() {
     return {
-        skill1:  { skillname:'', clashbase:0, coins:0, clashpower:0, attack:0, defense:0 },
-        skill2:  { skillname:'', clashbase:0, coins:0, clashpower:0, attack:0, defense:0 },
-        skill3:  { skillname:'', clashbase:0, coins:0, clashpower:0, attack:0, defense:0 },
-        evade:   { skillname:'', coins:0, clashpower:0, defense:0 },
+        skill1:  { skillname: '', clashbase: 0, coins: 0, clashpower: 0, attack: 0, defense: 0 },
+        skill2:  { skillname: '', clashbase: 0, coins: 0, clashpower: 0, attack: 0, defense: 0 },
+        skill3:  { skillname: '', clashbase: 0, coins: 0, clashpower: 0, attack: 0, defense: 0 },
+        evade:   { skillname: '', coins: 0, clashpower: 0, defense: 0 },
         counter: [
-            { skillname:'', canclash:true,  coins:0, clashpower:0, attack:0, defense:0 },
-            { skillname:'', canclash:false, coins:0, clashpower:0, attack:0, defense:0 },
+            { skillname: '', canclash: true,  coins: 0, clashpower: 0, attack: 0, defense: 0 },
+            { skillname: '', canclash: false, coins: 0, clashpower: 0, attack: 0, defense: 0 },
         ],
     };
 }
@@ -27,25 +27,25 @@ const identityRegistry = {
         { name: "［蒼藍殘響］阿爾加利亞 / The Blue Reverberation Argalia" },
     ],
     'Special': [
-        { name: "[黃金迪］索爾茲 / Gold of The Dih Solzc" },
+        { name: "［黃金迪］索爾茲 / Gold of The Dih Solzc" },
         { name: "[NULL] 這裡沒有任何東西 / theres nothing" },
         { name: "[東方Project] 芙蘭朵露·斯卡蕾特 / Flandre Scarlet" },
         { name: "[東方Project] 芙蘭朵露·蕾米莉亞 / Remilia Scarlet" },
         { name: "[赤月の破片] Fragment of Chaos." },
     ],
     '0000': [
-        { name: " [竹帽］Bamboo-hatted Kim " }, 
+        { name: "［竹帽］金 / Bamboo-hatted Kim" }, 
     ],
     '000': [
-        { name: " [黎明事務所 幫手］辛克萊 / Dawn Office Fixer Sinclair" },
-        { name: " [黎明事務所 收尾人] 浮士德 / Dawn Office Fixer Faust" },
-        { name: " [黎明事務所 代表］格里高爾 / Dawn Office Rep Gregor" },
-        { name: " [LCD現場推理小隊] 以實瑪麗 / LCD OSIR Team Ishmael" },
-        { name: " [S公司 推奴人] 鴻路 / S Corp. Ch'unokkun Hong Lu" },
-        { name: " [蜘蛛巢：拇指 父輩］羅佳 / The House of Spiders: Thumb Nursefather Rodion" },
+        { name: "［黎明事務所 幫手］辛克萊 / Dawn Office Fixer Sinclair" },
+        { name: "［黎明事務所 收尾人］浮士德 / Dawn Office Fixer Faust" },
+        { name: "［黎明事務所 代表］格里高爾 / Dawn Office Rep Gregor" },
+        { name: "［LCD現場推理小隊］以實瑪麗 / LCD OSIR Team Ishmael" },
+        { name: "［S公司 推奴人］鴻路 / S Corp. Ch'unokkun Hong Lu" },
+        { name: "［蜘蛛巢：拇指 父輩］羅佳 / The House of Spiders: Thumb Nursefather Rodion" },
         { name: "［蜘蛛巢：中指 父輩］奧提斯 / The House of Spiders: Middle Nursefather Outis" },
         { name: "［蜘蛛巢：環指 父輩］鴻璐 / The House of Spiders: Ring Nursefather Hong Lu" },
-        { name: "［蜘蛛巢之刃] 良秀 / Blade of the House of Spiders Ryōshū" },
+        { name: "［蜘蛛巢之刃］良秀 / Blade of the House of Spiders Ryōshū" },
         { name: "［環指 野獸派 講解員］羅佳 / The Ring Fauvist Lecturer Rodion" },
         { name: "［環指 點描派 學生］奧提斯 / The Ring Pointillist Student Outis" },
         { name: "［環指 點描派 學生］李箱 / The Ring Pointillist Student Yi Sang" },
@@ -54,7 +54,7 @@ const identityRegistry = {
         { name: "［蜘蛛巢：指環 學徒］浮士德 / The House of Spiders: Ring Apprentice Faust" },
         { name: "［蜘蛛巢：中指 學徒］以實瑪利 / The House of Spiders: Middle Apprentice Ishmael" },
         { name: "［蜘蛛巢：小指 學徒］辛克萊 / The House of Spiders: Pinky Apprentice Sinclair" },
-        { name: " [蜘蛛巢：拇指 學徒］希斯克里夫 / The House of Spiders: The Thumb Apprentice Heathcliff" },
+        { name: "［蜘蛛巢：拇指 學徒］希斯克里夫 / The House of Spiders: The Thumb Apprentice Heathcliff" },
         { name: "［食指 傳令：【紙條】］浮士德 / The Index Messenger: Slip Faust" },
         { name: "［中指 幼妹］堂吉訶德 / The Middle Little Sister Don Quixote" },
         { name: "［中指 幼弟］辛克萊 / The Middle Little Brother Sinclair" },
@@ -204,7 +204,7 @@ const identityRegistry = {
         { name: "［腦業公司 E.G.O::提燈］堂吉訶德 / Lobotomy E.G.O::Lantern Don Quixote" },
         { name: "［多裂紋事務所收尾人］希斯克里夫 / MultiCrack Office Fixer Heathcliff" },
         { name: "［T公司 2級征收人員］羅佳 / T Corp. Class 2 Collection Staff Rodion" },
-        { name: "［Zwei協會西部3科］辛克萊 / Zwei Assoc. West Section 3 Sinclair" }, // 修正中文與代號名稱
+        { name: "［Zwei協會 西部3科］辛克萊 / Zwei Assoc. West Section 3 Sinclair" },
     ],
     '0': [
         { name: "［邊獄公司 罪人］李箱 / LCB Sinner Yi Sang" },
@@ -352,54 +352,75 @@ const identityRegistry = {
 const identityDetails = {
     '［漆黑噤默］羅蘭 / The Black Silence Roland': {
         skill1: { skillname: '杜蘭達爾 / Durandal', clashbase: 5, coins: 2, clashpower: 3, attack: 11, defense: 0 },
-        // 可以在這裡自由新增其他填寫好的數值
+        // 可以在這裡自由新增其他填寫好的數值（未填寫的技能，會自動採用 T() 預設值）
     },
 };
 
 // ─── Rate Up 對象（Pickup）────────────────────────────────────
+// 這裡的文字標題與 Registry 保持完全一致，以防止抽卡系統比對失敗。
 const upTargets = {
-    'Color Fixer': 
-      [
-      "[紫色眼淚］伊織 / The Purple Tear Iori",
-      "[蒼藍殘響]阿爾加利亞 / The Blue Reverberation Argalia",
-      ], 
-    '0000':    
-      [null],
-    'Egos':
-        [
-      "[HE] 莊嚴的哀歌 / Solemn Lament - 李箱",
+    'Color Fixer': [
+        "［紫色眼淚］伊織 / The Purple Tear Iori",
+        "［蒼藍殘響］阿爾加利亞 / The Blue Reverberation Argalia",
+    ], 
+    '0000': [null],
+    'Egos': [
+        "[HE] 莊嚴的哀歌 / Solemn Lament - 李箱",
     ],
-    '000':     
-      [
-       "[黎明事務所 代表］格里高爾 / Dawn Office Rep Gregor",
-       "[黎明事務所 收尾人] 浮士德 / Dawn Office Fixer Faust",
-       "[黎明事務所 幫手］辛克萊 / Dawn Office Fixer Sinclair"
-      ],
-    '00':      
-      [null],
-    '0':      
-      [null],
+    '000': [
+        "［黎明事務所 代表］格里高爾 / Dawn Office Rep Gregor",
+        "［黎明事務所 收尾人］浮士德 / Dawn Office Fixer Faust",
+        "［黎明事務所 幫手］辛克萊 / Dawn Office Fixer Sinclair"
+    ],
+    '00': [null],
+    '0': [null],
 };
+
 // ─── 自動建構抽卡快取池 ──────────────────────────────────────────
 const pool = {};
 for (const [rarity, arr] of Object.entries(identityRegistry)) {
     pool[rarity] = arr.map(obj => obj.name);
 }
 
-// ─── 查詢特定人格完整資料 (O(1) 核心優化) ───────────────────────────
+// ─── 查詢特定人格完整資料 (O(1) 核心優化 + 安全深層合併) ───────────────
 function getIdentityData(name) {
-    // 1. 先確認 Details 覆蓋區內有沒有填好的具體數值
-    if (identityDetails[name]) {
-        return { name, ...identityDetails[name] };
+    // 1. 先確認該角色是否存在於註冊表 (Registry) 中
+    let exists = false;
+    for (const arr of Object.values(identityRegistry)) {
+        if (arr.some(obj => obj.name === name)) {
+            exists = true;
+            break;
+        }
+    }
+    if (!exists) return null;
+
+    // 2. 建立完整的空模板基礎 (不污染原始 T 模板)
+    const base = { name, ...T() };
+
+    // 3. 取得 Details 覆蓋區內的使用者自訂數值
+    const details = identityDetails[name];
+
+    // 4. 進行深層合併 (Deep Merge)，避免欄位遺失
+    if (details) {
+        for (const key of Object.keys(details)) {
+            if (details[key] && typeof details[key] === 'object') {
+                if (Array.isArray(details[key])) {
+                    // 合併陣列格式 (例如 counter 欄位)
+                    base[key] = details[key].map((item, idx) => {
+                        const defaultItem = base[key] && base[key][idx] ? base[key][idx] : {};
+                        return { ...defaultItem, ...item };
+                    });
+                } else {
+                    // 合併物件格式 (例如 skill1、skill2、evade 欄位)
+                    base[key] = { ...base[key], ...details[key] };
+                }
+            } else {
+                base[key] = details[key];
+            }
+        }
     }
 
-    // 2. 如果沒有，動態去註冊表中尋找該人格是否存在
-    for (const arr of Object.values(identityRegistry)) {
-        const found = arr.find(obj => obj.name === name);
-        // 找到了就給予完整的動態空模板 T()，不重複佔用初始化記憶體
-        if (found) return { name, ...T() };
-    }
-    return null;
+    return base;
 }
 
 // 依稀有度取得隨機人格名稱
