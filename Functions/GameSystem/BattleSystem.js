@@ -151,7 +151,9 @@ function resolveBattleRoster(player) {
 function buildBattleEmbed(state, log = '') {
     const allyLines = state.ally.map(u => {
         const bar = buildHPBar(u.hp, u.maxHp);
-        return `${u.hp > 0 ? '🟢' : '💀'} **${u.name}** \`${bar}\` ${u.hp}/${u.maxHp} | ${formatStatuses(u.statuses)}`;
+        const selected = state.pendingSkills && state.pendingSkills[u.sinnerName] !== undefined;
+        const icon = u.hp <= 0 ? '💀' : selected ? '✅' : '🟢';
+        return `${icon} **${u.name}** \`${bar}\` ${u.hp}/${u.maxHp} | ${formatStatuses(u.statuses)}`;
     });
 
     const e = state.enemy;
@@ -168,7 +170,10 @@ function buildBattleEmbed(state, log = '') {
         );
 
     if (log) embed.addFields({ name: '📜 本回合記錄', value: log.slice(-900), inline: false });
-    embed.setFooter({ text: `第 ${state.turn} 回合 ｜ 請在 ${SKILL_TIMEOUT / 1000} 秒內選擇技能` });
+
+    const alive = state.ally.filter(u => u.hp > 0);
+    const selected = state.pendingSkills ? alive.filter(u => state.pendingSkills[u.sinnerName] !== undefined).length : 0;
+    embed.setFooter({ text: `第 ${state.turn} 回合 ｜ 已選技能 ${selected}/${alive.length} ｜ 剩餘 ${SKILL_TIMEOUT / 1000}s 自動執行` });
     return embed;
 }
 
@@ -199,32 +204,55 @@ function buildSkillRow(activeUnit, disabled = false) {
     return new ActionRowBuilder().addComponents(buttons);
 }
 
-function promptBattleHelp(message) {
-    return message.reply({
-        embeds: [new EmbedBuilder()
-            .setTitle('⚔️ 戰鬥難度選擇')
-            .setColor(0x5865f2)
-            .setDescription(
-                '用法：\n' +
-                '`!battle normal` — 一般戰鬥\n' +
-                '`!battle elite` — 精英戰鬥\n' +
-                '`!battle boss` — BOSS 戰\n\n' +
-                '如果你直接呼叫 `startBattle()`，預設也是 `normal`。'
-            )
-            .setTimestamp()]
-    });
-}
-
+// ─── 難度選擇 UI（!battle 無參數時顯示）───────────────────────
 async function handleBattle(client, message) {
     const args = message.content.trim().split(/\s+/);
     const tier = (args[1] || '').toLowerCase();
 
-    if (!tier) return promptBattleHelp(message);
-    if (!DIFFICULTY[tier]) {
-        return message.reply('❌ 難度錯誤。可用：`normal`、`elite`、`boss`');
+    if (DIFFICULTY[tier]) {
+        return startBattle(client, message, tier);
     }
 
-    return startBattle(client, message, tier);
+    // 顯示按鈕選擇難度
+    const embed = new EmbedBuilder()
+        .setTitle('⚔️ 出戰 — 選擇難度')
+        .setColor(0x5865f2)
+        .setDescription(
+            '「主管，敵人的強度各有不同。請做好準備。」\n\n' +
+            '**⚔️ 一般** — 基礎難度 ｜ 獎勵 🧵×5\n' +
+            '**💀 精英** — 強化敵人 ｜ 獎勵 🧵×15\n' +
+            '**👹 BOSS** — 最高難度 ｜ 獎勵 🧵×40'
+        )
+        .setTimestamp();
+
+    const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('battle_normal').setLabel('⚔️ 一般').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('battle_elite').setLabel('💀 精英').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId('battle_boss').setLabel('👹 BOSS').setStyle(ButtonStyle.Danger),
+    );
+
+    const reply = await message.reply({ embeds: [embed], components: [row] });
+    const col = reply.createMessageComponentCollector({
+        filter: i => {
+            if (i.user.id !== message.author.id) {
+                i.reply({ content: '❌ 這不是你的戰鬥指令。', ephemeral: true });
+                return false;
+            }
+            return true;
+        },
+        time: 30_000,
+        max: 1,
+    });
+
+    col.on('collect', async i => {
+        const selectedTier = i.customId.replace('battle_', '');
+        await i.update({ embeds: [embed.setDescription(`已選擇：**${DIFFICULTY[selectedTier]?.label}** 難度，準備戰鬥...`)], components: [] }).catch(() => {});
+        return startBattle(client, message, selectedTier);
+    });
+
+    col.on('end', collected => {
+        if (!collected.size) reply.edit({ components: [] }).catch(() => {});
+    });
 }
 
 // ─── 主戰鬥入口 ───────────────────────────────────────────────
@@ -234,7 +262,7 @@ async function startBattle(client, message, tier = 'normal') {
     const allies = resolveBattleRoster(player);
 
     if (!allies.length) {
-        return message.reply('❌ 隊伍是空的！先用 `!party` 組建隊伍，或在 `!pack` 編成出戰人格。');
+        return message.reply('❌ 隊伍是空的！先用 `!party` 組建隊伍，或在 `!pack` → **⚔️ 出擊編成** 設定人格。');
     }
 
     let enemy = randomEnemy(tier);
@@ -247,6 +275,8 @@ async function startBattle(client, message, tier = 'normal') {
         statuses: {},
     };
 
+    const pendingSkills = {}; // sinnerName -> skillIndex | 'defend'
+
     const state = {
         userId: message.author.id,
         turn: 1,
@@ -254,14 +284,17 @@ async function startBattle(client, message, tier = 'normal') {
         difficultyLabel: diff.label,
         ally: allies,
         enemy,
+        pendingSkills,
     };
 
+    // 第一位存活的罪人需要先選技能
+    const firstAlive = state.ally.find(u => u.hp > 0);
+
     const battleMsg = await message.reply({
-        embeds: [buildBattleEmbed(state, `🔔 **戰鬥開始！** 遭遇 **${enemy.name}**`)],
-        components: [buildSkillRow(state.ally.find(u => u.hp > 0))].filter(Boolean),
+        embeds: [buildBattleEmbed(state, `🔔 **戰鬥開始！** 遭遇 **${enemy.name}**\n⏳ 請為 **${firstAlive?.name || '罪人'}** 選擇技能...`)],
+        components: [buildSkillRow(firstAlive)].filter(Boolean),
     });
 
-    const pendingSkills = {}; // sinnerName -> skillIndex | 'defend'
     let turnTimer;
     let finished = false;
 
@@ -405,7 +438,13 @@ async function startBattle(client, message, tier = 'normal') {
     }
 
     const collector = battleMsg.createMessageComponentCollector({
-        filter: i => i.user.id === message.author.id && i.customId.startsWith('bs_'),
+        filter: i => {
+            if (i.user.id !== message.author.id) {
+                i.reply({ content: '❌ 這不是你的戰鬥。', ephemeral: true });
+                return false;
+            }
+            return i.customId.startsWith('bs_');
+        },
         time: 10 * 60_000,
     });
 
