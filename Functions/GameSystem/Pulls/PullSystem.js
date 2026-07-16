@@ -1,195 +1,315 @@
-'use strict';
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
 
-const { EmbedBuilder } = require('discord.js');
-const identitiesData = require('./identitiesData.js');
-const { getOrCreatePlayer, savePlayerData, loadUserInventory, saveUserInventory } = require('../PacksAndData.js');
+const STORAGE_CHANNEL_ID = '1510947300212477972';
 
-const PULL_COST_PER_DRAW = 0;
+// ── 🎲 1. 串接抽卡系統（高相容性，防大小寫地雷） ──────────────────────
+let PullSystem;
+try {
+    PullSystem = require('./Pulls/PullSystem.js');
+} catch (e) {
+    try {
+        PullSystem = require('./pulls/PullSystem.js');
+    } catch (err) {
+        PullSystem = { POOLS: {}, upTargets: [] };
+    }
+}
 
-// ─── 獨立機率設定（非累計機率，直覺且極易調整） ──────────────────────────
-// 所有機率加起來不超過 100%，剩餘的機率會自動分配給 1星(0) 
-const PROBABILITIES = {
-    SPECIAL: 0.3,       // Special 隱藏池 (0.3%)
-    COLOR_FIXER: 0.0013,   // 特色收尾人 (0.0013%)
-    S4: 0.7,            // 0000 稀有度 (0.7%)
-    EGOS: 1.5,          // E.G.O (1.5%)
-    S3: 2.9,            // 000 (3.0%)
-    S2: 15.0,           // 00  (15.0%)
-    // S1 (0): 剩餘的 79.6%
+// ── 📊 2. 定義各階級基礎機率（已更新為你的最新機率） ──────────────────
+const TIER_RATES = {
+    colorFixer: 0.0000013,  // 0.00013% (色彩收尾人)
+    special: 0.00015,       // 0.015% (特殊池)
+    tier0000: 0.005,        // 0.5% (👑 0000)
+    tier000: 0.029,         // 2.9% (🌟 000 三星人格)
+    tier00: 0.128,          // 12.8% (⭐ 00 二星人格)
+    tier0: 0.803,           // 80.3% (⚪ 0 初始一星)
+    egos: 0.015             // 1.5% (🔮 E.G.O)
 };
 
-function pickRandom(arr) {
-    if (!Array.isArray(arr) || arr.length === 0) return null;
-    return arr[Math.floor(Math.random() * arr.length)];
+const RATE_UP_FRACTION = 0.5; // UP 佔階級機率的 50%
+
+const TIER_ORDER = ['colorFixer', 'special', 'tier0000', 'tier000', 'tier00', 'tier0', 'egos'];
+const TIER_NAMES = {
+    colorFixer: '🔴 Color Fixer (色彩收尾人)',
+    special: '✨ Special (特殊池)',
+    tier0000: '👑 0000',
+    tier000: '🌟 000 (三星人格)',
+    tier00: '⭐ 00 (二星人格)',
+    tier0: '⚪ 0 (初始一星)',
+    egos: '🔮 E.G.O'
+};
+
+function getPoolTier(pools, tierKey) {
+    if (!pools) return [];
+    if (pools[tierKey]) return pools[tierKey];
+    const lowerKey = tierKey.toLowerCase();
+    for (const key of Object.keys(pools)) {
+        if (key.toLowerCase() === lowerKey) return pools[key];
+    }
+    if (lowerKey === 'egos' && (pools['ego'] || pools['Egos'] || pools['EGO'])) {
+        return pools['ego'] || pools['Egos'] || pools['EGO'];
+    }
+    return [];
 }
 
-// ─── 擴充獲取所有池子的資料 ───────────────────────────
-function getPools() {
-    return {
-        poolSpecial: Array.isArray(identitiesData?.pool?.['Special']) ? identitiesData.pool['Special'] : [],
-        poolColorFixer: Array.isArray(identitiesData?.pool?.['Color Fixer']) ? identitiesData.pool['Color Fixer'] : [],
-        pool0000: Array.isArray(identitiesData?.pool?.['0000']) ? identitiesData.pool['0000'] : [],
-        poolEgos: Array.isArray(identitiesData?.pool?.['Egos']) ? identitiesData.pool['Egos'] : [],
-        pool000: Array.isArray(identitiesData?.pool?.['000']) ? identitiesData.pool['000'] : [],
-        pool00: Array.isArray(identitiesData?.pool?.['00']) ? identitiesData.pool['00'] : [],
-        pool0: Array.isArray(identitiesData?.pool?.['0']) ? identitiesData.pool['0'] : [],
-        
-        // Rate Up 判定 (過濾掉 null)
-        rateUpColorFixer: Array.isArray(identitiesData?.upTargets?.['Color Fixer']) ? identitiesData.upTargets['Color Fixer'].filter(Boolean) : [],
-        rateUp000: Array.isArray(identitiesData?.upTargets?.['000']) ? identitiesData.upTargets['000'].filter(Boolean) : [],
-        rateUpEgos: Array.isArray(identitiesData?.upTargets?.['Egos']) ? identitiesData.upTargets['Egos'].filter(Boolean) : [],
-    };
-}
-
-function drawOnce() {
-    const r = Math.random() * 100;
-    const pools = getPools();
-    let cumulative = 0;
-
-    // 1. Special 隱藏池
-    cumulative += PROBABILITIES.SPECIAL;
-    if (r < cumulative && pools.poolSpecial.length) {
-        const item = pickRandom(pools.poolSpecial);
-        return { item, tier: 'special', display: `🌀 ［SPECIAL］${item}` };
-    }
-
-    // 2. Color Fixer 特色收尾人 (支援 Rate Up 判定)
-    cumulative += PROBABILITIES.COLOR_FIXER;
-    if (r < cumulative && pools.poolColorFixer.length) {
-        if (pools.rateUpColorFixer.length && Math.random() < 0.5) {
-            const item = pickRandom(pools.rateUpColorFixer);
-            return { item, tier: 'color_fixer_up', display: `🔴 🌟 [Color Fixer Rate Up] ${item}` };
-        }
-        const item = pickRandom(pools.poolColorFixer);
-        return { item, tier: 'color_fixer', display: `🔴 🟥 ${item}` };
-    }
-
-    // 3. 0000 稀有度
-    cumulative += PROBABILITIES.S4;
-    if (r < cumulative && pools.pool0000.length) {
-        const item = pickRandom(pools.pool0000);
-        return { item, tier: 's4', display: `🏮 ★★★★ ${item}` };
-    }
-
-    // 4. EGOS (支援 Rate Up 判定)
-    cumulative += PROBABILITIES.EGOS;
-    if (r < cumulative && pools.poolEgos.length) {
-        if (pools.rateUpEgos.length && Math.random() < 0.5) {
-            const item = pickRandom(pools.rateUpEgos);
-            return { item, tier: 'egos_up', display: `🔮 🌟 [E.G.O Rate Up] ${item}` };
-        }
-        const item = pickRandom(pools.poolEgos);
-        return { item, tier: 'egos', display: `🔮 ${item}` };
-    }
-
-    // 5. S3 (支援 Rate Up 判定)
-    cumulative += PROBABILITIES.S3;
-    if (r < cumulative && pools.pool000.length) {
-        if (pools.rateUp000.length && Math.random() < 0.5) {
-            const item = pickRandom(pools.rateUp000);
-            return { item, tier: 's3_up', display: `🌟 ✨ [★★★ Rate Up] ${item}` };
-        }
-        const item = pickRandom(pools.pool000);
-        return { item, tier: 's3', display: `✨ ★★★ ${item}` };
-    }
-
-    // 6. S2
-    cumulative += PROBABILITIES.S2;
-    if (r < cumulative && pools.pool00.length) {
-        const item = pickRandom(pools.pool00);
-        return { item, tier: 's2', display: `⭐ ★★ ${item}` };
-    }
-
-    // 7. S1 (其餘約 79.6% 比例)
-    if (pools.pool0.length) {
-        const item = pickRandom(pools.pool0);
-        return { item, tier: 's1', display: `▫️ ★ ${item}` };
-    }
-
-    // 兜底防錯機制
-    const fallback = pools.pool000[0] || pools.pool00[0] || pools.pool0[0] || null;
-    if (!fallback) {
-        return { item: null, tier: 'empty', display: '⚠️ 沒有可抽取的資料' };
-    }
-    return { item: fallback, tier: 'fallback', display: `▫️ ${fallback}` };
-}
-
-function tierEmoji(tier) {
-    if (tier === 'special') return '🌀';
-    if (tier === 'color_fixer' || tier === 'color_fixer_up') return '🔴';
-    if (tier === 's4') return '🏮';
-    if (tier === 'egos' || tier === 'egos_up') return '🔮';
-    if (tier === 's3_up') return '🌟';
-    if (tier === 's3') return '✨';
-    if (tier === 's2') return '⭐';
-    if (tier === 'empty') return '⚠️';
-    return '▫️';
-}
-
-async function executePull(client, message, pullCount = 1) {
-    const userId = message.author.id;
-    const count = Math.max(1, Math.min(Number(pullCount) || 1, 10));
-    const cost = PULL_COST_PER_DRAW * count;
-
-    const player = getOrCreatePlayer(client, userId, message.author.username);
-    player.lunacy ??= 0;
-
-    if (player.lunacy < cost) {
-        return message.reply(`❌ 狂氣不足！\n本次需要 **${cost}** lunacy，你目前只有 **${player.lunacy}**。`);
-    }
-
-    player.lunacy -= cost;
-    savePlayerData(client, userId, player);
-
-    await message.channel.sendTyping().catch(() => {});
-
-    const draws = Array.from({ length: count }, () => drawOnce());
-    const resultLines = draws.map((d, i) => `${tierEmoji(d.tier)} \`${i + 1}.\` ${d.display}`);
-
-    // 統計抽卡結果
-    const specialCount = draws.filter(d => d.tier === 'special').length;
-    const colorFixerCount = draws.filter(d => d.tier === 'color_fixer' || d.tier === 'color_fixer_up').length;
-    const s4Count = draws.filter(d => d.tier === 's4').length;
-    const egoCount = draws.filter(d => d.tier === 'egos' || d.tier === 'egos_up').length;
-    const s3Count = draws.filter(d => d.tier === 's3' || d.tier === 's3_up').length;
-
-    const summaryParts = [];
-    if (specialCount) summaryParts.push(`🌀 SPECIAL ×${specialCount}`);
-    if (colorFixerCount) summaryParts.push(`🔴 Color Fixer ×${colorFixerCount}`);
-    if (s4Count) summaryParts.push(`🏮 ★★★★ ×${s4Count}`);
-    if (egoCount) summaryParts.push(`🔮 E.G.O ×${egoCount}`);
-    if (s3Count) summaryParts.push(`✨ ★★★ ×${s3Count}`);
-
-    // 根據最高稀有度決定 Embed 顏色
-    let embedColor = 0xeccc68;
-    if (specialCount) embedColor = 0x1abc9c;       // 青色
-    else if (colorFixerCount) embedColor = 0xff7675; // 亮紅
-    else if (s4Count) embedColor = 0xd63031;         // 深紅
-    else if (egoCount) embedColor = 0xa55eea;        // 紫色
-    else if (s3Count) embedColor = 0xffd166;         // 金黃
-
-    const pullEmbed = new EmbedBuilder()
-        .setAuthor({ name: message.author.username, iconURL: message.author.displayAvatarURL() })
-        .setTitle(count === 1 ? '🚂 腦葉物資梅菲斯特號 — 單抽報告' : '🚂 腦葉物資梅菲斯特號 — 十連報告')
-        .setColor(embedColor)
-        .setDescription(resultLines.join('\n'))
-        .setFooter({
-            text: summaryParts.length
-                ? `✨ 本次高稀有：${summaryParts.join('、')} ｜ 消耗 ${cost} lunacy`
-                : `「每一次提取，都是向平行世界借調可能性。」｜ 消耗 ${cost} lunacy`,
-        })
-        .setTimestamp();
-
-    const newItems = draws.map(d => d.item).filter(Boolean);
-
+// ── 📥 3. 雲端資料庫存取（保留你原有的格式與優化清理） ─────────────────
+async function loadUserInventory(client, userId) {
     try {
-        const inv = loadUserInventory(client, userId) || [];
-        saveUserInventory(client, userId, [...inv, ...newItems]);
-    } catch (err) {
-        console.error('背包儲存失敗:', err.message);
+        const channel = await client.channels.fetch(STORAGE_CHANNEL_ID);
+        const messages = await channel.messages.fetch({ limit: 100 });
+        const targetMsg = messages.find(m => m.content.startsWith(`📥 DATA_SAVE || ${userId} ||`));
+        if (targetMsg) {
+            const parts = targetMsg.content.split(' || ');
+            if (parts[2]) {
+                return JSON.parse(parts[2]);
+            }
+        }
+    } catch (e) {
+        console.error("Error loading inventory:", e);
     }
-
-    return message.reply({ embeds: [pullEmbed] });
+    return [];
 }
 
-module.exports = { executePull };
+async function saveUserInventory(client, userId, inventory) {
+    try {
+        const channel = await client.channels.fetch(STORAGE_CHANNEL_ID);
+        const messages = await channel.messages.fetch({ limit: 100 });
+        const oldMessages = messages.filter(m => m.content.startsWith(`📥 DATA_SAVE || ${userId} ||`));
+        for (const msg of oldMessages.values()) {
+            await msg.delete().catch(() => {});
+        }
+        await channel.send(`📥 DATA_SAVE || ${userId} || ${JSON.stringify(inventory)}`);
+    } catch (e) {
+        console.error("Error saving inventory:", e);
+    }
+}
+
+// ── 🎒 4. 背包查詢系統（防溢出分頁版） ────────────────────────────────
+async function handleInventory(client, message) {
+    try {
+        const userId = message.author.id;
+        const rawInventory = await loadUserInventory(client, userId);
+
+        if (!rawInventory || rawInventory.length === 0) {
+            return message.reply('🎒 你的背包空空如也... 快去使用 `!pull` 進行提取吧！');
+        }
+
+        // 統計數量並分類
+        const counts = rawInventory.reduce((acc, item) => {
+            acc[item] = (acc[item] || 0) + 1;
+            return acc;
+        }, {});
+
+        const pools = PullSystem.POOLS || PullSystem.pools || {};
+        const lines = [];
+
+        const categorized = {};
+        TIER_ORDER.forEach(t => categorized[t] = []);
+        const uncategorized = [];
+
+        Object.entries(counts).forEach(([itemName, count]) => {
+            let foundTier = null;
+            for (const tier of TIER_ORDER) {
+                const itemsInTier = getPoolTier(pools, tier);
+                if (itemsInTier.includes(itemName)) {
+                    foundTier = tier;
+                    break;
+                }
+            }
+            if (foundTier) {
+                categorized[foundTier].push(`• **${itemName}** x${count}`);
+            } else {
+                uncategorized.push(`• **${itemName}** x${count}`);
+            }
+        });
+
+        TIER_ORDER.forEach(tier => {
+            const list = categorized[tier];
+            if (list && list.length > 0) {
+                lines.push(`\n**${TIER_NAMES[tier]}** (${list.length} 件)`);
+                lines.push(...list);
+            }
+        });
+
+        if (uncategorized.length > 0) {
+            lines.push(`\n**📦 其他物資** (${uncategorized.length} 件)`);
+            lines.push(...uncategorized);
+        }
+
+        const PAGES = [];
+        const LINES_PER_PAGE = 12;
+        for (let i = 0; i < lines.length; i += LINES_PER_PAGE) {
+            PAGES.push(lines.slice(i, i + LINES_PER_PAGE).join('\n'));
+        }
+
+        await createPagination(
+            message, 
+            PAGES, 
+            `🎒 ${message.author.username} 的個人背包`, 
+            `已解鎖：${Object.keys(counts).length} 種物資`
+        );
+
+    } catch (error) {
+        console.error('Inventory Command Error:', error);
+        message.reply('❌ 讀取背包時發生錯誤，請稍後再試。');
+    }
+}
+
+// ── 📋 5. 機率清單系統（防溢出分頁版） ────────────────────────────────
+async function handleList(client, message) {
+    try {
+        const pools = PullSystem.POOLS || PullSystem.pools || {};
+        const upTargets = PullSystem.upTargets || PullSystem.rateUpIds || PullSystem.targetIdentities || [];
+        
+        const ratesMap = new Map();
+        const lines = [];
+
+        for (const tier of TIER_ORDER) {
+            const items = getPoolTier(pools, tier);
+            const totalTierRate = TIER_RATES[tier] || 0;
+            if (!items || items.length === 0 || totalTierRate === 0) continue;
+
+            const tierUpTargets = items.filter(item => upTargets.includes(item));
+            const numUp = tierUpTargets.length;
+            const numNormal = items.length - numUp;
+
+            if (numUp > 0) {
+                const upShare = totalTierRate * RATE_UP_FRACTION;
+                const normalShare = totalTierRate * (1 - RATE_UP_FRACTION);
+
+                const upRatePerItem = upShare / numUp;
+                const normalRatePerItem = numNormal > 0 ? (normalShare / numNormal) : 0;
+
+                items.forEach(item => {
+                    const isUp = upTargets.includes(item);
+                    ratesMap.set(item, {
+                        rate: isUp ? upRatePerItem : normalRatePerItem,
+                        isUp: isUp,
+                        tier: tier
+                    });
+                });
+            } else {
+                const ratePerItem = totalTierRate / items.length;
+                items.forEach(item => {
+                    ratesMap.set(item, {
+                        rate: ratePerItem,
+                        isUp: false,
+                        tier: tier
+                    });
+                });
+            }
+        }
+
+        TIER_ORDER.forEach(tier => {
+            const items = getPoolTier(pools, tier);
+            if (!items || items.length === 0) return;
+
+            lines.push(`\n**${TIER_NAMES[tier]}**`);
+            items.forEach(item => {
+                const data = ratesMap.get(item);
+                if (!data) return;
+                
+                // 動態計算極低機率時，使用 toFixed 自動調整精度，防出現 0.0000%
+                let decimalPlaces = 4;
+                if (data.rate < 0.0001) decimalPlaces = 6;
+                if (data.rate < 0.00001) decimalPlaces = 8;
+                
+                const ratePercent = (data.rate * 100).toFixed(decimalPlaces) + '%';
+
+                if (data.isUp) {
+                    lines.push(`> 🔺 **${item}** — \`${ratePercent}\` **[UP!]**`);
+                } else {
+                    lines.push(`• ${item} — \`${ratePercent}\``);
+                }
+            });
+        });
+
+        const PAGES = [];
+        const LINES_PER_PAGE = 15;
+        for (let i = 0; i < lines.length; i += LINES_PER_PAGE) {
+            PAGES.push(lines.slice(i, i + LINES_PER_PAGE).join('\n'));
+        }
+
+        if (PAGES.length === 0) {
+            return message.reply('❌ 目前提取池內沒有任何角色資料。');
+        }
+
+        await createPagination(message, PAGES, '📋 補給提取物資與動態機率清單', `總計品項：${ratesMap.size} 個`);
+
+    } catch (error) {
+        console.error('List Command Error:', error);
+        message.reply('❌ 讀取清單時發生錯誤，請聯絡開發者。');
+    }
+}
+
+// ── 🔘 6. 共用分頁核心邏輯 ──────────────────────────────────────────
+async function createPagination(message, pages, title, footerSuffix) {
+    let currentPage = 0;
+
+    const getRow = (pageIdx, total) => {
+        return new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId('prev')
+                .setLabel('◀️ 上一頁')
+                .setStyle(ButtonStyle.Primary)
+                .setDisabled(pageIdx === 0),
+            new ButtonBuilder()
+                .setCustomId('next')
+                .setLabel('下一頁 ▶️')
+                .setStyle(ButtonStyle.Primary)
+                .setDisabled(pageIdx === total - 1)
+        );
+    };
+
+    const embed = new EmbedBuilder()
+        .setTitle(title)
+        .setColor(0x00b4d8)
+        .setDescription(pages[currentPage])
+        .setFooter({ text: `第 ${currentPage + 1} / ${pages.length} 頁 ｜ ${footerSuffix}` });
+
+    const reply = await message.reply({
+        embeds: [embed],
+        components: pages.length > 1 ? [getRow(currentPage, pages.length)] : []
+    });
+
+    if (pages.length <= 1) return;
+
+    const collector = reply.createMessageComponentCollector({
+        componentType: ComponentType.Button,
+        time: 120000
+    });
+
+    collector.on('collect', async (interaction) => {
+        if (interaction.user.id !== message.author.id) {
+            return interaction.reply({ content: '❌ 這不是你的介面喔！', ephemeral: true });
+        }
+
+        if (interaction.customId === 'prev') {
+            currentPage--;
+        } else if (interaction.customId === 'next') {
+            currentPage++;
+        }
+
+        embed.setDescription(pages[currentPage])
+             .setFooter({ text: `第 ${currentPage + 1} / ${pages.length} 頁 ｜ ${footerSuffix}` });
+
+        await interaction.update({
+            embeds: [embed],
+            components: [getRow(currentPage, pages.length)]
+        });
+    });
+
+    collector.on('end', () => {
+        const disabledRow = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('prev').setLabel('◀️ 上一頁').setStyle(ButtonStyle.Primary).setDisabled(true),
+            new ButtonBuilder().setCustomId('next').setLabel('下一頁 ▶️').setStyle(ButtonStyle.Primary).setDisabled(true)
+        );
+        reply.edit({ components: [disabledRow] }).catch(() => {});
+    });
+}
+
+module.exports = { 
+    handleInventory, 
+    loadUserInventory, 
+    saveUserInventory, 
+    handleList 
+};
