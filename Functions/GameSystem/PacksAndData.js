@@ -30,9 +30,9 @@ let backupQueuedReason = 'save';
 const MAX_TXT_BYTES = 7_500_000; // 保守值，避免接近附件上限
 
 // ─── 稀有度設定 ───────────────────────────────────────────────
-const RARITY_ORDER  = ['0', '00', '000', '0000', 'Color Fixer', 'Special', 'Egos'];
-const RARITY_LABEL  = { '0':'★','00':'★★','000':'★★★','0000':'★★★★','Color Fixer':'👑CF','Special':'🌀SP','Egos':'🔮EGO' };
-const RARITY_COLOR  = { '0':0x57606f,'00':0x74b9ff,'000':0xffd166,'0000':0xff6b6b,'Color Fixer':0xffffff,'Special':0x2ed573,'Egos':0xa55eea };
+const RARITY_ORDER  = ['0','S1','00','S2','000','S3','0000','S4','Egos','EGOS','Special','Color Fixer','ABN_ZAYIN','ABN_TETH','ABN_HE','ABN_WAW','ABN_ALEPH','ABN_ANGELA'];
+const RARITY_LABEL  = { '0':'★','S1':'★','00':'★★','S2':'★★','000':'★★★','S3':'★★★','0000':'★★★★','S4':'★★★★','Color Fixer':'👑CF','Egos':'🔮EGO','EGOS':'🔮EGO','Special':'🌀SP','ABN_ZAYIN':'⚪異ZAYIN','ABN_TETH':'🟡異TETH','ABN_HE':'🟢異HE','ABN_WAW':'🔵異WAW','ABN_ALEPH':'🟣異ALEPH','ABN_ANGELA':'🕊️[LC]安潔菈' };
+const RARITY_COLOR  = { '0':0x57606f,'S1':0x57606f,'00':0x74b9ff,'S2':0x74b9ff,'000':0xffd166,'S3':0xffd166,'0000':0xff6b6b,'S4':0xff6b6b,'Color Fixer':0xffffff,'Egos':0xa55eea,'EGOS':0xa55eea,'Special':0x2ed573,'ABN_ZAYIN':0xbdc3c7,'ABN_TETH':0xf1c40f,'ABN_HE':0x2ecc71,'ABN_WAW':0x3498db,'ABN_ALEPH':0x9b59b6,'ABN_ANGELA':0xffffff };
 
 // ─── 等級費用表 ───────────────────────────────────────────────
 // Lv 1-20: 碎片 lv×5
@@ -67,8 +67,13 @@ function findRarity(name) {
 // \uFF09 = ） fullwidth right parenthesis (used in （…）names)
 // \u005D = ] ASCII right square bracket
 function getShortName(name) {
-    const m = String(name || '').match(/[\uFF3D\uFF09\u005D](.+?)(?:\s*\/|$)/);
-    return m ? m[1].trim().slice(0, 14) : String(name || '').slice(0, 14);
+    const s = String(name || '');
+    const m = s.match(/[］）]]([^［（[/(（[]+?)(?:s*/|$)/);
+    if (m) return m[1].trim().slice(0, 12);
+    const lcb = s.match(/^LCBs+S+s+(.+?)(?:s*/|$)/);
+    if (lcb) return lcb[1].trim().slice(0, 12);
+    const slash = s.indexOf('/');
+    return (slash > 0 ? s.slice(0, slash) : s).trim().slice(0, 12);
 }
 
 function safeFileName(name) {
@@ -370,6 +375,11 @@ function getOrCreatePlayer(client, userId, username) {
     p.totalPulls     ??= 0;
     p.identities     ??= [];
     p.lunacy         ??= 1300;
+    if (!p.identities.length) {
+        const pool = getIdData().pool || {};
+        const base = (pool['0'] || pool['S1'] || []).slice(0, 12);
+        if (base.length) { p.identities = [...base]; if (!p.team?.length) p.team = [...base].slice(0, 4); }
+    }
 
     return p;
 }
