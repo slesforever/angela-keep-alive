@@ -68,10 +68,19 @@ function findRarity(name) {
 // \u005D = ] ASCII right square bracket
 function getShortName(name) {
     const s = String(name || '');
-    const m = s.match(/[］）]]([^［（[/(（[]+?)(?:s*/|$)/);
-    if (m) return m[1].trim().slice(0, 12);
+    // 提取括號「內容」作為人格識別名（如「食指-父輩」「巴士底工廠」）
+    const inner = s.match(/[［（（([](.+?)[］））)]]/);
+    if (inner) {
+        let content = inner[1].trim();
+        // 取冒號後部分（如「蜘蛛巢：食指-父輩」→「食指-父輩」）
+        const afterColon = content.match(/[：:]s*(.+)/);
+        if (afterColon) content = afterColon[1].trim();
+        return content.slice(0, 12);
+    }
+    // LCB 格式取最後詞（如「LCB 罪人 李箱」→「李箱」）
     const lcb = s.match(/^LCBs+S+s+(.+?)(?:s*/|$)/);
     if (lcb) return lcb[1].trim().slice(0, 12);
+    // fallback：斜線前的部分
     const slash = s.indexOf('/');
     return (slash > 0 ? s.slice(0, slash) : s).trim().slice(0, 12);
 }
