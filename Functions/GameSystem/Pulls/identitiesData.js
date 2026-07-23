@@ -344,6 +344,52 @@ const identityRegistry = {
         { name: "[WAW] 荊棘之園 / Garden of Thorns - 格里高爾" },
         { name: "[WAW] 無光榮輝 / Unbrilliant Glory - 格里高爾" },
     ],
+    // ─── 異想體 (Abnormality) 本體分類 — 真正來自 Lobotomy / Limbus 的實體 ─────
+    'ABN_ZAYIN': [
+        { name: "[O-03-03] 一罪與百善 / One Sin and Hundreds of Good Deeds" },
+        { name: "[O-01-12] 禿頭是… / You're Bald..." },
+        { name: "[O-00-00] 破碎的鏡子 / Broken Mirror" },
+        { name: "[O-04-14] 萬能幫助 / You Must Be Happy" },
+        { name: "[O-01-00] 陽 / Sun" },
+    ],
+    'ABN_TETH': [
+        { name: "[O-02-56] 懲戒鳥 / Punishment Bird" },
+        { name: "[F-01-02] 妖精祭司 / Fairy Festival" },
+        { name: "[T-06-27] 1.76 MHz" },
+        { name: "[O-04-08] 蜘蛛蜂巢 / Spider Bud" },
+        { name: "[O-01-55] 披著狼皮的羊 / Beauty and the Beast" },
+        { name: "[O-01-08] 破舊小熊 / Old Lady" },
+    ],
+    'ABN_HE': [
+        { name: "[O-05-30] 歌唱機 / Singing Machine" },
+        { name: "[F-01-37] 綠之黎明 / Dawn of Green" },
+        { name: "[O-01-45] 無面少女 / Wall-Gazer" },
+        { name: "[O-01-64] 夢中虛空 / Void Dream" },
+        { name: "[O-01-04] 無名胎兒 / Nameless Fetus" },
+        { name: "[O-01-38] 枯萎之樹 / Snow White's Apple" },
+    ],
+    'ABN_WAW': [
+        { name: "[O-02-62] 審判鳥 / Judgement Bird" },
+        { name: "[O-02-40] 大鳥 / Big Bird" },
+        { name: "[O-01-64] 陰陽 / Yin and Yang" },
+        { name: "[F-01-57] 絕望騎士 / Knight of Despair" },
+        { name: "[O-01-73] 貪婪之王 / King of Greed" },
+        { name: "[O-03-89] 夢幻櫻花 / Cherry Blossom" },
+        { name: "[T-01-31] 靜默的侍從 / Silent Orchestra" },
+    ],
+    'ABN_ALEPH': [
+        { name: "[O-06-20] 一無所有 / Nothing There" },
+        { name: "[O-01-45] 屍山 / Mountain of Smiling Bodies" },
+        { name: "[O-02-63] 終末鳥 / Apocalypse Bird" },
+        { name: "[O-02-101] 融化之愛 / Melting Love" },
+        { name: "[O-03-93] 蒼藍星 / Blue Star" },
+        { name: "[O-00-62] 審判者 / Censored" },
+    ],
+    'ABN_ANGELA': [
+        { name: "［LC 總指揮］安吉拉 / Angela" },
+        { name: "［Library of Ruina 館長］安吉拉 / Director Angela" },
+    ],
+};
 };
 
 // ─── 數值實體覆蓋區 ──────────────────────────────────────────
