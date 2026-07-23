@@ -1,98 +1,56 @@
-// Functions/GameSystem/BattleSystem.js 
-//update
+// Functions/GameSystem/BattleSystem.js
+// 戰鬥引擎 — 5難度+狂氣獎勵+敵人選擇UI+StatusEffects整合
 'use strict';
 
-// 戰鬥引擎（碰撞系統，偏 Limbus 風格）
-const { EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder } = require('discord.js');
+const { EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder, StringSelectMenuBuilder } = require('discord.js');
 const { SINNERS, SINNER_NAMES, getSkillList } = require('./Data/SinnersData.js');
-const { randomEnemy } = require('./Data/EnemyData.js');
+const { randomEnemy, getEnemiesForTier } = require('./Data/EnemyData.js');
 const { getOrCreatePlayer, savePlayerData } = require('./PacksAndData.js');
+const {
+    applyStatus, processTurnEnd, processOnHit,
+    formatStatuses, isBindRestricted, getKnockdownMultiplier,
+} = require('./Data/StatusEffects.js');
 
 const SKILL_TIMEOUT = 45_000;
-
 const TYPE_EMOJI = { 斬: '⚔️', 刺: '🗡️', 鈍: '🔨' };
-const STATUS_EMOJI = { 流血: '🩸', 燃燒: '🔥', 震顫: '🌀', 沉沒: '🌊', 破裂: '💥', 束縛: '⛓️', 倒地: '💫' };
 
+// ─── 5難度設定 ────────────────────────────────────────────────
 const DIFFICULTY = {
-    normal: { enemyHp: 1.00, enemyAtk: 1.00, reward: 1.00, label: '一般' },
-    elite:  { enemyHp: 1.30, enemyAtk: 1.15, reward: 1.60, label: '精英' },
-    boss:   { enemyHp: 1.80, enemyAtk: 1.30, reward: 2.40, label: 'BOSS' },
+    super_easy: { enemyHpMult: 0.55, enemyAtkMult: 0.70, lunacyReward: 20,  threadReward: 2,  label: '超簡單 🟢' },
+    easy:       { enemyHpMult: 0.75, enemyAtkMult: 0.85, lunacyReward: 40,  threadReward: 5,  label: '簡單 🟡' },
+    normal:     { enemyHpMult: 1.00, enemyAtkMult: 1.00, lunacyReward: 70,  threadReward: 10, label: '一般 🟠' },
+    hard:       { enemyHpMult: 1.40, enemyAtkMult: 1.20, lunacyReward: 130, threadReward: 20, label: '困難 🔴' },
+    insane:     { enemyHpMult: 2.00, enemyAtkMult: 1.50, lunacyReward: 200, threadReward: 35, label: '瘋狂 💀' },
+    // 相容舊版 MirrorDungeon 呼叫
+    normal_md:  { enemyHpMult: 1.00, enemyAtkMult: 1.00, lunacyReward: 0,   threadReward: 10, label: '一般' },
+    elite:      { enemyHpMult: 1.30, enemyAtkMult: 1.15, lunacyReward: 0,   threadReward: 20, label: '精英' },
+    boss:       { enemyHpMult: 1.80, enemyAtkMult: 1.30, lunacyReward: 0,   threadReward: 35, label: 'BOSS' },
 };
 
-const THREAD_REWARD = {
-    normal: 5,
-    elite: 15,
-    boss: 40,
-};
-
-function clamp(n, min, max) {
-    return Math.max(min, Math.min(max, n));
-}
+function clamp(n, min, max) { return Math.max(min, Math.min(max, n)); }
 
 function rollCoins(count, headChance = 0.5) {
     let heads = 0;
     const icons = [];
     for (let i = 0; i < count; i++) {
-        if (Math.random() < headChance) {
-            heads++;
-            icons.push('🟡');
-        } else {
-            icons.push('⚫');
-        }
+        if (Math.random() < headChance) { heads++; icons.push('🟡'); }
+        else icons.push('⚫');
     }
     return { heads, icons };
 }
 
 function resolveSkillPower(skill, identityLv = 1, headChance = 0.5) {
     const coins = Math.max(1, Number(skill?.coins || 1));
-    const base = Number(skill?.clashbase ?? skill?.base ?? 0);
-    const clashPower = Number(skill?.clashpower ?? skill?.coin ?? 0);
+    const base  = Number(skill?.clashbase ?? skill?.base ?? 0);
+    const cp    = Number(skill?.clashpower ?? skill?.coin ?? 0);
     const lvBonus = Math.floor((identityLv - 1) * 0.5);
     const { heads, icons } = rollCoins(coins, headChance);
-    return {
-        power: base + heads * clashPower + lvBonus,
-        icons,
-        heads,
-    };
-}
-
-function applyStatus(target, name, stacks) {
-    if (!target.statuses) target.statuses = {};
-    target.statuses[name] = (target.statuses[name] || 0) + stacks;
-}
-
-function processEoT(unit) {
-    const effects = [];
-    if (!unit.statuses) return '';
-
-    if ((unit.statuses['流血'] || 0) > 0) {
-        const dmg = Math.max(1, Math.floor(unit.statuses['流血'] * 1.5));
-        unit.hp = Math.max(0, unit.hp - dmg);
-        unit.statuses['流血'] = Math.max(0, unit.statuses['流血'] - 1);
-        effects.push(`🩸 流血 → **${unit.name}** 受到 ${dmg} 傷害`);
-    }
-
-    if ((unit.statuses['燃燒'] || 0) > 0) {
-        const dmg = Math.max(1, unit.statuses['燃燒'] * 2);
-        unit.hp = Math.max(0, unit.hp - dmg);
-        unit.statuses['燃燒'] = Math.max(0, unit.statuses['燃燒'] - 1);
-        effects.push(`🔥 燃燒 → **${unit.name}** 受到 ${dmg} 傷害`);
-    }
-
-    return effects.join('\n');
+    return { power: base + heads * cp + lvBonus, icons, heads };
 }
 
 function buildHPBar(cur, max, len = 10) {
-    const safeMax = Math.max(1, max);
-    const f = clamp(Math.round((cur / safeMax) * len), 0, len);
+    const f = clamp(Math.round((cur / Math.max(1, max)) * len), 0, len);
     return '█'.repeat(f) + '░'.repeat(len - f);
-}
-
-function formatStatuses(s = {}) {
-    return Object.entries(s)
-        .filter(([, v]) => v > 0)
-        .map(([k, v]) => `${STATUS_EMOJI[k] || ''}${k}×${v}`)
-        .join(' ') || '無';
 }
 
 function inferSinnerFromIdentity(identityName) {
@@ -106,85 +64,57 @@ function resolveBattleRoster(player) {
 
     if (!identities.length) {
         const party = Array.isArray(player.party) ? player.party : [];
-        identities = party
-            .map(sinnerName => {
-                if (!SINNERS[sinnerName]) return null;
-                return player.sinners?.[sinnerName]?.equippedIdentity || `LCB ${sinnerName}`;
-            })
-            .filter(Boolean);
+        identities = party.map(s => !SINNERS[s] ? null : player.sinners?.[s]?.equippedIdentity || `LCB ${s}`).filter(Boolean);
     }
-
     if (!identities.length) {
-        identities = SINNER_NAMES.slice(0, 4).map(sinnerName => `LCB ${sinnerName}`);
+        identities = SINNER_NAMES.slice(0, 4).map(s => `LCB ${s}`);
     }
 
     const allies = [];
     for (const identityName of identities) {
         const sinnerName = inferSinnerFromIdentity(identityName) || identityName.replace(/^LCB\s+/i, '');
-        if (!SINNERS[sinnerName]) continue;
-        if (used.has(sinnerName)) continue;
+        if (!SINNERS[sinnerName] || used.has(sinnerName)) continue;
         used.add(sinnerName);
 
         const s = SINNERS[sinnerName];
-        const lv = player.identityLevels?.[identityName] || player.identityLevels?.[`LCB ${sinnerName}`] || player.identityLevels?.[sinnerName] || 1;
+        const lv = player.identityLevels?.[identityName] || player.identityLevels?.[`LCB ${sinnerName}`] || 1;
         const uptie = player.sinners?.[sinnerName]?.uptie || 1;
         const maxHp = Math.max(1, s.hp + (lv - 1) * 3 + (uptie - 1) * 5);
-
-        allies.push({
-            sinnerName,
-            identityName,
-            name: identityName,
-            hp: maxHp,
-            maxHp,
-            defLevel: s.defLevel || 0,
-            statuses: {},
-            lv,
-            uptie,
-        });
-
+        allies.push({ sinnerName, identityName, name: identityName, hp: maxHp, maxHp, defLevel: s.defLevel || 0, statuses: {}, lv, uptie });
         if (allies.length >= 6) break;
     }
-
     return allies;
 }
 
 function buildBattleEmbed(state, log = '') {
     const allyLines = state.ally.map(u => {
-        const bar = buildHPBar(u.hp, u.maxHp);
-        const selected = state.pendingSkills && state.pendingSkills[u.sinnerName] !== undefined;
+        const selected = state.pendingSkills?.[u.sinnerName] !== undefined;
         const icon = u.hp <= 0 ? '💀' : selected ? '✅' : '🟢';
-        return `${icon} **${u.name}** \`${bar}\` ${u.hp}/${u.maxHp} | ${formatStatuses(u.statuses)}`;
+        return `${icon} **${u.name}** \`${buildHPBar(u.hp, u.maxHp)}\` ${u.hp}/${u.maxHp} | ${formatStatuses(u.statuses)}`;
     });
-
     const e = state.enemy;
+    const alive = state.ally.filter(u => u.hp > 0);
+    const selected = Object.keys(state.pendingSkills || {}).filter(k => alive.some(u => u.sinnerName === k)).length;
+
     const embed = new EmbedBuilder()
-        .setTitle(`⚔️ 戰鬥中 — 第 ${state.turn} 回合 ｜ ${state.difficultyLabel}`)
-        .setColor(e.hp <= 0 ? 0x2ed573 : state.ally.every(u => u.hp <= 0) ? 0xff4757 : 0x5865f2)
+        .setTitle(`⚔️ 第 ${state.turn} 回合 ｜ ${state.difficultyLabel}`)
+        .setColor(e.hp <= 0 ? 0x2ed573 : alive.length === 0 ? 0xff4757 : 0x5865f2)
         .addFields(
-            {
-                name: `👹 ${e.name} [${e.tier === 'boss' ? 'BOSS' : e.tier === 'elite' ? '精英' : '一般'}]`,
-                value: `\`${buildHPBar(e.hp, e.maxHp)}\` ${e.hp}/${e.maxHp} HP | ${formatStatuses(e.statuses)}`,
-                inline: false
-            },
+            { name: `${e.attributeEmoji || '👹'} ${e.name} [${e.attribute || ''}]`, value: `\`${buildHPBar(e.hp, e.maxHp)}\` ${e.hp}/${e.maxHp} HP | ${formatStatuses(e.statuses)}`, inline: false },
             { name: '👥 我方隊伍', value: allyLines.join('\n') || '（無）', inline: false }
         );
-
     if (log) embed.addFields({ name: '📜 本回合記錄', value: log.slice(-900), inline: false });
-
-    const alive = state.ally.filter(u => u.hp > 0);
-    const selected = state.pendingSkills ? alive.filter(u => state.pendingSkills[u.sinnerName] !== undefined).length : 0;
-    embed.setFooter({ text: `第 ${state.turn} 回合 ｜ 已選技能 ${selected}/${alive.length} ｜ 剩餘 ${SKILL_TIMEOUT / 1000}s 自動執行` });
+    embed.setFooter({ text: `第 ${state.turn} 回合 ｜ 已選 ${selected}/${alive.length} ｜ ${SKILL_TIMEOUT / 1000}s 後自動執行` });
     return embed;
 }
 
-function buildSkillRow(activeUnit, disabled = false) {
+function buildSkillRow(activeUnit, disabled = false, restricted = false) {
     if (!activeUnit || activeUnit.hp <= 0) return null;
-
     const sinner = SINNERS[activeUnit.sinnerName];
     if (!sinner) return null;
 
     const skills = getSkillList(sinner);
-    const buttons = skills.slice(0, 3).map((sk, i) =>
+    const buttons = skills.slice(0, restricted ? 2 : 3).map((sk, i) =>
         new ButtonBuilder()
             .setCustomId(`bs_${activeUnit.sinnerName}_${i}`)
             .setLabel(`${i + 1}.${sk.name}`.slice(0, 80))
@@ -192,121 +122,158 @@ function buildSkillRow(activeUnit, disabled = false) {
             .setStyle(ButtonStyle.Primary)
             .setDisabled(disabled)
     );
-
     buttons.push(
-        new ButtonBuilder()
-            .setCustomId(`bs_${activeUnit.sinnerName}_defend`)
-            .setLabel('🛡️ 防禦')
-            .setStyle(ButtonStyle.Secondary)
-            .setDisabled(disabled)
+        new ButtonBuilder().setCustomId(`bs_${activeUnit.sinnerName}_defend`)
+            .setLabel('🛡️ 防禦').setStyle(ButtonStyle.Secondary).setDisabled(disabled)
     );
-
     return new ActionRowBuilder().addComponents(buttons);
 }
 
-// ─── 難度選擇 UI（!battle 無參數時顯示）───────────────────────
+// ─── !battle 主入口：難度選擇 UI ─────────────────────────────
 async function handleBattle(client, message) {
     const args = message.content.trim().split(/\s+/);
     const tier = (args[1] || '').toLowerCase();
 
-    if (DIFFICULTY[tier]) {
-        return startBattle(client, message, tier);
+    if (DIFFICULTY[tier] && !['elite', 'boss', 'normal_md'].includes(tier)) {
+        return startBattleFlow(client, message, tier);
     }
 
-    // 顯示按鈕選擇難度
     const embed = new EmbedBuilder()
         .setTitle('⚔️ 出戰 — 選擇難度')
         .setColor(0x5865f2)
         .setDescription(
             '「主管，敵人的強度各有不同。請做好準備。」\n\n' +
-            '**⚔️ 一般** — 基礎難度 ｜ 獎勵 🧵×5\n' +
-            '**💀 精英** — 強化敵人 ｜ 獎勵 🧵×15\n' +
-            '**👹 BOSS** — 最高難度 ｜ 獎勵 🧵×40'
-        )
-        .setTimestamp();
+            '🟢 **超簡單** — 🌙 狂氣 ×20\n' +
+            '🟡 **簡單** — 🌙 狂氣 ×40\n' +
+            '🟠 **一般** — 🌙 狂氣 ×70\n' +
+            '🔴 **困難** — 🌙 狂氣 ×130\n' +
+            '💀 **瘋狂** — 🌙 狂氣 ×200'
+        ).setTimestamp();
 
     const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('battle_normal').setLabel('⚔️ 一般').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId('battle_elite').setLabel('💀 精英').setStyle(ButtonStyle.Danger),
-        new ButtonBuilder().setCustomId('battle_boss').setLabel('👹 BOSS').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId('bt_super_easy').setLabel('🟢 超簡單').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('bt_easy').setLabel('🟡 簡單').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('bt_normal').setLabel('🟠 一般').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId('bt_hard').setLabel('🔴 困難').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId('bt_insane').setLabel('💀 瘋狂').setStyle(ButtonStyle.Danger),
     );
 
     const reply = await message.reply({ embeds: [embed], components: [row] });
     const col = reply.createMessageComponentCollector({
         filter: i => {
-            if (i.user.id !== message.author.id) {
-                i.reply({ content: '❌ 這不是你的戰鬥指令。', ephemeral: true });
-                return false;
-            }
-            return true;
+            if (i.user.id !== message.author.id) { i.reply({ content: '❌ 這不是你的戰鬥指令。', ephemeral: true }); return false; }
+            return i.customId.startsWith('bt_');
         },
-        time: 30_000,
-        max: 1,
+        time: 30_000, max: 1,
     });
 
     col.on('collect', async i => {
-        const selectedTier = i.customId.replace('battle_', '');
-        await i.update({ embeds: [embed.setDescription(`已選擇：**${DIFFICULTY[selectedTier]?.label}** 難度，準備戰鬥...`)], components: [] }).catch(() => {});
-        return startBattle(client, message, selectedTier);
+        const selectedTier = i.customId.replace('bt_', '');
+        await i.update({ components: [] }).catch(() => {});
+        return startBattleFlow(client, message, selectedTier);
+    });
+    col.on('end', collected => { if (!collected.size) reply.edit({ components: [] }).catch(() => {}); });
+}
+
+// ─── 敵人選擇 UI ─────────────────────────────────────────────
+async function startBattleFlow(client, message, tier) {
+    const enemies = getEnemiesForTier(tier);
+    if (!enemies.length) return startBattle(client, message, tier);
+
+    // 最多顯示 5 個選項
+    const options = enemies.slice(0, 5).map(e => ({
+        label: `${e.attributeEmoji} ${e.name}`,
+        description: `${e.attribute} ｜ HP ${e.hp} ｜ 防禦等級 ${e.defLevel}`,
+        value: e.key,
+    }));
+
+    const menu = new StringSelectMenuBuilder()
+        .setCustomId('bt_enemy_select')
+        .setPlaceholder('🔍 選擇要挑戰的異想體...')
+        .addOptions(options);
+
+    const randomBtn = new ButtonBuilder()
+        .setCustomId('bt_enemy_random')
+        .setLabel('🎲 隨機敵人')
+        .setStyle(ButtonStyle.Secondary);
+
+    const diff = DIFFICULTY[tier] || DIFFICULTY.normal;
+    const reply = await message.reply({
+        embeds: [new EmbedBuilder()
+            .setTitle(`⚔️ ${diff.label} — 選擇異想體`)
+            .setColor(0x5865f2)
+            .setDescription(`難度：**${diff.label}**\n獎勵：🌙 狂氣 ×${diff.lunacyReward}\n\n請選擇你要挑戰的目標：`)
+            .setTimestamp()],
+        components: [new ActionRowBuilder().addComponents(menu), new ActionRowBuilder().addComponents(randomBtn)],
+    });
+
+    const col = reply.createMessageComponentCollector({
+        filter: i => {
+            if (i.user.id !== message.author.id) { i.reply({ content: '❌ 這不是你的戰鬥指令。', ephemeral: true }); return false; }
+            return true;
+        },
+        time: 30_000, max: 1,
+    });
+
+    col.on('collect', async i => {
+        await i.update({ components: [] }).catch(() => {});
+        if (i.customId === 'bt_enemy_random') {
+            return startBattle(client, message, tier);
+        }
+        // 指定敵人
+        const { ENEMIES } = require('./Data/EnemyData.js');
+        const enemyKey = i.values?.[0];
+        const enemyData = ENEMIES[enemyKey];
+        return startBattle(client, message, tier, enemyData ? JSON.parse(JSON.stringify(enemyData)) : null);
     });
 
     col.on('end', collected => {
-        if (!collected.size) reply.edit({ components: [] }).catch(() => {});
+        if (!collected.size) {
+            reply.edit({ components: [] }).catch(() => {});
+        }
     });
 }
 
-// ─── 主戰鬥入口 ───────────────────────────────────────────────
-async function startBattle(client, message, tier = 'normal') {
+// ─── 主戰鬥引擎 ─────────────────────────────────────────────
+async function startBattle(client, message, tier = 'normal', presetEnemy = null) {
     const diff = DIFFICULTY[tier] || DIFFICULTY.normal;
     const player = getOrCreatePlayer(client, message.author.id, message.author.username);
     const allies = resolveBattleRoster(player);
 
     if (!allies.length) {
-        return message.reply('❌ 隊伍是空的！先用 `!party` 組建隊伍，或在 `!pack` → **⚔️ 出擊編成** 設定人格。');
+        return message.reply('❌ 隊伍是空的！先在 `!pack` → **⚔️ 出擊編成** 選好人格。');
     }
 
-    let enemy = randomEnemy(tier);
+    let enemy = presetEnemy || randomEnemy(tier);
     enemy = {
         ...enemy,
         tier,
-        maxHp: Math.max(1, Math.floor((enemy.hp || 1) * diff.enemyHp)),
-        hp: Math.max(1, Math.floor((enemy.hp || 1) * diff.enemyHp)),
-        defLevel: Math.max(0, Math.floor((enemy.defLevel || 0) * diff.enemyAtk)),
+        attribute: enemy.attribute || '一般',
+        attributeEmoji: enemy.attributeEmoji || '👹',
+        maxHp: Math.max(1, Math.floor((enemy.hp || 1) * diff.enemyHpMult)),
+        hp:    Math.max(1, Math.floor((enemy.hp || 1) * diff.enemyHpMult)),
+        defLevel: Math.max(0, Math.floor((enemy.defLevel || 0) * diff.enemyAtkMult)),
         statuses: {},
     };
 
-    const pendingSkills = {}; // sinnerName -> skillIndex | 'defend'
-
+    const pendingSkills = {};
     const state = {
-        userId: message.author.id,
-        turn: 1,
-        difficulty: tier,
-        difficultyLabel: diff.label,
-        ally: allies,
-        enemy,
-        pendingSkills,
+        userId: message.author.id, turn: 1, difficulty: tier,
+        difficultyLabel: diff.label, ally: allies, enemy, pendingSkills,
     };
 
-    // 第一位存活的罪人需要先選技能
     const firstAlive = state.ally.find(u => u.hp > 0);
-
+    const startMsg = `🔔 **戰鬥開始！** 遭遇 **${enemy.name}** [${enemy.attribute}]\n⏳ 請為 **${firstAlive?.name || '罪人'}** 選擇技能...`;
     const battleMsg = await message.reply({
-        embeds: [buildBattleEmbed(state, `🔔 **戰鬥開始！** 遭遇 **${enemy.name}**\n⏳ 請為 **${firstAlive?.name || '罪人'}** 選擇技能...`)],
-        components: [buildSkillRow(firstAlive)].filter(Boolean),
+        embeds: [buildBattleEmbed(state, startMsg)],
+        components: [buildSkillRow(firstAlive, false, isBindRestricted(firstAlive))].filter(Boolean),
     });
 
-    let turnTimer;
-    let finished = false;
-
+    let turnTimer, finished = false;
     let resolvePromise;
-    const battlePromise = new Promise(resolve => {
-        resolvePromise = resolve;
-    });
+    const battlePromise = new Promise(r => { resolvePromise = r; });
 
-    function clearTurnTimer() {
-        if (turnTimer) clearTimeout(turnTimer);
-        turnTimer = null;
-    }
+    function clearTurnTimer() { if (turnTimer) clearTimeout(turnTimer); turnTimer = null; }
 
     async function endBattle(win, lastLog = '') {
         if (finished) return;
@@ -314,41 +281,36 @@ async function startBattle(client, message, tier = 'normal') {
         clearTurnTimer();
         collector.stop('end');
 
-        const player2 = getOrCreatePlayer(client, message.author.id, message.author.username);
-        player2.totalBattles = (player2.totalBattles || 0) + 1;
-
-        const threadRewardBase = THREAD_REWARD[tier] || 5;
-        const threadReward = Math.max(1, Math.floor(threadRewardBase * diff.reward));
+        const p2 = getOrCreatePlayer(client, message.author.id, message.author.username);
+        p2.totalBattles = (p2.totalBattles || 0) + 1;
 
         let desc = '';
         if (win) {
-            player2.totalWins = (player2.totalWins || 0) + 1;
-            player2.thread = (player2.thread || 0) + threadReward;
-            desc = `🎉 **勝利！** 獲得 🧵 紡錘 ×${threadReward}\n\n${lastLog.slice(-600)}`;
+            p2.totalWins = (p2.totalWins || 0) + 1;
+            p2.lunacy    = (p2.lunacy  || 0) + diff.lunacyReward;
+            p2.thread    = (p2.thread  || 0) + diff.threadReward;
+            desc = `🎉 **勝利！**\n🌙 狂氣 +${diff.lunacyReward} ｜ 🧵 紡錘 +${diff.threadReward}\n\n${lastLog.slice(-600)}`;
         } else {
-            desc = `💀 **失敗...** 全員倒下或超時，戰鬥結束。\n\n${lastLog.slice(-600)}`;
+            desc = `💀 **失敗...** 全員倒下或超時。\n\n${lastLog.slice(-600)}`;
         }
 
-        savePlayerData(client, message.author.id, player2);
+        savePlayerData(client, message.author.id, p2);
 
         await battleMsg.edit({
             embeds: [new EmbedBuilder()
                 .setTitle(win ? '🏆 戰鬥勝利' : '💀 戰鬥失敗')
                 .setColor(win ? 0x2ed573 : 0xff4757)
-                .setDescription(desc)
-                .setTimestamp()],
+                .setDescription(desc).setTimestamp()],
             components: [],
         }).catch(() => {});
 
-        resolvePromise({ win, threadReward: win ? threadReward : 0, tier, state });
+        resolvePromise({ win, lunacyReward: win ? diff.lunacyReward : 0, threadReward: win ? diff.threadReward : 0, tier, state });
     }
 
     async function processTurn() {
         if (finished) return;
-
         const logs = [];
 
-        // 按速度排序
         const order = state.ally
             .filter(u => u.hp > 0)
             .map(u => {
@@ -361,67 +323,96 @@ async function startBattle(client, message, tier = 'normal') {
 
         for (const u of order) {
             if (state.enemy.hp <= 0) break;
-
             const sinner = SINNERS[u.sinnerName];
             const skills = getSkillList(sinner);
             const skillIdx = pendingSkills[u.sinnerName];
             const isDefend = skillIdx === 'defend' || skillIdx === undefined;
-            const mySkill = isDefend ? null : skills[skillIdx];
 
-            if (isDefend) {
+            // 束縛：不能使用 S3（最後一個技能）
+            const restricted = isBindRestricted(u);
+            const maxSkillIdx = restricted ? skills.length - 2 : skills.length - 1;
+            const actualIdx = (typeof skillIdx === 'number') ? Math.min(skillIdx, maxSkillIdx) : skillIdx;
+            const mySkill = (actualIdx === 'defend' || actualIdx === undefined) ? null : skills[actualIdx];
+
+            if (!mySkill) {
                 const healed = Math.min(u.maxHp - u.hp, 5);
                 u.hp += healed;
-                logs.push(`🛡️ **${u.name}** 防禦${healed > 0 ? `，回復 ${healed} HP` : ''}`);
+                if (restricted) logs.push(`⛓️ **${u.name}** 被束縛，強制防禦${healed > 0 ? `（回復 ${healed} HP）` : ''}`);
+                else logs.push(`🛡️ **${u.name}** 防禦${healed > 0 ? `（回復 ${healed} HP）` : ''}`);
                 continue;
             }
 
             const eSkill = state.enemy.skills[Math.floor(Math.random() * state.enemy.skills.length)];
             const myRoll = resolveSkillPower(mySkill, u.lv, 0.5);
-            const eRoll = resolveSkillPower({
-                clashbase: eSkill.base ?? eSkill.clashbase ?? 0,
-                coins: eSkill.coins ?? 1,
-                clashpower: eSkill.coin ?? eSkill.clashpower ?? 0,
-            }, 1, 0.5);
-
+            const eRoll  = resolveSkillPower({ clashbase: eSkill.base ?? eSkill.clashbase ?? 0, coins: eSkill.coins ?? 1, clashpower: eSkill.coin ?? eSkill.clashpower ?? 0 }, 1, 0.5);
             const myWins = myRoll.power >= eRoll.power;
 
             logs.push(`${TYPE_EMOJI[mySkill.type] || ''}**${u.name}** ${mySkill.name} \`[${myRoll.power}]\` ${myRoll.icons.join('')}`);
             logs.push(`    ${myWins ? '◀勝▶' : '◀敗▶'} **${state.enemy.name}** ${eSkill.name} \`[${eRoll.power}]\` ${eRoll.icons.join('')}`);
 
             if (myWins) {
-                const dmg = Math.max(1, (mySkill.attack || 1) - Math.floor((state.enemy.defLevel || 0) * 0.2) + Math.floor(Math.random() * 3));
+                const mult = getKnockdownMultiplier(state.enemy);
+                const dmg = Math.max(1, Math.floor(((mySkill.attack || 1) - Math.floor((state.enemy.defLevel || 0) * 0.2) + Math.floor(Math.random() * 3)) * mult));
                 state.enemy.hp = Math.max(0, state.enemy.hp - dmg);
                 logs.push(`    💥 ${state.enemy.name} 受到 **${dmg}** 傷害`);
 
+                // 流血在被攻擊時觸發（敵人出血）
+                if ((state.enemy.statuses?.['流血'] || 0) > 0) {
+                    const bleedDmg = state.enemy.statuses['流血'];
+                    state.enemy.hp = Math.max(0, state.enemy.hp - bleedDmg);
+                    state.enemy.statuses['流血'] = Math.max(0, state.enemy.statuses['流血'] - 1);
+                    logs.push(`    🩸 出血 → ${state.enemy.name} 額外受到 ${bleedDmg} 傷害`);
+                }
+
                 if (mySkill.effect) {
                     applyStatus(state.enemy, mySkill.effect.name, mySkill.effect.stacks || 1);
-                    logs.push(`    ${STATUS_EMOJI[mySkill.effect.name] || ''} 附加 ${mySkill.effect.name}×${mySkill.effect.stacks || 1}`);
+                    logs.push(`    ➕ 附加 ${mySkill.effect.name}×${mySkill.effect.stacks || 1}`);
                 }
+
+                // 破裂觸發
+                const ruptureLogs = processOnHit(state.enemy, dmg);
+                ruptureLogs.forEach(l => logs.push(`    ${l}`));
             } else {
-                const dmg = Math.max(1, (eSkill.base ?? eSkill.clashbase ?? 1) - Math.floor((u.defLevel || 0) * 0.2) + Math.floor(Math.random() * 3));
+                const mult = getKnockdownMultiplier(u);
+                const dmg = Math.max(1, Math.floor(((eSkill.base ?? eSkill.clashbase ?? 1) - Math.floor((u.defLevel || 0) * 0.2) + Math.floor(Math.random() * 3)) * mult));
                 u.hp = Math.max(0, u.hp - dmg);
                 logs.push(`    💥 ${u.name} 受到 **${dmg}** 傷害`);
+
+                // 敵方技能效果
+                if (eSkill.effect) {
+                    applyStatus(u, eSkill.effect.name, eSkill.effect.stacks || 1);
+                    logs.push(`    ➕ ${u.name} 附加 ${eSkill.effect.name}×${eSkill.effect.stacks || 1}`);
+                }
             }
         }
 
+        // 敵人額外攻擊未選技能的隊員
         if (state.enemy.hp > 0) {
             const target = state.ally.filter(u => u.hp > 0 && pendingSkills[u.sinnerName] === undefined)[0]
-                || state.ally.filter(u => u.hp > 0)[0];
-
+                        || state.ally.filter(u => u.hp > 0)[0];
             if (target) {
                 const eSkill = state.enemy.skills[Math.floor(Math.random() * state.enemy.skills.length)];
-                const dmg = Math.max(1, (eSkill.base ?? eSkill.clashbase ?? 1) - Math.floor((target.defLevel || 0) * 0.2) + Math.floor(Math.random() * 3));
+                const mult = getKnockdownMultiplier(target);
+                const dmg = Math.max(1, Math.floor(((eSkill.base ?? eSkill.clashbase ?? 1) - Math.floor((target.defLevel || 0) * 0.2) + Math.floor(Math.random() * 3)) * mult));
                 target.hp = Math.max(0, target.hp - dmg);
                 logs.push(`👹 **${state.enemy.name}** 對 **${target.name}** 發動 ${eSkill.name}，造成 **${dmg}** 傷害`);
+                if (eSkill.effect) {
+                    applyStatus(target, eSkill.effect.name, eSkill.effect.stacks || 1);
+                    logs.push(`    ➕ 附加 ${eSkill.effect.name}×${eSkill.effect.stacks || 1}`);
+                }
             }
         }
 
+        // 回合結束：處理燃燒、震顫、沉沒等
         state.ally.forEach(u => {
-            const r = processEoT(u);
-            if (r) logs.push(r);
+            if (u.hp <= 0) return;
+            const r = processTurnEnd(u);
+            r.forEach(l => logs.push(l));
         });
-        const er = processEoT(state.enemy);
-        if (er) logs.push(er);
+        {
+            const r = processTurnEnd(state.enemy);
+            r.forEach(l => logs.push(l));
+        }
 
         Object.keys(pendingSkills).forEach(k => delete pendingSkills[k]);
         state.turn += 1;
@@ -433,16 +424,13 @@ async function startBattle(client, message, tier = 'normal') {
         const nextUnit = aliveAllies[0];
         await battleMsg.edit({
             embeds: [buildBattleEmbed(state, logs.join('\n'))],
-            components: [buildSkillRow(nextUnit)].filter(Boolean),
+            components: [buildSkillRow(nextUnit, false, isBindRestricted(nextUnit))].filter(Boolean),
         }).catch(() => {});
     }
 
     const collector = battleMsg.createMessageComponentCollector({
         filter: i => {
-            if (i.user.id !== message.author.id) {
-                i.reply({ content: '❌ 這不是你的戰鬥。', ephemeral: true });
-                return false;
-            }
+            if (i.user.id !== message.author.id) { i.reply({ content: '❌ 這不是你的戰鬥。', ephemeral: true }); return false; }
             return i.customId.startsWith('bs_');
         },
         time: 10 * 60_000,
@@ -453,7 +441,7 @@ async function startBattle(client, message, tier = 'normal') {
     collector.on('collect', async interaction => {
         const parts = interaction.customId.split('_');
         const sinnerName = parts[1];
-        const skillPart = parts[2];
+        const skillPart  = parts[2];
 
         if (!state.ally.some(u => u.sinnerName === sinnerName && u.hp > 0)) {
             return interaction.deferUpdate().catch(() => {});
@@ -473,11 +461,10 @@ async function startBattle(client, message, tier = 'normal') {
             }
         } else {
             const remaining = aliveAllies.filter(u => pendingSkills[u.sinnerName] === undefined);
-            const nextUnit = remaining[0];
-
+            const nextUnit  = remaining[0];
             await battleMsg.edit({
-                embeds: [buildBattleEmbed(state, `✅ **${sinnerName}** 已選擇技能（${aliveAllies.length - remaining.length}/${aliveAllies.length}）\n⏳ 請為 **${nextUnit?.name || '下一位罪人'}** 選擇技能...`)],
-                components: [buildSkillRow(nextUnit)].filter(Boolean),
+                embeds: [buildBattleEmbed(state, `✅ **${sinnerName}** 已選（${aliveAllies.length - remaining.length}/${aliveAllies.length}）\n⏳ 請為 **${nextUnit?.name || '下一位'}** 選擇技能...`)],
+                components: [buildSkillRow(nextUnit, false, isBindRestricted(nextUnit))].filter(Boolean),
             }).catch(() => {});
         }
     });
@@ -485,19 +472,12 @@ async function startBattle(client, message, tier = 'normal') {
     collector.on('end', async (_, reason) => {
         clearTurnTimer();
         if (!finished) {
-            if (reason !== 'end') {
-                await endBattle(false, '⏰ 戰鬥超時。').catch(() => {});
-            } else {
-                await battleMsg.edit({ components: [] }).catch(() => {});
-                resolvePromise({ win: false, threadReward: 0, tier, state });
-            }
+            if (reason !== 'end') await endBattle(false, '⏰ 戰鬥超時。').catch(() => {});
+            else { await battleMsg.edit({ components: [] }).catch(() => {}); resolvePromise({ win: false, lunacyReward: 0, threadReward: 0, tier, state }); }
         }
     });
 
     return battlePromise;
 }
 
-module.exports = {
-    handleBattle,
-    startBattle,
-};
+module.exports = { handleBattle, startBattle };
