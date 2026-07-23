@@ -29,8 +29,8 @@ const identityRegistry = {
     'Special': [
         { name: "[黃金迪］索爾茲 / Gold of The Dih Solzc" },
         { name: "[NULL] 這裡沒有任何東西 / theres nothing" },
-        { name: "[東方Project] 芙蘭朵露·斯卡蕾特 / Flandre Scarlet" },
-        { name: "[東方Project] 芙蘭朵露·蕾米莉亞 / Remilia Scarlet" },
+        { name: "[Touhou Project] 芙蘭朵露·斯卡蕾特 / Flandre Scarlet" },
+        { name: "[Touhou Project] 芙蘭朵露·蕾米莉亞 / Remilia Scarlet" },
         { name: "[赤月の破片] Fragment of Chaos." },
     ],
     '0000': [
