@@ -8,7 +8,7 @@ function isAdmin(message) {
     return message.member?.permissions.has(PermissionFlagsBits.Administrator);
 }
 
-async function handleGiveAway(_client, message) {
+async function handleGiveAway(client, message) {
     if (!isAdmin(message)) {
         return message.reply('「很抱歉主管，您當前的精神權限不足以發動全系統物資撥款。」');
     }
@@ -23,9 +23,9 @@ async function handleGiveAway(_client, message) {
         if (!target || isNaN(amount) || amount <= 0)
             return message.reply('❌ 格式：`!givelunacy @玩家 數量`');
 
-        const p = getOrCreatePlayer(null, target.id, target.username);
+        const p = getOrCreatePlayer(client, target.id, target.username);
         p.lunacy = (p.lunacy || 0) + amount;
-        savePlayerData(null, target.id, p);
+        savePlayerData(client, target.id, p);
 
         return message.reply({ embeds: [new EmbedBuilder()
             .setTitle('💎 單人狂氣撥款').setColor(0x00b4d8)
@@ -40,9 +40,9 @@ async function handleGiveAway(_client, message) {
         if (!target || isNaN(amount) || amount <= 0)
             return message.reply('❌ 格式：`!givefragments @玩家 數量`');
 
-        const p = getOrCreatePlayer(null, target.id, target.username);
+        const p = getOrCreatePlayer(client, target.id, target.username);
         p.fragments = (p.fragments || 0) + amount;
-        savePlayerData(null, target.id, p);
+        savePlayerData(client, target.id, p);
 
         return message.reply({ embeds: [new EmbedBuilder()
             .setTitle('📦 人格碎片撥款').setColor(0xffd166)
@@ -57,9 +57,9 @@ async function handleGiveAway(_client, message) {
         if (!target || isNaN(amount) || amount <= 0)
             return message.reply('❌ 格式：`!givescrolls @玩家 數量`');
 
-        const p = getOrCreatePlayer(null, target.id, target.username);
+        const p = getOrCreatePlayer(client, target.id, target.username);
         p.expScrolls = (p.expScrolls || 0) + amount;
-        savePlayerData(null, target.id, p);
+        savePlayerData(client, target.id, p);
 
         return message.reply({ embeds: [new EmbedBuilder()
             .setTitle('📜 經驗卷撥款').setColor(0xa55eea)
@@ -74,9 +74,9 @@ async function handleGiveAway(_client, message) {
         if (!target || isNaN(amount) || amount <= 0)
             return message.reply('❌ 格式：`!givethreads @玩家 數量`');
 
-        const p = getOrCreatePlayer(null, target.id, target.username);
+        const p = getOrCreatePlayer(client, target.id, target.username);
         p.thread = (p.thread || 0) + amount;
-        savePlayerData(null, target.id, p);
+        savePlayerData(client, target.id, p);
 
         return message.reply({ embeds: [new EmbedBuilder()
             .setTitle('🧵 紡錘撥款').setColor(0x2ed573)
