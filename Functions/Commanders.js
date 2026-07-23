@@ -1,6 +1,5 @@
 // Functions/Commanders.js
 const PacksAndData    = require('./GameSystem/PacksAndData.js');
-const Stages          = require('./GameSystem/Stages.js');
 const GiveAwaySystem  = require('./GameSystem/GiveAwaySystem.js');
 const MirrorDungeon   = require('./GameSystem/MirrorDungeon.js');
 const PullSystem      = require('./GameSystem/Pulls/PullSystem.js');
@@ -44,15 +43,12 @@ async function handleCommands(client, message) {
     // ── 戰鬥 ──────────────────────────────────────────────────
     if (raw === '!battle' || raw === '!戰鬥' || raw === '!fight') {
         if (isOnCooldown(uid, 'battle', 5000)) return message.react('⏳');
-        return BattleSystem.startBattle(client, message, 'normal');
+        return BattleSystem.handleBattle(client, message);
     }
-    if (raw === '!battle elite' || raw === '!精英戰') {
+    // 保留快捷難度指令
+    if (raw.startsWith('!battle ')) {
         if (isOnCooldown(uid, 'battle', 5000)) return message.react('⏳');
-        return BattleSystem.startBattle(client, message, 'elite');
-    }
-    if (raw === '!battle boss' || raw === '!boss戰') {
-        if (isOnCooldown(uid, 'battle', 5000)) return message.react('⏳');
-        return BattleSystem.startBattle(client, message, 'boss');
+        return BattleSystem.handleBattle(client, message);
     }
 
     // ── 隊伍 ──────────────────────────────────────────────────
@@ -80,13 +76,7 @@ async function handleCommands(client, message) {
         return MirrorDungeon.handleMirrorDungeon(client, message);
     }
 
-    // ── 主線關卡 ──────────────────────────────────────────────
-    if (raw.startsWith('!stage') || raw === '!挑戰') {
-        if (isOnCooldown(uid, 'stage')) return message.react('⏳');
-        return Stages.handleStage(client, message);
-    }
-
-    // ── 管理員（修復 Bug #4：加入所有 give 指令路由）──────────
+    // ── 管理員 ────────────────────────────────────────────────
     if (
         raw.startsWith('!givelunacy')   ||
         raw.startsWith('!givefragments') ||
@@ -124,16 +114,16 @@ async function sendHelp(message) {
             .setTitle('📋 Angela 指令清單')
             .setColor(0x00b4d8)
             .addFields(
-                { name:'🎰 抽卡',      value:'`!pull` — 單抽\n`!十連` `!10pulls` — 十連' },
-                { name:'🎒 背包',      value:'`!pack` — LC主頁式背包介面\n`!list` — 全池機率清單（翻頁）' },
-                { name:'⚔️ 戰鬥',     value:'`!battle` — 普通 ｜ `!battle elite` — 精英 ｜ `!battle boss` — BOSS' },
-                { name:'👥 隊伍',      value:'`!party` — 查看\n`!party add/remove [罪人]` — 管理\n`!party set 李箱,浮士德,...`' },
-                { name:'👤 罪人',      value:'`!sinner` 全覽 ｜ `!sinner [名]` 詳細\n`!uptie [名]` 連結提升 ｜ `!equip [名] | [人格]`\n`!threads` 資源查詢' },
-                { name:'🪞 鏡光迷宮',  value:'`!md` 說明 ｜ `!md start` 開始 ｜ `!md status` 進度' },
-                { name:'🎮 其他',      value:'`!stage` 挑戰關卡 ｜ `!steam` Steam公告 ｜ `!tweet` Twitter最新' },
-                { name:'🔑 管理員',    value:'`!givelunacy @玩家 數量`\n`!givefragments @玩家 數量`\n`!givescrolls @玩家 數量`\n`!givethreads @玩家 數量`\n`!updaterewards 數量` ｜ `!updatebuff 倍數`' },
+                { name: '🎰 抽卡',     value: '`!pull` — 單抽\n`!十連` `!10pulls` — 十連' },
+                { name: '🎒 背包',     value: '`!pack` — LC主頁式背包介面\n`!list` — 全池機率清單（翻頁）' },
+                { name: '⚔️ 戰鬥',    value: '`!battle` — 選擇難度出戰（5個難度）\n狂氣獎勵：超簡單×20 ｜ 簡單×40 ｜ 一般×70 ｜ 困難×130 ｜ 瘋狂×200' },
+                { name: '👥 隊伍',     value: '`!party` — 查看\n`!party add/remove [罪人]` — 管理\n`!party set 李箱,浮士德,...`' },
+                { name: '👤 罪人',     value: '`!sinner` 全覽 ｜ `!sinner [名]` 詳細\n`!uptie [名]` 連結提升 ｜ `!equip [名] | [人格]`\n`!threads` 資源查詢' },
+                { name: '🪞 鏡光迷宮', value: '`!md` 開始 ｜ `!md status` 進度' },
+                { name: '🎮 其他',     value: '`!steam` Steam公告 ｜ `!tweet` Twitter最新' },
+                { name: '🔑 管理員',   value: '`!givelunacy @玩家 數量`\n`!givefragments @玩家 數量`\n`!givescrolls @玩家 數量`\n`!givethreads @玩家 數量`\n`!updaterewards 數量` ｜ `!updatebuff 倍數`' },
             )
-            .setFooter({ text:'指令冷卻 3s ｜ !help 再次查看' })]
+            .setFooter({ text: '指令冷卻 3s ｜ !help 再次查看' })]
     });
 }
 
