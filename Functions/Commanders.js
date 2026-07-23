@@ -41,7 +41,7 @@ async function handleCommands(client, message) {
     }
 
     // ── 戰鬥 ──────────────────────────────────────────────────
-    if (raw === '!battle' || raw === '!戰鬥' || raw === '!fight') {
+    if (raw === '!stage' || raw === '!戰鬥' || raw === '!fight') {
         if (isOnCooldown(uid, 'battle', 5000)) return message.react('⏳');
         return BattleSystem.handleBattle(client, message);
     }
