@@ -37,6 +37,7 @@ const identityRegistry = {
         { name: "［竹帽］金 / Bamboo-hatted Kim" }, 
     ],
     '000': [
+        { name: "［次元折斷者］李箱 / Dimension Shredder Yi Sang" },
         { name: "［黎明事務所 幫手］辛克萊 / Dawn Office Fixer Sinclair" },
         { name: "［黎明事務所 收尾人］浮士德 / Dawn Office Fixer Faust" },
         { name: "［黎明事務所 代表］格里高爾 / Dawn Office Rep Gregor" },
@@ -387,7 +388,7 @@ const identityRegistry = {
     ],
     'ABN_ANGELA': [
         { name: "［LC 總指揮］安吉拉 / Angela" },
-        { name: "［Library of Ruina 館長］安吉拉 / Director Angela" },
+        { name: "［LibraryofRuina］安吉拉 / Director Angela" },
     ],
 };
 
@@ -401,18 +402,11 @@ const identityDetails = {
 // ─── Rate Up 對象（Pickup）────────────────────────────────────
 const upTargets = {
     'Color Fixer': [
-        "［紫色眼淚］伊織 / The Purple Tear Iori",
+        "［蒼藍殘響］阿爾加利亞 / The Blue Reverberation Argalia",
     ], 
     '000': [
-        "［黎明事務所 代表］格里高爾 / Dawn Office Rep Gregor",
-        "［黎明事務所 收尾人］浮士德 / Dawn Office Fixer Faust",
-        "［黎明事務所 幫手］辛克萊 / Dawn Office Fixer Sinclair"
+        "［次元折斷者］李箱 / Dimension Shredder Yi Sang",
     ],
-    'Egos': [
-        "[HE] 莊嚴的哀歌 / Solemn Lament - 李箱",
-    ],
-};
-
 // ─── 自動建構抽卡快取池 ──────────────────────────────────────────
 const pool = {};
 for (const [rarity, arr] of Object.entries(identityRegistry)) {
