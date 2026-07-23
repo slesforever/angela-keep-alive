@@ -407,6 +407,7 @@ const upTargets = {
     '000': [
         "［次元折斷者］李箱 / Dimension Shredder Yi Sang",
     ],
+};
 // ─── 自動建構抽卡快取池 ──────────────────────────────────────────
 const pool = {};
 for (const [rarity, arr] of Object.entries(identityRegistry)) {
