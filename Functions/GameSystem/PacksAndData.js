@@ -16,6 +16,9 @@ const {
 
 // ─── 資料目錄 ─────────────────────────────────────────────────
 const DATA_DIR = path.join(process.cwd(), 'data', 'players');
+
+// ─── SinnersData（供 getIdentitySinnerKey 使用）─────────────────
+const { SINNERS } = require('./Data/SinnersData.js');
 try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch {}
 
 // Discord 備份頻道
@@ -73,12 +76,12 @@ function getShortName(name) {
     if (inner) {
         let content = inner[1].trim();
         // 取冒號後部分（如「蜘蛛巢：食指-父輩」→「食指-父輩」）
-        const afterColon = content.match(/[：:]s*(.+)/);
+        const afterColon = content.match(/[：:]\s*(.+)/);
         if (afterColon) content = afterColon[1].trim();
         return content.slice(0, 12);
     }
     // LCB 格式取最後詞（如「LCB 罪人 李箱」→「李箱」）
-    const lcb = s.match(/^LCBs+S+s+(.+?)(?:s*/|$)/);
+    const lcb = s.match(/^LCB\s+\S+\s+(.+?)(?:\s*\/|$)/);
     if (lcb) return lcb[1].trim().slice(0, 12);
     // fallback：斜線前的部分
     const slash = s.indexOf('/');
