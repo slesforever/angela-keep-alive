@@ -14,7 +14,7 @@ function T() {
     };
 }
 
-// ─── 原始人格清單（按稀有度分類） ──────────────────────────────────
+// ─── 原始人格、E.G.O 與 異想體（Abnormality）清單 ─────────────────────────
 const identityRegistry = {
     'Color Fixer': [
         { name: "［殷紅迷霧］卡莉 / The Red Mist Kali" },
@@ -40,7 +40,7 @@ const identityRegistry = {
         { name: "［黎明事務所 幫手］辛克萊 / Dawn Office Fixer Sinclair" },
         { name: "［黎明事務所 收尾人］浮士德 / Dawn Office Fixer Faust" },
         { name: "［黎明事務所 代表］格里高爾 / Dawn Office Rep Gregor" },
-        { name: "［LCD現場推理小隊］以實瑪麗 / LCD OSIR Team Ishmael" },
+        { name: "［LCD現場推理小隊］以實瑪利 / LCD OSIR Team Ishmael" },
         { name: "［S公司 推奴人］鴻路 / S Corp. Ch'unokkun Hong Lu" },
         { name: "［蜘蛛巢：拇指 父輩］羅佳 / The House of Spiders: Thumb Nursefather Rodion" },
         { name: "［蜘蛛巢：中指 父輩］奧提斯 / The House of Spiders: Middle Nursefather Outis" },
@@ -390,36 +390,27 @@ const identityRegistry = {
         { name: "［Library of Ruina 館長］安吉拉 / Director Angela" },
     ],
 };
-};
 
 // ─── 數值實體覆蓋區 ──────────────────────────────────────────
-// 在此處填寫已實裝、有具體數值的人格。
-// 未在此處定義的人格，在被查詢時會自動經由 getIdentityData() 附加 T() 的空模板。
 const identityDetails = {
     '［漆黑噤默］羅蘭 / The Black Silence Roland': {
         skill1: { skillname: '杜蘭達爾 / Durandal', clashbase: 5, coins: 2, clashpower: 3, attack: 11, defense: 0 },
-        // 可以在這裡自由新增其他填寫好的數值（未填寫的技能，會自動採用 T() 預設值）
     },
 };
 
 // ─── Rate Up 對象（Pickup）────────────────────────────────────
-// 這裡的文字標題與 Registry 保持完全一致，以防止抽卡系統比對失敗。
 const upTargets = {
     'Color Fixer': [
         "［紫色眼淚］伊織 / The Purple Tear Iori",
-        "［蒼藍殘響］阿爾加利亞 / The Blue Reverberation Argalia",
     ], 
-    '0000': [null],
-    'Egos': [
-        "[HE] 莊嚴的哀歌 / Solemn Lament - 李箱",
-    ],
     '000': [
         "［黎明事務所 代表］格里高爾 / Dawn Office Rep Gregor",
         "［黎明事務所 收尾人］浮士德 / Dawn Office Fixer Faust",
         "［黎明事務所 幫手］辛克萊 / Dawn Office Fixer Sinclair"
     ],
-    '00': [null],
-    '0': [null],
+    'Egos': [
+        "[HE] 莊嚴的哀歌 / Solemn Lament - 李箱",
+    ],
 };
 
 // ─── 自動建構抽卡快取池 ──────────────────────────────────────────
@@ -428,9 +419,7 @@ for (const [rarity, arr] of Object.entries(identityRegistry)) {
     pool[rarity] = arr.map(obj => obj.name);
 }
 
-// ─── 查詢特定人格完整資料 (O(1) 核心優化 + 安全深層合併) ───────────────
 function getIdentityData(name) {
-    // 1. 先確認該角色是否存在於註冊表 (Registry) 中
     let exists = false;
     for (const arr of Object.values(identityRegistry)) {
         if (arr.some(obj => obj.name === name)) {
@@ -440,36 +429,21 @@ function getIdentityData(name) {
     }
     if (!exists) return null;
 
-    // 2. 建立完整的空模板基礎 (不污染原始 T 模板)
     const base = { name, ...T() };
-
-    // 3. 取得 Details 覆蓋區內的使用者自訂數值
     const details = identityDetails[name];
 
-    // 4. 進行深層合併 (Deep Merge)，避免欄位遺失
     if (details) {
         for (const key of Object.keys(details)) {
             if (details[key] && typeof details[key] === 'object') {
-                if (Array.isArray(details[key])) {
-                    // 合併陣列格式 (例如 counter 欄位)
-                    base[key] = details[key].map((item, idx) => {
-                        const defaultItem = base[key] && base[key][idx] ? base[key][idx] : {};
-                        return { ...defaultItem, ...item };
-                    });
-                } else {
-                    // 合併物件格式 (例如 skill1、skill2、evade 欄位)
-                    base[key] = { ...base[key], ...details[key] };
-                }
+                base[key] = { ...base[key], ...details[key] };
             } else {
                 base[key] = details[key];
             }
         }
     }
-
     return base;
 }
 
-// 依稀有度取得隨機人格名稱
 function pullIdentity(rarity) {
     const arr = pool[rarity] || [];
     if (!arr.length) return '（該稀有度無資料）';
@@ -483,8 +457,8 @@ function pullUpIdentity(rarity) {
 }
 
 module.exports = {
-    identities: identityDetails, // 保持向上相容
-    registry: identityRegistry,   // 完整的稀有度清單原始資料
+    identities: identityDetails,
+    registry: identityRegistry,
     pool,
     upTargets,
     getIdentityData,
