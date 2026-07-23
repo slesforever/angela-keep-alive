@@ -64,7 +64,7 @@ const STATUS_DEFS = {
     },
 
     // 5. 沉沒 (Sinking) ── 累積至 15 層爆發造成大量傷害
-    '沉沒': {
+    '沉淪': {
         emoji: '🌊',
         maxStacks: 99,
         burstThreshold: 15,
@@ -92,7 +92,7 @@ const STATUS_DEFS = {
     },
 
     // 7. 倒地 (Knockdown) ── 受到額外傷害，無法防禦
-    '倒地': {
+    '易損': {
         emoji: '💫',
         maxStacks: 5,
         onTurnEnd: (unit, stacks) => {
