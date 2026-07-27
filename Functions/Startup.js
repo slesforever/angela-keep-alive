@@ -6,11 +6,10 @@ const {
     EmbedBuilder, 
     ActivityType, 
     Events,
-    REST,
-    Routes,
     SlashCommandBuilder,
     PermissionFlagsBits,
-    ChannelType
+    ChannelType,
+    MessageFlags
 } = require('discord.js');
 const express = require('express');
 const fs      = require('fs');
@@ -23,11 +22,14 @@ const CONFIG_PATH   = path.join(BASE_DATA_DIR, 'config.json');
 
 try { fs.mkdirSync(PLAYERS_DIR, { recursive: true }); } catch {}
 
+// 預設設定檔結構
 const defaultConfig = {
     notifyChannelId: process.env.NOTIFY_CHANNEL_ID || '',
     rateUpChannelId: process.env.RATEUP_ANNOUNCE_CHANNEL || '',
+    newsChannelId:   process.env.NEWS_CHANNEL_ID || '',
 };
 
+// 讀取設定檔
 function getConfig() {
     try {
         if (fs.existsSync(CONFIG_PATH)) {
@@ -35,11 +37,12 @@ function getConfig() {
             return { ...defaultConfig, ...JSON.parse(data) };
         }
     } catch (err) {
-        console.error('⚠️ 讀取 config.json 失敗:', err.message);
+        console.error('⚠️ 讀取 config.json 失敗，使用預設值:', err.message);
     }
     return defaultConfig;
 }
 
+// 儲存設定檔
 function saveConfig(newConfig) {
     try {
         const current = getConfig();
@@ -74,69 +77,25 @@ const client = new Client({
     ],
 });
 
-// ─── 定義斜線指令 ──────────────────────────────────────────────
-const commands = [
-    new SlashCommandBuilder()
-        .setName('setchannel')
-        .setDescription('設定 Angela 的系統通知頻道')
-        // 🔒 關鍵：限制只有「管理者權限」的成員才能使用
-        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-        .addStringOption(option =>
-            option.setName('type')
-                .setDescription('選擇要設定的頻道類型')
-                .setRequired(true)
-                .addChoices(
-                    { name: '🟢 上線通知頻道 (notify)', value: 'notifyChannelId' },
-                    { name: '📢 Rate Up 廣播頻道 (rateup)', value: 'rateUpChannelId' }
-                )
-        )
-        .addChannelOption(option =>
-            option.setName('target')
-                .setDescription('選擇目標文字頻道')
-                .addChannelTypes(ChannelType.GuildText)
-                .setRequired(true)
-        ),
-];
-
-// 註冊斜線指令至 Discord
-async function registerSlashCommands(botToken, clientId) {
-    const rest = new REST({ version: '10' }).setToken(botToken);
-    try {
-        console.log('🔄 開始同步斜線指令 (Slash Commands)...');
-        await rest.put(
-            Routes.applicationCommands(clientId),
-            { body: commands.map(cmd => cmd.toJSON()) }
-        );
-        console.log('✅ 斜線指令註冊完成！');
-    } catch (err) {
-        console.error('❌ 斜線指令註冊失敗:', err.message);
-    }
-}
-
-// ─── 處理斜線指令互動 (Interaction) ───────────────────────────
-client.on(Events.InteractionCreate, async (interaction) => {
-    if (!interaction.isChatInputCommand()) return;
-
-    if (interaction.commandName === 'setchannel') {
-        const type = interaction.options.getString('type');
-        const targetChannel = interaction.options.getChannel('target');
-
-        // 寫入 config.json
-        saveConfig({ [type]: targetChannel.id });
-
-        const typeName = type === 'notifyChannelId' ? '上線通知頻道' : 'Rate Up 廣播頻道';
-
-        await interaction.reply({
-            embeds: [new EmbedBuilder()
-                .setTitle('⚙️ 系統頻道設定更新')
-                .setColor(0x00b4d8)
-                .setDescription(`已成功將 **${typeName}** 設定為：${targetChannel}`)
-                .setTimestamp()
-            ],
-            ephemeral: true // 只有執行指令的管理員自己看得見訊息
-        });
-    }
-});
+// ─── 斜線指令結構 (僅限伺服器管理員) ──────────────────────────
+const setChannelCommand = new SlashCommandBuilder()
+    .setName('setchannel')
+    .setDescription('【管理員】設定 Angela 系統各項通知與發射頻道')
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addStringOption(option =>
+        option.setName('type')
+            .setDescription('請選擇要設定的頻道類型')
+            .setRequired(true)
+            .addChoices(
+                { name: '🟢 系統上線通知頻道', value: 'notify' },
+                { name: '📢 Rate Up 抽卡公告頻道', value: 'rateup' },
+                { name: '📰 新聞與社群動態頻道', value: 'news' },
+            ))
+    .addChannelOption(option =>
+        option.setName('target_channel')
+            .setDescription('選擇目標文字頻道')
+            .addChannelTypes(ChannelType.GuildText)
+            .setRequired(true));
 
 // ─── 工具函式 ──────────────────────────────────────────────────
 function rarityLabel(rarity) {
@@ -176,7 +135,37 @@ async function announceCurrentRateUps(botClient) {
     }
 }
 
-// ─── 傳統文字指令監聽 ──────────────────────────────────────────
+// ─── 處理斜線指令 (Interaction) ───────────────────────────
+client.on(Events.InteractionCreate, async (interaction) => {
+    if (!interaction.isChatInputCommand()) return;
+
+    if (interaction.commandName === 'setchannel') {
+        const type = interaction.options.getString('type');
+        const targetChannel = interaction.options.getChannel('target_channel');
+
+        if (type === 'notify') {
+            saveConfig({ notifyChannelId: targetChannel.id });
+            await interaction.reply({
+                content: `「主管，系統上線通知頻道已重定向至 ${targetChannel}。」`,
+                flags: MessageFlags.Ephemeral
+            });
+        } else if (type === 'rateup') {
+            saveConfig({ rateUpChannelId: targetChannel.id });
+            await interaction.reply({
+                content: `「主管，Rate Up 公告發射頻道已重定向至 ${targetChannel}。」`,
+                flags: MessageFlags.Ephemeral
+            });
+        } else if (type === 'news') {
+            saveConfig({ newsChannelId: targetChannel.id });
+            await interaction.reply({
+                content: `「主管，新聞與社群監測頻道已重定向至 ${targetChannel}。」`,
+                flags: MessageFlags.Ephemeral
+            });
+        }
+    }
+});
+
+// ─── 普通文字訊息監聽 ──────────────────────────────────────────
 client.on(Events.MessageCreate, async (message) => {
     if (message.author.bot) return;
     try {
@@ -187,12 +176,17 @@ client.on(Events.MessageCreate, async (message) => {
     }
 });
 
-// ─── 上線事件 ──────────────────────────────────────────────────
+// ─── 上線事件與註冊斜線指令 ────────────────────────────────
 client.once(Events.ClientReady, async () => {
     console.log(`🤖 Angela 系統脈衝對齊。已激活：${client.user.tag}`);
-    
-    // 註冊斜線指令
-    await registerSlashCommands(client.token, client.user.id);
+
+    // 自動註冊斜線指令
+    try {
+        await client.application.commands.set([setChannelCommand.toJSON()]);
+        console.log('✅ 斜線指令 `/setchannel` 已自動註冊完畢');
+    } catch (err) {
+        console.error('❌ 註冊斜線指令失敗:', err.message);
+    }
 
     client.user.setPresence({
         status: 'idle',
@@ -222,14 +216,13 @@ client.once(Events.ClientReady, async () => {
     console.log('📡 [排程] Newscheck 循環已啟動');
 });
 
-// ─── 錯誤保護 ──────────────────────────────────────────────────
+// ─── 錯誤保護與登入 ───────────────────────────────────────────
 client.on('error', err => console.error('Discord 客戶端錯誤:', err.message));
 process.on('unhandledRejection', err => console.error('未捕捉的 Promise 拒絕:', err?.message || err));
 process.on('uncaughtException', err => console.error('未捕捉的例外錯誤:', err?.message || err));
 
 module.exports = { getConfig, saveConfig };
 
-// ─── 登入 ──────────────────────────────────────────────────────
 const TOKEN = process.env.DISCORD_TOKEN;
 if (!TOKEN || TOKEN === 'DISCORD_TOKEN') {
     console.error('❌ 請設定環境變數 DISCORD_TOKEN');
