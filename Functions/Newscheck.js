@@ -1,6 +1,6 @@
 // Functions/Newscheck.js
 // Twitter Nitter RSS + Steam 官方新聞 API + YouTube 頻道監測
-const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
+const { EmbedBuilder, AttachmentBuilder, SlashCommandBuilder, PermissionFlagsBits, ChannelType } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 
@@ -11,8 +11,10 @@ const MONITORED_USERS = (process.env.TARGET_USERS || 'LimbusCompany_B,ProjMoonSt
     .map(s => s.trim())
     .filter(Boolean);
 
-const NOTIFY_CHANNEL = process.env.NOTIFY_CHANNEL_ID || '1402282604165730348';
-const PING_ROLE = process.env.PING_ROLE_MENTION || '<@&1406984068725211177>';
+// 動態變數，預設值從環境變數讀取
+let notifyChannelId = process.env.NOTIFY_CHANNEL_ID || '1402282604165730348';
+let pingRoleMention = process.env.PING_ROLE_MENTION || '<@&1406984068725211177>';
+
 const STEAM_APP_ID = '1973530';
 const CHECK_INTERVAL = Number(process.env.CHECK_INTERVAL_MS || 20 * 1000);
 
@@ -44,6 +46,7 @@ let loopTimer = null;
 let twitterLock = false;
 let steamLock = false;
 let youtubeLock = false;
+let isStateLoaded = false;
 
 const userStates = new Map(); // userId -> { lastFetchedId, recentIds: Map<id, ts> }
 const steamState = {
@@ -229,12 +232,46 @@ async function buildSteamAnnouncementPayload(item) {
     return { embeds, files: attachments };
 }
 
+// ── 取得與設定通知頻道 / 身分組 ─────────────────────────────
+function getNotifyChannelId() {
+    if (!isStateLoaded) loadState();
+    return notifyChannelId;
+}
+
+function setNotifyChannelId(channelId) {
+    if (!isStateLoaded) loadState();
+    notifyChannelId = channelId;
+    saveState();
+}
+
+function getPingRole() {
+    if (!isStateLoaded) loadState();
+    return pingRoleMention;
+}
+
+function setPingRole(roleMention) {
+    if (!isStateLoaded) loadState();
+    pingRoleMention = roleMention;
+    saveState();
+}
+
 function loadState() {
+    if (isStateLoaded) return;
+    isStateLoaded = true;
+
     try {
         if (!fs.existsSync(STATE_FILE)) return;
 
         const raw = fs.readFileSync(STATE_FILE, 'utf8');
         const data = JSON.parse(raw);
+
+        if (data?.notifyChannelId) {
+            notifyChannelId = String(data.notifyChannelId);
+        }
+
+        if (data?.pingRoleMention) {
+            pingRoleMention = String(data.pingRoleMention);
+        }
 
         if (data?.users && typeof data.users === 'object') {
             for (const [userId, info] of Object.entries(data.users)) {
@@ -295,6 +332,8 @@ function saveState() {
         cleanupRecent(youtubeState.recentIds);
 
         const data = {
+            notifyChannelId,
+            pingRoleMention,
             users,
             steam: {
                 lastSteamNewsId: steamState.lastSteamNewsId,
@@ -456,7 +495,7 @@ async function fetchTweetItemsFromAllNodes(userId) {
         throw new Error('所有 Nitter 節點都失敗');
     }
 
-    merged.sort((a, b) => compareSnowflakeIds(b.id, a.id)); // newest first
+    merged.sort((a, b) => compareSnowflakeIds(b.id, a.id));
     return merged;
 }
 
@@ -512,9 +551,6 @@ async function fetchYouTubeItems(channelId) {
 }
 
 // ── Twitter 監測 ─────────────────────────────────────────────
-// targetUserId 可選：
-// - 不傳 => 監測所有 MONITORED_USERS
-// - 傳入 => 只測該 user
 async function checkTwitterUpdates(client, isManual = false, messageContext = null, targetUserId = null) {
     if (twitterLock) {
         if (!isManual) console.log('⏳ [Twitter] 上一輪尚未完成，略過本輪');
@@ -552,7 +588,6 @@ async function checkTwitterUpdates(client, isManual = false, messageContext = nu
                 continue;
             }
 
-            // 首次啟動：只建立快取，不發送
             if (!state.lastFetchedId && !isManual) {
                 state.lastFetchedId = feedItems[0].id;
                 rememberRecent(state.recentIds, feedItems[0].id);
@@ -561,7 +596,6 @@ async function checkTwitterUpdates(client, isManual = false, messageContext = nu
                 continue;
             }
 
-            // 手動測試：只回最新幾則，不影響自動監測快取
             if (isManual) {
                 const preview = feedItems.slice(0, 3).map((item, idx) => {
                     const titlePart = item.title ? `**${item.title}**\n` : '';
@@ -581,7 +615,7 @@ async function checkTwitterUpdates(client, isManual = false, messageContext = nu
             }
 
             newItems = [...new Map(newItems.map(item => [item.id, item])).values()];
-            newItems.sort((a, b) => compareSnowflakeIds(a.id, b.id)); // oldest -> newest
+            newItems.sort((a, b) => compareSnowflakeIds(a.id, b.id));
 
             if (!newItems.length) {
                 console.log(`ℹ️ [Twitter][${userId}] 沒有新推文`);
@@ -598,10 +632,10 @@ async function checkTwitterUpdates(client, isManual = false, messageContext = nu
             }).join('\n\n');
 
             try {
-                const channel = await client.channels.fetch(NOTIFY_CHANNEL);
+                const channel = await client.channels.fetch(getNotifyChannelId());
                 if (channel) {
                     await channel.send({
-                        content: `🔔 ${PING_ROLE} **偵測到 @${userId} 發布了 ${newItems.length} 則新訊息：**\n${body}`,
+                        content: `🔔 ${getPingRole()} **偵測到 @${userId} 發布了 ${newItems.length} 則新訊息：**\n${body}`,
                         allowedMentions: { parse: ['roles'] }
                     });
                 }
@@ -613,7 +647,7 @@ async function checkTwitterUpdates(client, isManual = false, messageContext = nu
         if (isManual && messageContext) {
             if (manualLines.length) {
                 await messageContext.reply({
-                    content: `🔔 ${PING_ROLE} **[推特手動測試成功]**\n${manualLines.join('\n\n')}`,
+                    content: `🔔 ${getPingRole()} **[推特手動測試成功]**\n${manualLines.join('\n\n')}`,
                     allowedMentions: { parse: ['roles'] }
                 });
             } else {
@@ -666,11 +700,9 @@ async function checkSteamUpdates(client, isManual = false, messageContext = null
             return;
         }
 
-        // 依照 API 回傳順序，通常是最新在前
         const newestItem = newsItems[0];
         const currentId = String(newestItem.gid);
 
-        // 首次啟動只建立快取
         if (!steamState.lastSteamNewsId && !isManual) {
             steamState.lastSteamNewsId = currentId;
             rememberRecent(steamState.recentIds, currentId);
@@ -693,9 +725,8 @@ async function checkSteamUpdates(client, isManual = false, messageContext = null
         }
 
         const uniqueUnseen = [...new Map(unseen.map(item => [String(item.gid), item])).values()];
-        uniqueUnseen.sort((a, b) => compareSnowflakeIds(String(a.gid), String(b.gid))); // oldest -> newest
+        uniqueUnseen.sort((a, b) => compareSnowflakeIds(String(a.gid), String(b.gid)));
 
-        // 手動測試：永遠回最新，但不影響自動監測快取
         if (isManual) {
             const preview = newsItems.slice(0, 3).map(item => {
                 const images = extractSteamImages(item.contents || '');
@@ -723,7 +754,7 @@ async function checkSteamUpdates(client, isManual = false, messageContext = null
 
             if (messageContext) {
                 await messageContext.reply({
-                    content: `🔔 ${PING_ROLE} **Steam 手動測試成功**`,
+                    content: `🔔 ${getPingRole()} **Steam 手動測試成功**`,
                     embeds: [steamEmbed],
                     files: latestFiles,
                     allowedMentions: { parse: ['roles'] }
@@ -742,7 +773,7 @@ async function checkSteamUpdates(client, isManual = false, messageContext = null
         saveState();
 
         try {
-            const channel = await client.channels.fetch(NOTIFY_CHANNEL);
+            const channel = await client.channels.fetch(getNotifyChannelId());
             if (!channel) return;
 
             let firstMessage = true;
@@ -752,7 +783,7 @@ async function checkSteamUpdates(client, isManual = false, messageContext = null
 
                 await channel.send({
                     content: firstMessage
-                        ? `🔔 ${PING_ROLE} **監測到邊獄巴士有 ${uniqueUnseen.length} 則全新 Steam 公告發布！**`
+                        ? `🔔 ${getPingRole()} **監測到邊獄巴士有 ${uniqueUnseen.length} 則全新 Steam 公告發布！**`
                         : undefined,
                     embeds: payload.embeds,
                     files: payload.files,
@@ -798,7 +829,6 @@ async function checkYouTubeUpdates(client, isManual = false, messageContext = nu
             return;
         }
 
-        // 首次啟動：只建立快取，不發送
         if (!youtubeState.lastVideoId && !isManual) {
             youtubeState.lastVideoId = feedItems[0].id;
             youtubeState.lastPublishedAt = feedItems[0].published || new Date().toISOString();
@@ -808,7 +838,6 @@ async function checkYouTubeUpdates(client, isManual = false, messageContext = nu
             return;
         }
 
-        // 手動測試：顯示最新 3 部
         if (isManual) {
             const preview = feedItems.slice(0, 3).map((item, idx) => {
                 const titleLine = item.title ? `**${item.title}**\n` : '';
@@ -838,7 +867,7 @@ async function checkYouTubeUpdates(client, isManual = false, messageContext = nu
         }
 
         newItems = [...new Map(newItems.map(item => [item.id, item])).values()];
-        newItems.reverse(); // oldest -> newest
+        newItems.reverse();
 
         if (!newItems.length) {
             console.log('ℹ️ [YouTube] 沒有新影片');
@@ -856,10 +885,10 @@ async function checkYouTubeUpdates(client, isManual = false, messageContext = nu
         }).join('\n\n');
 
         try {
-            const channel = await client.channels.fetch(NOTIFY_CHANNEL);
+            const channel = await client.channels.fetch(getNotifyChannelId());
             if (channel) {
                 await channel.send({
-                    content: `🔔 ${PING_ROLE} **@${YOUTUBE_HANDLE} 發布了 ${newItems.length} 部新影片：**\n${body}`,
+                    content: `🔔 ${getPingRole()} **@${YOUTUBE_HANDLE} 發布了 ${newItems.length} 部新影片：**\n${body}`,
                     allowedMentions: { parse: ['roles'] }
                 });
             }
@@ -876,6 +905,61 @@ async function checkYouTubeUpdates(client, isManual = false, messageContext = nu
     }
 }
 
+// ── 斜線指令 1：設定通知頻道 ─────────────────────────────
+const setChannelCommandData = new SlashCommandBuilder()
+    .setName('setnewschannel')
+    .setDescription('設定新聞通知頻道')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels)
+    .addChannelOption(option =>
+        option
+            .setName('channel')
+            .setDescription('選擇要接收新聞通知的頻道')
+            .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+            .setRequired(true)
+    );
+
+async function handleSetChannelCommand(interaction) {
+    const targetChannel = interaction.options.getChannel('channel');
+
+    if (!targetChannel) {
+        return interaction.reply({ content: '❌ 無法取得指定的頻道。', flags: 64 });
+    }
+
+    setNotifyChannelId(targetChannel.id);
+
+    await interaction.reply({
+        content: `✅ 已將新聞通知頻道設定為：<#${targetChannel.id}>`,
+        flags: 64
+    });
+}
+
+// ── 斜線指令 2：設定通知 Ping 身分組 ──────────────────────
+const setRoleCommandData = new SlashCommandBuilder()
+    .setName('setnewsrole')
+    .setDescription('設定新聞通知要 Mention (Ping) 的身分組')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels)
+    .addRoleOption(option =>
+        option
+            .setName('role')
+            .setDescription('選擇要 Tag 的身分組')
+            .setRequired(true)
+    );
+
+async function handleSetRoleCommand(interaction) {
+    const targetRole = interaction.options.getRole('role');
+
+    if (!targetRole) {
+        return interaction.reply({ content: '❌ 無法取得指定的身分組。', flags: 64 });
+    }
+
+    setPingRole(`<@&${targetRole.id}>`);
+
+    await interaction.reply({
+        content: `✅ 已將新聞通知 Ping 身分組設定為：<@&${targetRole.id}>`,
+        flags: 64
+    });
+}
+
 // ── 啟動定時循環 ─────────────────────────────────────────────
 function startNewsCheckLoop(client) {
     if (globalThis.__NEWSCHECK_LOOP_STARTED__) {
@@ -886,7 +970,6 @@ function startNewsCheckLoop(client) {
 
     loadState();
 
-    // 立即執行一次，只建立快取，不會重複發
     void checkTwitterUpdates(client, false, null);
     void checkSteamUpdates(client, false, null);
     void checkYouTubeUpdates(client, false, null);
@@ -904,5 +987,13 @@ module.exports = {
     checkTwitterUpdates,
     checkSteamUpdates,
     checkYouTubeUpdates,
-    startNewsCheckLoop
+    startNewsCheckLoop,
+    getNotifyChannelId,
+    setNotifyChannelId,
+    getPingRole,
+    setPingRole,
+    setChannelCommandData,
+    handleSetChannelCommand,
+    setRoleCommandData,
+    handleSetRoleCommand
 };
