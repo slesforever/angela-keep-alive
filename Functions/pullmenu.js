@@ -324,11 +324,11 @@ module.exports = {
           }
 
           // ─────────────────
-          // 延遲回覆（結果只顯示給玩家本人）
+          // 延遲回覆 
           // ─────────────────
 
           await componentInteraction.deferReply({
-            ephemeral: true,
+            ephemeral: false,
           });
 
           // ─────────────────
