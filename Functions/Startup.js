@@ -93,13 +93,6 @@ const allSlashCommands = [
     new SlashCommandBuilder()
         .setName('pull')
         .setDescription('進行抽取人格/E.G.O')
-        .addIntegerOption(option =>
-            option.setName('count')
-                .setDescription('選擇抽卡次數')
-                .addChoices(
-                    { name: '單抽 (1次)', value: 1 },
-                    { name: '十連抽 (10次)', value: 10 }
-                )),
 
     // 2. 背包與機率
     new SlashCommandBuilder().setName('pack').setDescription('查看 LC 主頁式背包與資源介面'),
