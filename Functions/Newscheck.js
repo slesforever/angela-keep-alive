@@ -64,17 +64,6 @@ function ensureStateDir() {
     }
 }
 
-function setNotifyChannel(channelId) {
-    if (!channelId) return false;
-    notifyChannelId = String(channelId);
-    saveState();
-    return true;
-}
-
-function getNotifyChannel() {
-    return notifyChannelId;
-}
-
 function getUserState(userId) {
     if (!userStates.has(userId)) {
         userStates.set(userId, {
@@ -247,10 +236,6 @@ function loadState() {
         const raw = fs.readFileSync(STATE_FILE, 'utf8');
         const data = JSON.parse(raw);
 
-        if (data?.channelId) {
-            notifyChannelId = String(data.channelId);
-        }
-
         if (data?.users && typeof data.users === 'object') {
             for (const [userId, info] of Object.entries(data.users)) {
                 const state = getUserState(userId);
@@ -310,7 +295,6 @@ function saveState() {
         cleanupRecent(youtubeState.recentIds);
 
         const data = {
-            channelId: notifyChannelId,
             users,
             steam: {
                 lastSteamNewsId: steamState.lastSteamNewsId,
@@ -890,6 +874,17 @@ async function checkYouTubeUpdates(client, isManual = false, messageContext = nu
     } finally {
         youtubeLock = false;
     }
+}
+
+// ── 頻道動態設定功能 ──────────────────────────────────────────
+function setNotifyChannel(channelId) {
+    if (!channelId) return false;
+    notifyChannelId = String(channelId);
+    return true;
+}
+
+function getNotifyChannel() {
+    return notifyChannelId;
 }
 
 // ── 啟動定時循環 ─────────────────────────────────────────────
