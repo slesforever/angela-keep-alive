@@ -1,4 +1,5 @@
 // Functions/Commanders.js
+const { EmbedBuilder } = require('discord.js');
 const PacksAndData    = require('./GameSystem/PacksAndData.js');
 const GiveAwaySystem  = require('./GameSystem/GiveAwaySystem.js');
 const MirrorDungeon   = require('./GameSystem/MirrorDungeon.js');
@@ -8,7 +9,7 @@ const PartySystem     = require('./GameSystem/PartySystem.js');
 const BattleSystem    = require('./GameSystem/BattleSystem.js');
 const { checkSteamUpdates, checkTwitterUpdates, checkYouTubeUpdates } = require('./Newscheck.js');
 
-// ── 冷卻 ──────────────────────────────────────────────────────
+// ── 冷卻系統 ──────────────────────────────────────────────────
 const COOLDOWNS = new Map();
 function isOnCooldown(userId, cmd, ms = 3000) {
     const key = `${userId}:${cmd}`;
@@ -17,118 +18,123 @@ function isOnCooldown(userId, cmd, ms = 3000) {
     return false;
 }
 
-async function handleCommands(client, message) {
-    const raw = message.content.trim();
-    const uid = message.author.id;
+// ── 處理斜線指令 ──────────────────────────────────────────────
+async function handleSlashCommands(client, interaction) {
+    if (!interaction.isChatInputCommand()) return;
 
-    // ── 抽卡 ──────────────────────────────────────────────────
-    if (raw === '!pull' || raw === '!單抽') {
-        if (isOnCooldown(uid, 'pull')) return message.react('⏳');
-        return PullSystem.executePull(client, message, 1);
-    }
-    if (['!十連', '!10pulls', '!pull 10', '!pull10'].includes(raw)) {
-        if (isOnCooldown(uid, 'pull10')) return message.react('⏳');
-        return PullSystem.executePull(client, message, 10);
-    }
+    const { commandName, user } = interaction;
+    const uid = user.id;
 
-    // ── 背包 / 清單 ────────────────────────────────────────────
-    if (raw === '!pack' || raw === '!bag' || raw === '!背包') {
-        if (isOnCooldown(uid, 'pack')) return message.react('⏳');
-        return PacksAndData.handleInventory(client, message);
-    }
-    if (raw === '!list' || raw === '!清單') {
-        return PacksAndData.handleInventory(client, message);
-    }
+    try {
+        // ── 抽卡 (/pull) ──────────────────────────────────────
+        if (commandName === 'pull') {
+            const count = interaction.options.getInteger('count') || 1;
+            const cdKey = count === 10 ? 'pull10' : 'pull';
+            if (isOnCooldown(uid, cdKey)) {
+                return interaction.reply({ content: '⏳ 指令冷卻中，請稍後再試。', ephemeral: true });
+            }
+            return PullSystem.executePull(client, interaction, count);
+        }
 
-    // ── 戰鬥 ──────────────────────────────────────────────────
-    if (raw === '!stage' || raw === '!戰鬥' || raw === '!fight') {
-        if (isOnCooldown(uid, 'battle', 5000)) return message.react('⏳');
-        return BattleSystem.handleBattle(client, message);
-    }
-    // 保留快捷難度指令
-    if (raw.startsWith('!battle ')) {
-        if (isOnCooldown(uid, 'battle', 5000)) return message.react('⏳');
-        return BattleSystem.handleBattle(client, message);
-    }
+        // ── 背包 / 清單 (/pack, /list) ─────────────────────────
+        if (commandName === 'pack' || commandName === 'list') {
+            if (isOnCooldown(uid, 'pack')) {
+                return interaction.reply({ content: '⏳ 指令冷卻中，請稍後再試。', ephemeral: true });
+            }
+            return PacksAndData.handleInventory(client, interaction);
+        }
 
-    // ── 隊伍 ──────────────────────────────────────────────────
-    if (raw.startsWith('!party') || raw.startsWith('!隊伍')) {
-        return PartySystem.handleParty(client, message);
-    }
+        // ── 戰鬥 (/battle) ────────────────────────────────────
+        if (commandName === 'battle') {
+            if (isOnCooldown(uid, 'battle', 5000)) {
+                return interaction.reply({ content: '⏳ 戰鬥指令冷卻中，請稍後再試。', ephemeral: true });
+            }
+            return BattleSystem.handleBattle(client, interaction);
+        }
 
-    // ── 罪人管理 ──────────────────────────────────────────────
-    if (raw.startsWith('!sinner') || raw.startsWith('!罪人')) {
-        return CharacterSystem.handleSinner(client, message);
-    }
-    if (raw.startsWith('!uptie') || raw.startsWith('!連結')) {
-        return CharacterSystem.handleUptie(client, message);
-    }
-    if (raw.startsWith('!equip') || raw.startsWith('!裝備')) {
-        return CharacterSystem.handleEquip(client, message);
-    }
-    if (raw === '!threads' || raw === '!絲線' || raw === '!thread') {
-        return CharacterSystem.handleThreads(client, message);
-    }
+        // ── 隊伍 (/party) ─────────────────────────────────────
+        if (commandName === 'party') {
+            return PartySystem.handleParty(client, interaction);
+        }
 
-    // ── 鏡光迷宮 ──────────────────────────────────────────────
-    if (raw.startsWith('!md') || raw.startsWith('!mirror') || raw === '!鏡光迷宮' || raw === '!鏡牢') {
-        if (isOnCooldown(uid, 'md', 2000)) return message.react('⏳');
-        return MirrorDungeon.handleMirrorDungeon(client, message);
-    }
+        // ── 罪人管理 (/sinner, /uptie, /equip, /threads) ───────
+        if (commandName === 'sinner') {
+            return CharacterSystem.handleSinner(client, interaction);
+        }
+        if (commandName === 'uptie') {
+            return CharacterSystem.handleUptie(client, interaction);
+        }
+        if (commandName === 'equip') {
+            return CharacterSystem.handleEquip(client, interaction);
+        }
+        if (commandName === 'threads') {
+            return CharacterSystem.handleThreads(client, interaction);
+        }
 
-    // ── 管理員 ────────────────────────────────────────────────
-    if (
-        raw.startsWith('!givelunacy')   ||
-        raw.startsWith('!givefragments') ||
-        raw.startsWith('!givefrag')      ||
-        raw.startsWith('!givescrolls')   ||
-        raw.startsWith('!givescroll')    ||
-        raw.startsWith('!givethreads')   ||
-        raw.startsWith('!givethread')    ||
-        raw.startsWith('!updaterewards') ||
-        raw.startsWith('!updatebuff')
-    ) {
-        return GiveAwaySystem.handleGiveAway(client, message);
-    }
+        // ── 鏡光迷宮 (/md) ───────────────────────────────────
+        if (commandName === 'md') {
+            if (isOnCooldown(uid, 'md', 2000)) {
+                return interaction.reply({ content: '⏳ 指令冷卻中，請稍後再試。', ephemeral: true });
+            }
+            return MirrorDungeon.handleMirrorDungeon(client, interaction);
+        }
 
-    // ── 新聞 ──────────────────────────────────────────────────
-    if (raw === '!steam') {
-        await message.channel.sendTyping();
-        return checkSteamUpdates(client, true, message);
-    }
-    if (raw === '!tweet' || raw === '!testtweet' || raw === '!測試官方推文') {
-        await message.channel.sendTyping();
-        return checkTwitterUpdates(client, true, message);
-    }
-    if (raw === '!yt' || raw === '!youtube' || raw === '!測試YT') {
-        await message.channel.sendTyping();
-        return checkYouTubeUpdates(client, true, message);
-    }
+        // ── 管理員指令 ────────────────────────────────────────
+        if ([
+            'givelunacy', 'givefragments', 'givescrolls', 
+            'givethreads', 'updaterewards', 'updatebuff'
+        ].includes(commandName)) {
+            return GiveAwaySystem.handleGiveAway(client, interaction);
+        }
 
-    // ── 說明 ──────────────────────────────────────────────────
-    if (raw === '!help' || raw === '!指令' || raw === '!h') {
-        return sendHelp(message);
+        // ── 新聞監測 (/steam, /tweet, /yt) ────────────────────
+        if (commandName === 'steam') {
+            await interaction.deferReply();
+            return checkSteamUpdates(client, true, interaction);
+        }
+        if (commandName === 'tweet') {
+            await interaction.deferReply();
+            return checkTwitterUpdates(client, true, interaction);
+        }
+        if (commandName === 'yt') {
+            await interaction.deferReply();
+            return checkYouTubeUpdates(client, true, interaction);
+        }
+
+        // ── 說明 (/help) ──────────────────────────────────────
+        if (commandName === 'help') {
+            return sendHelp(interaction);
+        }
+
+    } catch (error) {
+        console.error(`[Command Error] 執行 /${commandName} 時發生錯誤:`, error);
+        const replyPayload = { content: '❌ 執行指令時發生內部錯誤。', ephemeral: true };
+        if (interaction.deferred || interaction.replied) {
+            await interaction.followUp(replyPayload);
+        } else {
+            await interaction.reply(replyPayload);
+        }
     }
 }
 
-async function sendHelp(message) {
-    const { EmbedBuilder } = require('discord.js');
-    return message.reply({
-        embeds: [new EmbedBuilder()
-            .setTitle('📋 Angela 指令清單')
-            .setColor(0x00b4d8)
-            .addFields(
-                { name: '🎰 抽卡',     value: '`!pull` — 單抽\n`!十連` `!10pulls` — 十連' },
-                { name: '🎒 背包',     value: '`!pack` — LC主頁式背包介面\n`!list` — 全池機率清單（翻頁）' },
-                { name: '⚔️ 戰鬥',    value: '`!battle` — 選擇難度出戰（5個難度）\n狂氣獎勵：超簡單×20 ｜ 簡單×40 ｜ 一般×70 ｜ 困難×130 ｜ 瘋狂×200' },
-                { name: '👥 隊伍',     value: '`!party` — 查看\n`!party add/remove [罪人]` — 管理\n`!party set 李箱,浮士德,...`' },
-                { name: '👤 罪人',     value: '`!sinner` 全覽 ｜ `!sinner [名]` 詳細\n`!uptie [名]` 連結提升 ｜ `!equip [名] | [人格]`\n`!threads` 資源查詢' },
-                { name: '🪞 鏡光迷宮', value: '`!md` 開始 ｜ `!md status` 進度' },
-                { name: '🎮 其他',     value: '`!steam` Steam最新 ｜ `!tweet` 推特最新 ｜ `!yt` YouTube最新' },
-                { name: '🔑 管理員',   value: '`/setchannel` — 設定各種通知與公告頻道 (斜線指令)\n`!givelunacy @玩家 數量`\n`!givefragments @玩家 數量`\n`!givescrolls @玩家 數量`\n`!givethreads @玩家 數量`\n`!updaterewards 數量` ｜ `!updatebuff 倍數`' },
-            )
-            .setFooter({ text: '指令冷卻 3s ｜ !help 再次查看' })]
-    });
+// ── Help 選單 ─────────────────────────────────────────────────
+async function sendHelp(interaction) {
+    const embed = new EmbedBuilder()
+        .setTitle('📋 Angela 指令清單 (Slash Commands)')
+        .setColor(0x00b4d8)
+        .addFields(
+            { name: '🎰 抽卡',      value: '`/pull` — 單抽或十連抽卡' },
+            { name: '🎒 背包',      value: '`/pack` — 背包介面\n`/list` — 全池機率清單' },
+            { name: '⚔️ 戰鬥',     value: '`/battle` — 出戰並領取狂氣獎勵（5個難度）' },
+            { name: '👥 隊伍',      value: '`/party` — 查看與管理隊伍陣容' },
+            { name: '👤 罪人',      value: '`/sinner` 罪人全覽／詳細資訊\n`/uptie` 提升連結 ｜ `/equip` 裝備人格\n`/threads` 資源查詢' },
+            { name: '🪞 鏡光迷宮',  value: '`/md` 進入鏡光迷宮與進度查看' },
+            { name: '🎮 新聞',      value: '`/steam` Steam最新 ｜ `/tweet` 推特最新 ｜ `/yt` YouTube最新' },
+            { name: '🔑 管理員',    value: '`/setchannel` — 設定通知與公告頻道\n`/givelunacy` ｜ `/givefragments` ｜ `/givescrolls` ｜ `/givethreads`\n`/updaterewards` ｜ `/updatebuff`' }
+        )
+        .setFooter({ text: '指令冷卻 3s ｜ /help 再次查看' });
+
+    return interaction.reply({ embeds: [embed] });
 }
 
-module.exports = { handleCommands };
+module.exports = { handleCommands: handleSlashCommands };
