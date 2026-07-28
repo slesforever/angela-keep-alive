@@ -406,8 +406,8 @@ function filterIdentities(rarity, keyword) {
 
 // ─── 🎯 卡池設定檔 ──────────────────────────────────────────────
 const BANNERS = {
-    'dawn_office': {
-        id: 'Season-7',
+    'Season': {
+        id: 'Season',
         name: 'Season-7 賽季池 — 梅菲斯特號',
         description: '第七賽季人格概率 UP！',
         cost: { single: 130, ten: 1300 },
@@ -417,8 +417,8 @@ const BANNERS = {
             S2: []
         }
     },
-    'ishmael_focus': {
-        id: 'ishmael_focus',
+    'focus': {
+        id: 'focus',
         name: '罪人特定提取 — Rodion Focus UP',
         description: '所有羅佳 (Rodion) 的人格與 E.G.O 出現機率大幅提升！',
         cost: { single: 130, ten: 1300 },
