@@ -146,7 +146,7 @@ async function handleSlashCommands(client, interaction) {
                 : (rate < 20 ? '「數據顯示：鋼鐵般堅硬直男。」' : rate < 50 ? '「有些許隱藏屬性。」' : rate < 80 ? '「成分相當濃烈。」' : '「100% 純度純真男同！」');
 
             const embed = new EmbedBuilder()
-                .setTitle('🏳️‍🌈 同性戀指數測試 (Gay Rate)')
+                .setTitle('男同指數測試 (Gay Rate)')
                 .setColor(0x3498db)
                 .setDescription(`**${target.username}** 的男同指數為：**${rate}%**\n\n\`[${bar}]\` ${rate}%\n\n> ${comment}`)
                 .setThumbnail(target.displayAvatarURL({ dynamic: true }));
@@ -162,10 +162,10 @@ async function handleSlashCommands(client, interaction) {
             const bar = createProgressBar(rate);
             let comment = target.id === SUPER_ADMIN_ID 
                 ? '「主管專屬認證：絕對 0% 直直到發光，姬圈屬性完全免疫。」'
-                : (rate < 20 ? '「姬圈指數較低，極度純粹直女。」' : rate < 50 ? '「有些許姬圈潛質。」' : rate < 80 ? '「姬圈能量爆棚！」' : '「100% 頂級姬圈霸主！」');
+                : (rate < 20 ? '「姬圈指數較低，極度純粹直女。」' : rate < 50 ? '「有些許潛質。」' : rate < 80 ? '「能量爆棚！」' : '「100% 頂級女同霸主！」');
 
             const embed = new EmbedBuilder()
-                .setTitle('👭 姬圈指數測試 (Lesbian Rate)')
+                .setTitle('女同指數測試 (Lesbian Rate)')
                 .setColor(0xe91e63)
                 .setDescription(`**${target.username}** 的女同指數為：**${rate}%**\n\n\`[${bar}]\` ${rate}%\n\n> ${comment}`)
                 .setThumbnail(target.displayAvatarURL({ dynamic: true }));
@@ -186,7 +186,7 @@ async function handleSlashCommands(client, interaction) {
             await interaction.deferReply(); // 先 deferred，fakeMessage 會自動 editReply 解決報錯！
             if (commandName === 'steam') return checkSteamUpdates(client, true, fakeMessage);
             if (commandName === 'tweet') return checkTwitterUpdates(client, true, fakeMessage);
-            if (commandName === 'yt')    return checkYouTubeUpdates(client, true, fakeMessage);
+            if (commandName === 'youtube')    return checkYouTubeUpdates(client, true, fakeMessage);
         }
 
         // ── 9. 最高權限管理員指令 (嚴格限制僅 Sles ID: 1330463890122735642 可執行) ──
