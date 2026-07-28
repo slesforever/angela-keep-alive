@@ -410,7 +410,7 @@ const BANNERS = {
         id: 'Season',
         name: 'Season-7 賽季池 — 梅菲斯特號',
         description: '第七賽季人格概率 UP！',
-        cost: { single: 130, ten: 1300 },
+        cost: { single: 0, ten: 0 },
         rateUp: {
             S3: ['［次元折斷者］李箱 / Dimension Shredder Yi Sang'],
             EGOS: [],
@@ -421,7 +421,7 @@ const BANNERS = {
         id: 'focus',
         name: '罪人特定提取 — Rodion Focus UP',
         description: '所有羅佳 (Rodion) 的人格與 E.G.O 出現機率大幅提升！',
-        cost: { single: 130, ten: 1300 },
+        cost: { single: 0, ten: 0 },
         rateUp: {
             S3: filterIdentities('000', '羅佳'),
             S2: filterIdentities('00', '羅佳'),
@@ -432,7 +432,7 @@ const BANNERS = {
         id: 'standard',
         name: '常駐提取 — 邊獄公司',
         description: '包含所有基礎人格與 E.G.O 的常駐提取卡池。',
-        cost: { single: 130, ten: 1300 },
+        cost: { single: 0, ten: 0 },
         rateUp: { S3: [], EGOS: [], S2: [] }
     }
 };
