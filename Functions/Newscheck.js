@@ -11,6 +11,7 @@ const MONITORED_USERS = (process.env.TARGET_USERS || 'LimbusCompany_B,ProjMoonSt
     .map(s => s.trim())
     .filter(Boolean);
 
+let notifyChannelId = process.env.NOTIFY_CHANNEL_ID || '1402282604165730348';
 const PING_ROLE = process.env.PING_ROLE_MENTION || '<@&1406984068725211177>';
 const STEAM_APP_ID = '1973530';
 const CHECK_INTERVAL = Number(process.env.CHECK_INTERVAL_MS || 20 * 1000);
@@ -56,37 +57,22 @@ const youtubeState = {
     recentIds: new Map()
 };
 
-// ─── 動態獲取目標發送頻道 (連動 Startup.js 與 /setchannel) ────────────────
-function getNewsChannelId() {
-    try {
-        const { getConfig } = require('./Startup.js');
-        if (typeof getConfig === 'function') {
-            const config = getConfig();
-            if (config.newsChannelId) return config.newsChannelId;
-            if (config.notifyChannelId) return config.notifyChannelId;
-        }
-    } catch (_) {}
-    return process.env.NEWS_CHANNEL_ID || process.env.NOTIFY_CHANNEL_ID || '1402282604165730348';
-}
-
-async function getTargetChannel(client) {
-    const channelId = getNewsChannelId();
-    if (!channelId) return null;
-
-    try {
-        return await client.channels.fetch(channelId);
-    } catch (err) {
-        console.error(`[Newscheck] 找不到指定頻道 (${channelId}):`, err.message);
-        return null;
-    }
-}
-
-// ─── 狀態管理與目錄初始化 ─────────────────────────────────────────────────
 function ensureStateDir() {
     const dir = path.dirname(STATE_FILE);
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
     }
+}
+
+function setNotifyChannel(channelId) {
+    if (!channelId) return false;
+    notifyChannelId = String(channelId);
+    saveState();
+    return true;
+}
+
+function getNotifyChannel() {
+    return notifyChannelId;
 }
 
 function getUserState(userId) {
@@ -261,6 +247,10 @@ function loadState() {
         const raw = fs.readFileSync(STATE_FILE, 'utf8');
         const data = JSON.parse(raw);
 
+        if (data?.channelId) {
+            notifyChannelId = String(data.channelId);
+        }
+
         if (data?.users && typeof data.users === 'object') {
             for (const [userId, info] of Object.entries(data.users)) {
                 const state = getUserState(userId);
@@ -320,6 +310,7 @@ function saveState() {
         cleanupRecent(youtubeState.recentIds);
 
         const data = {
+            channelId: notifyChannelId,
             users,
             steam: {
                 lastSteamNewsId: steamState.lastSteamNewsId,
@@ -537,6 +528,9 @@ async function fetchYouTubeItems(channelId) {
 }
 
 // ── Twitter 監測 ─────────────────────────────────────────────
+// targetUserId 可選：
+// - 不傳 => 監測所有 MONITORED_USERS
+// - 傳入 => 只測該 user
 async function checkTwitterUpdates(client, isManual = false, messageContext = null, targetUserId = null) {
     if (twitterLock) {
         if (!isManual) console.log('⏳ [Twitter] 上一輪尚未完成，略過本輪');
@@ -620,7 +614,7 @@ async function checkTwitterUpdates(client, isManual = false, messageContext = nu
             }).join('\n\n');
 
             try {
-                const channel = await getTargetChannel(client);
+                const channel = await client.channels.fetch(notifyChannelId);
                 if (channel) {
                     await channel.send({
                         content: `🔔 ${PING_ROLE} **偵測到 @${userId} 發布了 ${newItems.length} 則新訊息：**\n${body}`,
@@ -764,7 +758,7 @@ async function checkSteamUpdates(client, isManual = false, messageContext = null
         saveState();
 
         try {
-            const channel = await getTargetChannel(client);
+            const channel = await client.channels.fetch(notifyChannelId);
             if (!channel) return;
 
             let firstMessage = true;
@@ -878,7 +872,7 @@ async function checkYouTubeUpdates(client, isManual = false, messageContext = nu
         }).join('\n\n');
 
         try {
-            const channel = await getTargetChannel(client);
+            const channel = await client.channels.fetch(notifyChannelId);
             if (channel) {
                 await channel.send({
                     content: `🔔 ${PING_ROLE} **@${YOUTUBE_HANDLE} 發布了 ${newItems.length} 部新影片：**\n${body}`,
@@ -908,7 +902,7 @@ function startNewsCheckLoop(client) {
 
     loadState();
 
-    // 歷史快取預載入
+    // 立即執行一次，只建立快取，不會重複發
     void checkTwitterUpdates(client, false, null);
     void checkSteamUpdates(client, false, null);
     void checkYouTubeUpdates(client, false, null);
@@ -926,5 +920,7 @@ module.exports = {
     checkTwitterUpdates,
     checkSteamUpdates,
     checkYouTubeUpdates,
-    startNewsCheckLoop
+    startNewsCheckLoop,
+    setNotifyChannel,
+    getNotifyChannel
 };
