@@ -143,7 +143,7 @@ async function handleSlashCommands(client, interaction) {
             else                comment = '「100% 純度的純真男同！ Angela 判定無誤。」';
 
             const embed = new EmbedBuilder()
-                .setTitle('🏳️‍🌈 同性戀指數測試 (Gay Rate)')
+                .setTitle('男同指數測試 (Gay Rate)')
                 .setColor(0x3498db)
                 .setDescription(`**${target.username}** 的男同指數為：**${rate}%**\n\n\`[${bar}]\` ${rate}%\n\n> ${comment}`)
                 .setThumbnail(target.displayAvatarURL({ dynamic: true }))
@@ -159,12 +159,12 @@ async function handleSlashCommands(client, interaction) {
             
             let comment = '';
             if (rate < 20)      comment = '「姬圈指數較低，極度純粹的直女屬性。」';
-            else if (rate < 50) comment = '「有些許姬圈潛質，值得進一步觀察。」';
-            else if (rate < 80) comment = '「姬圈能量爆棚！極具吸引力。」';
-            else                comment = '「100% 頂級姬圈霸主！ Angela 認證完畢。」';
+            else if (rate < 50) comment = '「有些許女同潛質，值得進一步觀察。」';
+            else if (rate < 80) comment = '「同能量爆棚！極具吸引力。」';
+            else                comment = '「100% 頂級女同霸主！ Angela 認證完畢。」';
 
             const embed = new EmbedBuilder()
-                .setTitle('👭 姬圈指數測試 (Lesbian Rate)')
+                .setTitle('女同圈指數測試 (Lesbian Rate)')
                 .setColor(0xe91e63)
                 .setDescription(`**${target.username}** 的女同指數為：**${rate}%**\n\n\`[${bar}]\` ${rate}%\n\n> ${comment}`)
                 .setThumbnail(target.displayAvatarURL({ dynamic: true }))
