@@ -77,8 +77,8 @@ const client = new Client({
     ],
 });
 
-// ─── 斜線指令選單定義 ──────────────────────────────────────────
-const slashCommands = [
+// ─── 所有斜線指令定義 (讓 Discord 內建選單直接顯示) ─────────────
+const allSlashCommands = [
     // 頻道設定
     new SlashCommandBuilder()
         .setName('setchannel')
@@ -102,47 +102,47 @@ const slashCommands = [
     // 抽卡
     new SlashCommandBuilder()
         .setName('pull')
-        .setDescription('進行抽卡')
-        .addIntegerOption(opt =>
-            opt.setName('count')
-                .setDescription('抽卡次數')
+        .setDescription('進行抽取人格/E.G.O')
+        .addIntegerOption(option =>
+            option.setName('count')
+                .setDescription('選擇抽卡次數')
                 .addChoices(
                     { name: '單抽 (1次)', value: 1 },
                     { name: '十連抽 (10次)', value: 10 }
                 )),
 
-    // 背包 & 清單
-    new SlashCommandBuilder().setName('pack').setDescription('查看 LC 主頁式背包介面'),
-    new SlashCommandBuilder().setName('list').setDescription('查看全池機率與可獲得清單'),
+    // 背包與資訊
+    new SlashCommandBuilder().setName('pack').setDescription('查看 LC 主頁式背包與資源介面'),
+    new SlashCommandBuilder().setName('list').setDescription('查看當前卡池機率與清單'),
 
-    // 戰鬥 & 隊伍
-    new SlashCommandBuilder().setName('battle').setDescription('選擇難度出戰關卡'),
-    new SlashCommandBuilder().setName('party').setDescription('隊伍陣容查看與管理'),
+    // 戰鬥與隊伍
+    new SlashCommandBuilder().setName('battle').setDescription('選擇難度進入戰鬥並獲取狂氣'),
+    new SlashCommandBuilder().setName('party').setDescription('查看與管理出戰隊伍陣容'),
 
-    // 罪人系統
-    new SlashCommandBuilder().setName('sinner').setDescription('罪人清單與詳細資訊'),
-    new SlashCommandBuilder().setName('uptie').setDescription('進行罪人連結提升'),
+    // 罪人管理
+    new SlashCommandBuilder().setName('sinner').setDescription('查看罪人詳細資料與清單'),
+    new SlashCommandBuilder().setName('uptie').setDescription('進行罪人人格/E.G.O 連結提升'),
     new SlashCommandBuilder().setName('equip').setDescription('更換罪人裝備與人格'),
-    new SlashCommandBuilder().setName('threads').setDescription('查詢當前絲線與資源'),
+    new SlashCommandBuilder().setName('threads').setDescription('查詢當前持有絲線與資源'),
 
     // 鏡光迷宮
-    new SlashCommandBuilder().setName('md').setDescription('開啟或查看鏡光迷宮狀態'),
+    new SlashCommandBuilder().setName('md').setDescription('開啟或查看鏡光迷宮進度'),
 
-    // 新聞測試
-    new SlashCommandBuilder().setName('steam').setDescription('手動觸發測試 Steam 最新公告'),
-    new SlashCommandBuilder().setName('tweet').setDescription('手動觸發測試 Twitter 最新推文'),
-    new SlashCommandBuilder().setName('yt').setDescription('手動觸發測試 YouTube 最新影片'),
+    // 社群新聞測試
+    new SlashCommandBuilder().setName('steam').setDescription('手動觸發 Steam 最新更新檢測'),
+    new SlashCommandBuilder().setName('tweet').setDescription('手動觸發 Twitter 最新推文檢測'),
+    new SlashCommandBuilder().setName('yt').setDescription('手動觸發 YouTube 最新影片檢測'),
 
-    // 管理員發放指令
-    new SlashCommandBuilder().setName('givelunacy').setDescription('[管理員] 發放狂氣').setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
-    new SlashCommandBuilder().setName('givefragments').setDescription('[管理員] 發放碎片').setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
-    new SlashCommandBuilder().setName('givescrolls').setDescription('[管理員] 發放抽卡券').setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
-    new SlashCommandBuilder().setName('givethreads').setDescription('[管理員] 發放絲線').setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
-    new SlashCommandBuilder().setName('updaterewards').setDescription('[管理員] 更新獎勵設置').setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
-    new SlashCommandBuilder().setName('updatebuff').setDescription('[管理員] 更新倍率 Buff').setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+    // 管理員指令
+    new SlashCommandBuilder().setName('givelunacy').setDescription('【管理員】發放狂氣').setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+    new SlashCommandBuilder().setName('givefragments').setDescription('【管理員】發放碎片').setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+    new SlashCommandBuilder().setName('givescrolls').setDescription('【管理員】發放抽卡券').setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+    new SlashCommandBuilder().setName('givethreads').setDescription('【管理員】發放絲線').setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+    new SlashCommandBuilder().setName('updaterewards').setDescription('【管理員】更新獎勵設置').setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+    new SlashCommandBuilder().setName('updatebuff').setDescription('【管理員】更新倍率 Buff').setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
     // Help
-    new SlashCommandBuilder().setName('help').setDescription('顯示 Angela 機器人指令清單')
+    new SlashCommandBuilder().setName('help').setDescription('顯示 Angela 系統全部斜線指令選單')
 ];
 
 // ─── 工具函式 ──────────────────────────────────────────────────
@@ -183,11 +183,11 @@ async function announceCurrentRateUps(botClient) {
     }
 }
 
-// ─── 處理斜線指令 (Interaction) ───────────────────────────
+// ─── 處理斜線指令 (InteractionCreate) ─────────────────────────
 client.on(Events.InteractionCreate, async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
 
-    // 1. 特殊指令 /setchannel 本地邏輯
+    // 1. /setchannel 專屬邏輯
     if (interaction.commandName === 'setchannel') {
         const type = interaction.options.getString('type');
         const targetChannel = interaction.options.getChannel('target_channel');
@@ -214,7 +214,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         return;
     }
 
-    // 2. 其他所有斜線指令統一傳給 Commanders.js 處理
+    // 2. 其他指令分發至 Commanders.js
     try {
         await handleCommands(client, interaction);
     } catch (err) {
@@ -232,10 +232,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
 client.once(Events.ClientReady, async () => {
     console.log(`🤖 Angela 系統脈衝對齊。已激活：${client.user.tag}`);
 
-    // 一次性將所有斜線指令自動註冊給 Discord
+    // 一次性註冊所有斜線指令至 Discord 選單
     try {
-        await client.application.commands.set(slashCommands.map(cmd => cmd.toJSON()));
-        console.log('✅ 所有斜線指令（Slash Commands）已自動註冊完畢！');
+        await client.application.commands.set(allSlashCommands.map(cmd => cmd.toJSON()));
+        console.log('✅ 所有斜線指令選單已成功註冊至 Discord！');
     } catch (err) {
         console.error('❌ 註冊斜線指令失敗:', err.message);
     }
@@ -254,7 +254,7 @@ client.once(Events.ClientReady, async () => {
                     embeds: [new EmbedBuilder()
                         .setTitle('🟢 系統連線：AI 助理 Angela 已重新上線')
                         .setColor(0x00b4d8)
-                        .setDescription('「主管，精神脈衝已重新對齊。\n核心系統與指令發射器已就緒，隨時待命。」\n\n請直接輸入 `/help` 或 `/` 即可開啟指令選單。')
+                        .setDescription('「主管，精神脈衝已重新對齊。\n核心系統與指令發射器已就緒，隨時待命。」\n\n請直接輸入 `/` 即可喚出全套斜線指令選單。')
                         .setTimestamp()],
                 });
             }
