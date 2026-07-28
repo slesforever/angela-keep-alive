@@ -74,7 +74,7 @@ const client = new Client({
     ],
 });
 
-// ─── 內建斜線指令 (已重排：一般指令在上，管理員指令沉底) ─────────
+// ─── 內建斜線指令 (已去重：僅保留唯一定義) ────────────────────────
 const allSlashCommands = [
     // 1. 抽卡
     new SlashCommandBuilder()
@@ -119,7 +119,7 @@ const allSlashCommands = [
     // 7. 說明選單
     new SlashCommandBuilder().setName('help').setDescription('顯示 Angela 系統全部斜線指令選單'),
 
-    // ─── 伺服器管理員專用指令 (需群組管理員權限) ───────────────────
+    // ─── 伺服器管理員專用指令 ───────────────────────────────────
     new SlashCommandBuilder()
         .setName('setchannel')
         .setDescription('【伺服器管理員】設定 Angela 系統各項通知頻道')
@@ -154,10 +154,10 @@ const allSlashCommands = [
         .setDescription('【伺服器管理員】手動觸發 YouTube 最新影片檢測')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
-    // ─── 最高特權管理員專用指令 (沉底，僅限 ID: 1330463890122735642) ───
+    // ─── 最高特權擁有者專用指令 (僅限 Sles ID: 1330463890122735642) ───
     new SlashCommandBuilder()
         .setName('givelunacy')
-        .setDescription('👑【最高權限】發放狂氣 (可給個人或全伺服器)')
+        .setDescription('👑【Sles 專屬】發放狂氣 (可給個人或全伺服器)')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
         .addIntegerOption(opt => opt.setName('amount').setDescription('發放數量').setRequired(true))
         .addUserOption(opt => opt.setName('target').setDescription('指定目標玩家 (若發給全服可留空)'))
@@ -165,7 +165,7 @@ const allSlashCommands = [
 
     new SlashCommandBuilder()
         .setName('givefragments')
-        .setDescription('👑【最高權限】發放碎片 (可給個人或全伺服器)')
+        .setDescription('👑【Sles 專屬】發放碎片 (可給個人或全伺服器)')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
         .addIntegerOption(opt => opt.setName('amount').setDescription('發放數量').setRequired(true))
         .addUserOption(opt => opt.setName('target').setDescription('指定目標玩家 (若發給全服可留空)'))
@@ -173,7 +173,7 @@ const allSlashCommands = [
 
     new SlashCommandBuilder()
         .setName('givescrolls')
-        .setDescription('👑【最高權限】發放抽卡券 (可給個人或全伺服器)')
+        .setDescription('👑【Sles 專屬】發放抽卡券 (可給個人或全伺服器)')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
         .addIntegerOption(opt => opt.setName('amount').setDescription('發放數量').setRequired(true))
         .addUserOption(opt => opt.setName('target').setDescription('指定目標玩家 (若發給全服可留空)'))
@@ -181,7 +181,7 @@ const allSlashCommands = [
 
     new SlashCommandBuilder()
         .setName('givethreads')
-        .setDescription('👑【最高權限】發放絲線 (可給個人或全伺服器)')
+        .setDescription('👑【Sles 專屬】發放絲線 (可給個人或全伺服器)')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
         .addIntegerOption(opt => opt.setName('amount').setDescription('發放數量').setRequired(true))
         .addUserOption(opt => opt.setName('target').setDescription('指定目標玩家 (若發給全服可留空)'))
@@ -189,12 +189,12 @@ const allSlashCommands = [
 
     new SlashCommandBuilder()
         .setName('updaterewards')
-        .setDescription('👑【最高權限】更新獎勵設置')
+        .setDescription('👑【Sles 專屬】更新獎勵設置')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
     new SlashCommandBuilder()
         .setName('updatebuff')
-        .setDescription('👑【最高權限】更新倍率 Buff')
+        .setDescription('👑【Sles 專屬】更新倍率 Buff')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
 ];
 
@@ -240,7 +240,6 @@ async function announceCurrentRateUps(botClient) {
 client.on(Events.InteractionCreate, async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
 
-    // /setchannel 專屬頻道設定邏輯
     if (interaction.commandName === 'setchannel') {
         const type = interaction.options.getString('type');
         const targetChannel = interaction.options.getChannel('target_channel');
@@ -280,16 +279,19 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
 });
 
-// ─── 上線事件與同步斜線指令選單 ─────────────────────────────
+// ─── 上線事件：清除舊全域指令，並重置伺服器區域指令 ─────────────
 client.once(Events.ClientReady, async () => {
     console.log(`🤖 Angela 系統脈衝對齊。已激活：${client.user.tag}`);
 
     try {
+        // 🔥 關鍵修復：清空舊全域指令，防止 Discord 殘留重複指令
+        await client.application.commands.set([]);
+        
         const commandData = allSlashCommands.map(cmd => cmd.toJSON());
         for (const guild of client.guilds.cache.values()) {
             await guild.commands.set(commandData);
         }
-        console.log('✅ 所有斜線指令已成功重排並同步至 Discord 原生選單！');
+        console.log('✅ 全域舊指令已清空，伺服器區域指令已重新註冊！');
     } catch (err) {
         console.error('❌ 註冊斜線指令失敗:', err.message);
     }
@@ -308,7 +310,7 @@ client.once(Events.ClientReady, async () => {
                     embeds: [new EmbedBuilder()
                         .setTitle('🟢 系統連線：AI 助理 Angela 已重新上線')
                         .setColor(0x00b4d8)
-                        .setDescription('「主管，精神脈衝已重新對齊。\n指令選單已完成重新排序與權限交接。」\n\n請輸入 `/` 即可喚出內建選單。')
+                        .setDescription('「主管，精神脈衝已重新對齊。\n全域舊指令已抹除，特權與新聞檢測模組已完美校正。」')
                         .setTimestamp()],
                 });
             }
