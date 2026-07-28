@@ -106,35 +106,69 @@ return new EmbedBuilder()
 
 // ─────────────────────────────────────────────
 // 建立卡池選擇器
-// 注意：使用 banner.id 作為唯一識別
-// 不固定任何卡池名稱
+//
+// 注意：
+// 這裡使用 BANNERS 的「外層 Key」作為 value
+//
+// 例如：
+//
+// const BANNERS = {
+//     Season: {
+//         id: 'Season',
+//         name: 'Season-7 賽季池'
+//     },
+//     focus: {
+//         id: 'focus',
+//         name: 'Rodion Focus UP'
+//     }
+// };
+//
+// 選單傳出去的就是：
+// Season
+// focus
+//
+// 這樣可以直接對應 PullSystem.js 的：
+// banners[bannerKey]
 // ─────────────────────────────────────────────
 
 function createBannerSelectMenu(banners) {
-const options = Object.values(banners)
+const options = Object.entries(banners)
 .filter(
-banner =>
+([bannerKey, banner]) =>
 banner &&
-banner.id
+bannerKey
 )
 .slice(0, 25)
-.map(banner => ({
+.map(
+([bannerKey, banner]) => ({
 label: String(
-banner.name || banner.id
+banner.name ||
+banner.id ||
+bannerKey
 ).slice(0, 100),
 
 ```
-        description: String(
-            banner.description ||
-            '沒有卡池說明'
-        ).slice(0, 100),
+            description: String(
+                banner.description ||
+                '沒有卡池說明'
+            ).slice(0, 100),
 
-        value: String(banner.id),
-    }));
+            // 使用 BANNERS 外層 Key
+            // 不使用 banner.id
+            value: String(
+                bannerKey
+            ),
+        })
+    );
 
-const menu = new StringSelectMenuBuilder()
-    .setCustomId('pull_select_banner')
-    .setPlaceholder('🚂 選擇要進行提取的卡池...');
+const menu =
+    new StringSelectMenuBuilder()
+        .setCustomId(
+            'pull_select_banner'
+        )
+        .setPlaceholder(
+            '🚂 選擇要進行提取的卡池...'
+        );
 
 if (options.length > 0) {
     menu.addOptions(options);
@@ -150,25 +184,34 @@ return new ActionRowBuilder()
 
 // ─────────────────────────────────────────────
 // 建立抽卡按鈕
+//
+// 注意：這裡傳入的是 BANNERS 外層 Key
 // ─────────────────────────────────────────────
 
-function createPullButtons(banner) {
-const bannerId = String(
-banner?.id || 'standard'
+function createPullButtons(
+banner,
+bannerKey
+) {
+const finalBannerKey =
+String(
+bannerKey ||
+'standard'
 );
 
 ```
 const singleCost =
-    banner?.cost?.single ?? 130;
+    banner?.cost?.single ??
+    130;
 
 const tenCost =
-    banner?.cost?.ten ?? 1300;
+    banner?.cost?.ten ??
+    1300;
 
 return new ActionRowBuilder()
     .addComponents(
         new ButtonBuilder()
             .setCustomId(
-                `pull_execute_${bannerId}_1`
+                `pull_execute_${finalBannerKey}_1`
             )
             .setLabel(
                 `單抽 (${singleCost} 狂氣)`
@@ -179,7 +222,7 @@ return new ActionRowBuilder()
 
         new ButtonBuilder()
             .setCustomId(
-                `pull_execute_${bannerId}_10`
+                `pull_execute_${finalBannerKey}_10`
             )
             .setLabel(
                 `十連 (${tenCost} 狂氣)`
@@ -196,7 +239,9 @@ return new ActionRowBuilder()
 // 停用抽卡介面
 // ─────────────────────────────────────────────
 
-function disableComponents(components) {
+function disableComponents(
+components
+) {
 return components.map(row => {
 const newRow =
 ActionRowBuilder.from(row);
@@ -216,53 +261,39 @@ ActionRowBuilder.from(row);
 
 // ─────────────────────────────────────────────
 // 找預設卡池
-// 不再固定任何卡池名稱
 //
-// 會自動使用 BANNERS 裡第一個有效卡池
+// 不固定 Season / focus / standard
+// 自動取得 BANNERS 第一個有效卡池
+//
+// 回傳格式：
+// {
+//     key: 'Season',
+//     banner: { ... }
+// }
 // ─────────────────────────────────────────────
 
-function getDefaultBanner(banners) {
-return (
-Object.values(banners)
+function getDefaultBanner(
+banners
+) {
+const entry =
+Object.entries(banners)
 .find(
-banner =>
+([bannerKey, banner]) =>
 banner &&
-banner.id
-) || null
+bannerKey
 );
+
+```
+if (!entry) {
+    return null;
 }
 
-// ─────────────────────────────────────────────
-// 根據 banner.id 找卡池
-//
-// 不依賴 BANNERS 的外層 Key
-// 例如：
-//
-// BANNERS = {
-//     Season: {
-//         id: 'Season'
-//     }
-// }
-//
-// 或：
-//
-// BANNERS = {
-//     my_banner: {
-//         id: 'Season-7'
-//     }
-// }
-//
-// 都可以正常找到
-// ─────────────────────────────────────────────
+return {
+    key: entry[0],
+    banner: entry[1],
+};
+```
 
-function findBannerById(banners, bannerId) {
-return Object.values(banners)
-.find(
-banner =>
-banner &&
-String(banner.id) ===
-String(bannerId)
-) || null;
 }
 
 // ─────────────────────────────────────────────
@@ -270,19 +301,23 @@ String(bannerId)
 // ─────────────────────────────────────────────
 
 module.exports = {
-data: new SlashCommandBuilder()
+data:
+new SlashCommandBuilder()
 .setName('pull')
 .setDescription(
 '開啟狂氣提取介面'
 ),
 
 ```
-async execute(interaction) {
-    const banners = getBanners();
+async execute(
+    interaction
+) {
+    const banners =
+        getBanners();
 
-    // ─────────────────────────────────────
-    // 檢查是否有卡池
-    // ─────────────────────────────────────
+    // ─────────────────────────────────
+    // 檢查卡池
+    // ─────────────────────────────────
 
     if (
         !Object.keys(banners).length
@@ -294,15 +329,18 @@ async execute(interaction) {
         });
     }
 
-    // ─────────────────────────────────────
-    // 自動取得第一個有效卡池
-    // 不再固定 Season / standard 等名稱
-    // ─────────────────────────────────────
+    // ─────────────────────────────────
+    // 自動取得預設卡池
+    // ─────────────────────────────────
 
-    const defaultBanner =
-        getDefaultBanner(banners);
+    const defaultBannerData =
+        getDefaultBanner(
+            banners
+        );
 
-    if (!defaultBanner) {
+    if (
+        !defaultBannerData
+    ) {
         return interaction.reply({
             content:
                 '❌ 找不到可用的抽卡卡池。',
@@ -310,9 +348,15 @@ async execute(interaction) {
         });
     }
 
-    // ─────────────────────────────────────
-    // 建立抽卡介面
-    // ─────────────────────────────────────
+    const defaultBannerKey =
+        defaultBannerData.key;
+
+    const defaultBanner =
+        defaultBannerData.banner;
+
+    // ─────────────────────────────────
+    // 建立介面
+    // ─────────────────────────────────
 
     const selectRow =
         createBannerSelectMenu(
@@ -321,7 +365,8 @@ async execute(interaction) {
 
     const buttonRow =
         createPullButtons(
-            defaultBanner
+            defaultBanner,
+            defaultBannerKey
         );
 
     const embed =
@@ -331,7 +376,9 @@ async execute(interaction) {
 
     const response =
         await interaction.reply({
-            embeds: [embed],
+            embeds: [
+                embed,
+            ],
 
             components: [
                 selectRow,
@@ -341,9 +388,9 @@ async execute(interaction) {
             fetchReply: true,
         });
 
-    // ─────────────────────────────────────
-    // 建立互動收集器
-    // ─────────────────────────────────────
+    // ─────────────────────────────────
+    // 建立 Component Collector
+    // ─────────────────────────────────
 
     const collector =
         response.createMessageComponentCollector({
@@ -354,9 +401,9 @@ async execute(interaction) {
         'collect',
         async componentInteraction => {
 
-            // ─────────────────────────────
-            // 只允許開啟介面的玩家操作
-            // ─────────────────────────────
+            // ─────────────────────────
+            // 玩家驗證
+            // ─────────────────────────
 
             if (
                 componentInteraction.user.id !==
@@ -371,9 +418,9 @@ async execute(interaction) {
 
             try {
 
-                // ─────────────────────────
+                // ─────────────────────
                 // 選擇卡池
-                // ─────────────────────────
+                // ─────────────────────
 
                 if (
                     componentInteraction.isStringSelectMenu() &&
@@ -381,11 +428,21 @@ async execute(interaction) {
                         'pull_select_banner'
                 ) {
 
-                    const bannerId =
+                    // 這裡取得的是
+                    // BANNERS 外層 Key
+                    //
+                    // 例如：
+                    // Season
+                    // focus
+                    // standard
+
+                    const bannerKey =
                         componentInteraction
                             .values?.[0];
 
-                    if (!bannerId) {
+                    if (
+                        !bannerKey
+                    ) {
                         return componentInteraction.reply({
                             content:
                                 '❌ 無法取得選擇的卡池。',
@@ -393,15 +450,15 @@ async execute(interaction) {
                         });
                     }
 
-                    // 根據 banner.id 搜尋
-                    // 不依賴 BANNERS 外層 Key
+                    // 直接使用外層 Key
                     const selectedBanner =
-                        findBannerById(
-                            banners,
-                            bannerId
-                        );
+                        banners[
+                            bannerKey
+                        ];
 
-                    if (!selectedBanner) {
+                    if (
+                        !selectedBanner
+                    ) {
                         return componentInteraction.reply({
                             content:
                                 '❌ 找不到這個卡池。',
@@ -416,7 +473,8 @@ async execute(interaction) {
 
                     const newButtons =
                         createPullButtons(
-                            selectedBanner
+                            selectedBanner,
+                            bannerKey
                         );
 
                     await componentInteraction.update({
@@ -433,9 +491,9 @@ async execute(interaction) {
                     return;
                 }
 
-                // ─────────────────────────
+                // ─────────────────────
                 // 執行抽卡
-                // ─────────────────────────
+                // ─────────────────────
 
                 if (
                     componentInteraction.isButton() &&
@@ -445,67 +503,47 @@ async execute(interaction) {
                 ) {
 
                     /*
-                     * Custom ID 格式：
-                     *
-                     * pull_execute_${bannerId}_1
-                     * pull_execute_${bannerId}_10
-                     *
-                     * 例如：
+                     * Custom ID：
                      *
                      * pull_execute_Season_1
+                     * pull_execute_Season_10
+                     *
+                     * pull_execute_focus_1
                      * pull_execute_focus_10
                      *
-                     * 最後一段永遠是抽卡次數。
+                     * 最後一段是抽卡次數。
                      */
 
-                    const customId =
-                        componentInteraction.customId;
+                    const parts =
+                        componentInteraction
+                            .customId
+                            .split('_');
 
-                    const prefix =
-                        'pull_execute_';
-
-                    const payload =
-                        customId.slice(
-                            prefix.length
-                        );
-
-                    const lastUnderscore =
-                        payload.lastIndexOf('_');
-
-                    if (
-                        lastUnderscore === -1
-                    ) {
-                        return componentInteraction.reply({
-                            content:
-                                '❌ 無效的抽卡按鈕。',
-                            ephemeral: true,
-                        });
-                    }
-
-                    // 取得抽卡次數
+                    // 最後一段是 1 或 10
                     const count =
                         parseInt(
-                            payload.slice(
-                                lastUnderscore + 1
-                            ),
+                            parts.pop(),
                             10
                         );
 
-                    // 取得完整 banner ID
-                    // 支援 ID 中包含 _
-                    const bannerId =
-                        payload.slice(
-                            0,
-                            lastUnderscore
-                        );
+                    // 剩餘部分重新組合
+                    // 得到 BANNERS 外層 Key
+                    const bannerKey =
+                        parts
+                            .slice(2)
+                            .join('_');
 
-                    // ─────────────────────
+                    // ─────────────────
                     // 驗證抽卡次數
-                    // ─────────────────────
+                    // ─────────────────
 
                     if (
-                        !Number.isInteger(count) ||
-                        ![1, 10].includes(count)
+                        !Number.isInteger(
+                            count
+                        ) ||
+                        ![1, 10].includes(
+                            count
+                        )
                     ) {
                         return componentInteraction.reply({
                             content:
@@ -514,17 +552,15 @@ async execute(interaction) {
                         });
                     }
 
-                    // ─────────────────────
+                    // ─────────────────
                     // 驗證卡池
-                    // ─────────────────────
+                    // ─────────────────
 
-                    const selectedBanner =
-                        findBannerById(
-                            banners,
-                            bannerId
-                        );
-
-                    if (!selectedBanner) {
+                    if (
+                        !banners[
+                            bannerKey
+                        ]
+                    ) {
                         return componentInteraction.reply({
                             content:
                                 '❌ 找不到指定的卡池。',
@@ -532,22 +568,27 @@ async execute(interaction) {
                         });
                     }
 
-                    // ─────────────────────
-                    // 回應抽卡請求
-                    // ─────────────────────
+                    // ─────────────────
+                    // 延遲回覆
+                    // ─────────────────
 
                     await componentInteraction.deferReply({
                         ephemeral: false,
                     });
 
-                    // ─────────────────────
+                    // ─────────────────
                     // 執行抽卡
-                    // ─────────────────────
+                    //
+                    // 直接傳 BANNERS 外層 Key
+                    //
+                    // PullSystem.js：
+                    // banners[bannerKey]
+                    // ─────────────────
 
                     await executePull(
                         componentInteraction.client,
                         componentInteraction.user,
-                        bannerId,
+                        bannerKey,
                         count,
                         componentInteraction
                     );
@@ -555,7 +596,9 @@ async execute(interaction) {
                     return;
                 }
 
-            } catch (error) {
+            } catch (
+                error
+            ) {
 
                 console.error(
                     '[PullMenu] Component Error:',
@@ -593,9 +636,9 @@ async execute(interaction) {
         }
     );
 
-    // ─────────────────────────────────────
-    // 介面過期
-    // ─────────────────────────────────────
+    // ─────────────────────────────────
+    // Collector 結束
+    // ─────────────────────────────────
 
     collector.on(
         'end',
