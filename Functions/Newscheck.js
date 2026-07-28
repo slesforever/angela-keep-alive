@@ -24,6 +24,9 @@ const STEAM_FETCH_TIMEOUT_MS = Number(process.env.STEAM_FETCH_TIMEOUT_MS || 5000
 // Steam 圖片前綴
 const STEAM_CLAN_IMAGE_BASE = 'https://steamcdn-a.akamaihd.net/steamcommunity/public/images/clans/';
 
+// 🎯 YouTube 設定：正確的 Project Moon 官方頻道 ID (ProjectMoon Official)
+const DEFAULT_PM_CHANNEL_ID = 'UCpqyr6h4RCXCEswHlkSjykA'; 
+const YOUTUBE_CHANNEL_ID_ENV = process.env.YOUTUBE_CHANNEL_ID || DEFAULT_PM_CHANNEL_ID;
 const YOUTUBE_HANDLE = (process.env.YOUTUBE_HANDLE || 'ProjectMoonOfficial').replace(/^@/, '');
 const YOUTUBE_PAGE_URL = `https://www.youtube.com/@${YOUTUBE_HANDLE}`;
 
@@ -461,6 +464,10 @@ async function fetchTweetItemsFromAllNodes(userId) {
 }
 
 async function resolveYouTubeChannelId() {
+    if (YOUTUBE_CHANNEL_ID_ENV && /^UC[\w-]{22}$/.test(YOUTUBE_CHANNEL_ID_ENV)) {
+        return YOUTUBE_CHANNEL_ID_ENV;
+    }
+
     const candidates = [
         `${YOUTUBE_PAGE_URL}/videos`,
         YOUTUBE_PAGE_URL,
@@ -487,7 +494,7 @@ async function resolveYouTubeChannelId() {
         } catch (_) {}
     }
 
-    throw new Error('無法解析 YouTube Channel ID');
+    return DEFAULT_PM_CHANNEL_ID;
 }
 
 async function fetchYouTubeItems(channelId) {
@@ -495,7 +502,7 @@ async function fetchYouTubeItems(channelId) {
     const response = await fetchWithTimeout(url, {}, 12000);
 
     if (!response.ok) {
-        throw new Error(`YouTube RSS HTTP 錯誤! 狀態碼: ${response.status}`);
+        throw new Error(`YouTube RSS HTTP 錯誤! 狀態碼: ${response.status} ( Channel ID: ${channelId} )`);
     }
 
     const xml = await response.text();
@@ -584,7 +591,6 @@ async function checkTwitterUpdates(client, isManual = false, messageContext = nu
             for (const item of newItems) rememberRecent(state.recentIds, item.id);
             saveState();
 
-            // 防護措施：超過 1900 字自動分段發送，避免觸發 Discord 2000 字上限
             try {
                 const channel = await client.channels.fetch(notifyChannelId);
                 if (channel) {
@@ -795,10 +801,12 @@ async function checkYouTubeUpdates(client, isManual = false, messageContext = nu
     youtubeLock = true;
 
     try {
-        if (!youtubeState.channelId) {
-            youtubeState.channelId = await resolveYouTubeChannelId();
+        // 🔥 自動對齊正確的 Channel ID (UCpqyr6h4RCXCEswHlkSjykA)
+        const targetChannelId = process.env.YOUTUBE_CHANNEL_ID || DEFAULT_PM_CHANNEL_ID;
+        if (youtubeState.channelId !== targetChannelId) {
+            youtubeState.channelId = targetChannelId;
             saveState();
-            console.log(`📡 [YouTube] 已解析頻道 ID：${youtubeState.channelId}`);
+            console.log(`📡 [YouTube] 已校正 Channel ID：${youtubeState.channelId}`);
         }
 
         const feedItems = await fetchYouTubeItems(youtubeState.channelId);
