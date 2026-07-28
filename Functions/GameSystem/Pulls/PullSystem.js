@@ -1,20 +1,27 @@
-// Functions/GameSystem/Pulls/PullSystem.js
 'use strict';
 
 const { EmbedBuilder } = require('discord.js');
 const identitiesData = require('./identitiesData.js');
-const { loadUserInventory, saveUserInventory } = require('../PacksAndData.js');
 
-// ─── 機率設定 ─────────────────────────────────────────────────
+let loadUserInventory, saveUserInventory;
+try {
+    const packsModule = require('../PacksAndData.js');
+    loadUserInventory = packsModule.loadUserInventory;
+    saveUserInventory = packsModule.saveUserInventory;
+} catch (e) {
+    loadUserInventory = () => [];
+    saveUserInventory = () => {};
+}
+
 const BASE_WEIGHTS = {
-    COLOR_FIXER:  0.001,   // 0.001%
-    ABN:          0.15,    // 0.15%  → 觸發異想體二段抽
-    SPECIAL:      0.30,    // 0.3%
-    S4:           0.50,    // 0.5%
-    EGOS:         1.50,    // 1.5%   → 罪人 E.G.O 技能/裝備
-    S3:           2.90,    // 2.9%   → ★★★ 人格
-    S2:          15.00,    // 15.0%  → ★★ 人格
-    S1:          79.649,   // 剩餘   → ★ 人格
+    COLOR_FIXER:  0.001,
+    ABN:          0.15,
+    SPECIAL:      0.30,
+    S4:           0.50,
+    EGOS:         1.50,
+    S3:           2.90,
+    S2:          15.00,
+    S1:          79.649,
 };
 
 const ABN_WEIGHTS = {
@@ -27,7 +34,7 @@ const ABN_WEIGHTS = {
 };
 
 const TIER_CONFIGS = {
-    COLOR_FIXER: { poolKeys: ['ColorFixer', 'Color_Fixer', 'Color Fixer'], label: 'Color Fixer', emoji: '🔴', color: 0xff3838, shardValue: 10 },
+    COLOR_FIXER: { poolKeys: ['Color Fixer', 'ColorFixer', 'Color_Fixer'], label: 'Color Fixer', emoji: '🔴', color: 0xff3838, shardValue: 10 },
     ABN_ANGELA:  { poolKeys: ['ABN_ANGELA'],            label: '異想體 ANGELA', emoji: '🕊️', color: 0xffffff, shardValue: 20 },
     ABN_ALEPH:   { poolKeys: ['ABN_ALEPH'],             label: '異想體 ALEPH',  emoji: '🟣', color: 0x9b59b6, shardValue: 15 },
     ABN_WAW:     { poolKeys: ['ABN_WAW'],               label: '異想體 WAW',    emoji: '🔵', color: 0x3498db, shardValue: 10 },
@@ -66,7 +73,6 @@ function weightedDraw(weights) {
     return Object.keys(weights)[0];
 }
 
-// ─── 核心單抽邏輯 ─────────────────────────────────────────────
 function drawOnce(banner, tempInventory = [], forceS2OrHigher = false) {
     let weights = { ...BASE_WEIGHTS };
     if (forceS2OrHigher) {
@@ -83,7 +89,6 @@ function drawOnce(banner, tempInventory = [], forceS2OrHigher = false) {
     const config = TIER_CONFIGS[finalTier] || TIER_CONFIGS.S1;
     let name = '';
 
-    // 🎯 通用 UP 判斷 (50% 概率命中該稀有度的 UP 角色)
     const rateUpList = banner?.rateUp?.[finalTier] || [];
     if (rateUpList.length > 0 && Math.random() < 0.5) {
         name = pickRandom(rateUpList);
@@ -115,7 +120,6 @@ function formatItemDisplay(draw) {
     return `${draw.emoji} [${draw.label}] ${draw.name}`;
 }
 
-// ─── 主執行函數 (新增狂氣檢查與卡池參數) ──────────────────────────
 async function executePull(client, user, bannerKey = 'standard', pullCount = 1, interactionOrMessage) {
     const userId = user.id;
     const banner = identitiesData.BANNERS[bannerKey] || identitiesData.BANNERS['standard'];
@@ -129,17 +133,15 @@ async function executePull(client, user, bannerKey = 'standard', pullCount = 1, 
         console.error('[PullSystem] 讀取背包失敗:', err.message);
     }
 
-    // 💰 檢查與扣除狂氣 (此處預設背包內以 '狂氣' 計數)
     const lunacyCount = inv.filter(item => item === '狂氣').length;
     if (lunacyCount < cost) {
         const errorMsg = `❌ **狂氣不足！**\n抽卡需要 **${cost}** 狂氣，你目前持有 **${lunacyCount}** 狂氣。`;
-        if (interactionOrMessage.replied || interactionOrMessage.deferred) {
-            return interactionOrMessage.followUp({ content: errorMsg, ephemeral: true });
+        if (interactionOrMessage.deferred || interactionOrMessage.replied) {
+            return interactionOrMessage.editReply({ content: errorMsg });
         }
         return interactionOrMessage.reply({ content: errorMsg, ephemeral: true });
     }
 
-    // 扣除狂氣數量
     let deducted = 0;
     inv = inv.filter(item => {
         if (item === '狂氣' && deducted < cost) {
@@ -209,13 +211,10 @@ async function executePull(client, user, bannerKey = 'standard', pullCount = 1, 
         })
         .setTimestamp();
 
-    if (interactionOrMessage.isRepliable && (interactionOrMessage.replied || interactionOrMessage.deferred)) {
-        return interactionOrMessage.followUp({ embeds: [pullEmbed] });
+    if (interactionOrMessage.deferred || interactionOrMessage.replied) {
+        return interactionOrMessage.editReply({ content: null, embeds: [pullEmbed] });
     }
     return interactionOrMessage.reply({ embeds: [pullEmbed] });
 }
-
-
-
 
 module.exports = { executePull, BASE_WEIGHTS, ABN_WEIGHTS };
