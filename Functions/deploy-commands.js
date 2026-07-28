@@ -5,15 +5,7 @@ const commands = [
     // 抽卡
     new SlashCommandBuilder()
         .setName('pull')
-        .setDescription('進行抽卡')
-        .addIntegerOption(opt =>
-            opt.setName('count')
-                .setDescription('抽卡次數')
-                .addChoices(
-                    { name: '單抽 (1次)', value: 1 },
-                    { name: '十連抽 (10次)', value: 10 }
-                )
-        ),
+        .setDescription('開啟狂氣提取介面'),
 
     // 背包 & 清單
     new SlashCommandBuilder().setName('pack').setDescription('查看 LC 主頁式背包介面'),
