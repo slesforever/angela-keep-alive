@@ -566,11 +566,11 @@ async function executePull(
         pullCount === 10
             ? Number(
                 banner.cost?.ten ??
-                1300
+                0
             )
             : Number(
                 banner.cost?.single ??
-                130
+                0
             );
 
     // ─────────────────────────────────
