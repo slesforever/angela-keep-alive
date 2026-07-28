@@ -1,6 +1,3 @@
-Here's the complete corrected `pullmenu.js` with the three fixes applied (stale `buttonRow`, ephemeral results, and rebuilt select menu on collector end):
-
-```js
 'use strict';
 
 const {
