@@ -93,7 +93,7 @@ const allSlashCommands = [
     new SlashCommandBuilder()
         .setName('pull')
         .setDescription('進行抽取人格/E.G.O')
-    )),
+    ),
 
     // 2. 背包與機率
     new SlashCommandBuilder().setName('pack').setDescription('查看 LC 主頁式背包與資源介面'),
