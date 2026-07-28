@@ -8,8 +8,8 @@ const {
     ButtonBuilder, 
     ButtonStyle 
 } = require('discord.js');
-const identitiesData = require('../Functions/GameSystem/Pulls/identitiesData.js');
-const { executePull } = require('../Functions/GameSystem/Pulls/PullSystem.js');
+const identitiesData = require('./GameSystem/Pulls/identitiesData.js');
+const { executePull } = require('./GameSystem/Pulls/PullSystem.js');
 
 function createBannerEmbed(banner) {
     const rateUpS3 = banner.rateUp.S3?.length ? banner.rateUp.S3.join('\n• ') : '無';
