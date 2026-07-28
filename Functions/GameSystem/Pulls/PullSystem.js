@@ -9,6 +9,8 @@ const identitiesData = require('./identitiesData.js');
 
 let loadUserInventory;
 let saveUserInventory;
+let getOrCreatePlayer;
+let savePlayerData;
 
 try {
     const packsModule =
@@ -24,6 +26,16 @@ try {
             ? packsModule.saveUserInventory
             : () => {};
 
+    getOrCreatePlayer =
+        typeof packsModule.getOrCreatePlayer === 'function'
+            ? packsModule.getOrCreatePlayer
+            : (_c, _id) => ({ lunacy: 0, identities: [] });
+
+    savePlayerData =
+        typeof packsModule.savePlayerData === 'function'
+            ? packsModule.savePlayerData
+            : () => {};
+
 } catch (error) {
     console.error(
         '[PullSystem] 無法載入 PacksAndData.js:',
@@ -32,6 +44,8 @@ try {
 
     loadUserInventory = () => [];
     saveUserInventory = () => {};
+    getOrCreatePlayer = (_c, _id) => ({ lunacy: 0, identities: [] });
+    savePlayerData = () => {};
 }
 
 // ─────────────────────────────────────────────
@@ -591,14 +605,11 @@ async function executePull(
     }
 
     // ─────────────────────────────────
-    // 計算狂氣
+    // 計算狂氣（從 player.lunacy 讀取，非 inventory 計數）
     // ─────────────────────────────────
 
-    const lunacyCount =
-        inventory.filter(
-            item =>
-                item === '狂氣'
-        ).length;
+    const player = getOrCreatePlayer(client, user.id, user.username || 'Player');
+    const lunacyCount = player.lunacy || 0;
 
     if (
         lunacyCount < cost
@@ -627,23 +638,12 @@ async function executePull(
     }
 
     // ─────────────────────────────────
-    // 扣除狂氣
+    // 扣除狂氣（直接操作 player.lunacy）
     // ─────────────────────────────────
 
-    let deducted = 0;
+    player.lunacy = lunacyCount - cost;
 
-    const remainingInventory =
-        inventory.filter(item => {
-            if (
-                item === '狂氣' &&
-                deducted < cost
-            ) {
-                deducted++;
-                return false;
-            }
-
-            return true;
-        });
+    const remainingInventory = inventory;
 
     // ─────────────────────────────────
     // 開始抽卡
@@ -722,19 +722,20 @@ async function executePull(
     // ─────────────────────────────────
 
     try {
-        saveUserInventory(
+        player.identities = finalInventory;
+        savePlayerData(
             client,
             user.id,
-            finalInventory
+            player
         );
     } catch (error) {
         console.error(
-            '[PullSystem] 儲存背包失敗:',
+            '[PullSystem] 儲存玩家資料失敗:',
             error
         );
 
         throw new Error(
-            '抽卡完成，但儲存玩家背包時發生錯誤。'
+            '抽卡完成，但儲存玩家資料時發生錯誤。'
         );
     }
 
