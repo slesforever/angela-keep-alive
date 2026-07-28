@@ -312,7 +312,7 @@ client.once(Events.ClientReady, async () => {
 
     client.user.setPresence({
         status: 'idle',
-        activities: [{ name: 'customstatus', type: ActivityType.Custom, state: 'Sles被我吃掉了' }],
+        activities: [{ name: 'customstatus', type: ActivityType.Custom, state: '羅蘭。我不能在這裡停下。哪怕這是一條沒有盡頭的荊棘之路，哪怕最後只能迎來毫無意義的毀滅……我也要親手為這長達百年的悲劇畫上句號' }],
     });
 
     const config = getConfig();
