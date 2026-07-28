@@ -174,7 +174,7 @@ async function handleSlashCommands(client, interaction) {
         }
 
         // ── 8. 社群測試指令 (限該伺服器「管理員」執行) ──────────────
-        if (['steam', 'tweet', 'yt'].includes(commandName)) {
+        if (['steam', 'tweet', 'youtube'].includes(commandName)) {
             const isGuildAdmin = interaction.memberPermissions?.has(PermissionFlagsBits.Administrator);
             if (!isGuildAdmin) {
                 return interaction.reply({
