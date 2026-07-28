@@ -80,18 +80,25 @@ async function handleSlashCommands(client, interaction) {
 
     try {
         // ── 1. 抽卡 (/pull) ──────────────────────────────────
-        if (commandName === 'pull') {
-            const count = interaction.options.getInteger('count') || 1;
-            fakeMessage.content = `!pull ${count}`;
-            if (isOnCooldown(uid, count === 10 ? 'pull10' : 'pull')) {
-                return interaction.reply({ content: '⏳ 指令冷卻中，請稍後再試。', flags: MessageFlags.Ephemeral });
-            }
-            if (typeof PullSystem.executePull === 'function') {
-                return PullSystem.executePull(client, fakeMessage, count);
-            }
-            return typeof PullSystem === 'function' ? PullSystem(client, fakeMessage) : PullSystem.handlePull?.(client, fakeMessage);
-        }
+       if (commandName === 'pull') {
+    const pullCommand =
+        client.commands?.get('pull');
 
+    if (
+        pullCommand &&
+        typeof pullCommand.execute === 'function'
+    ) {
+        return pullCommand.execute(
+            interaction
+        );
+    }
+
+    return interaction.reply({
+        content:
+            '❌ 抽卡系統模組尚未成功載入。',
+        ephemeral: true,
+    });
+}
         // ── 2. 背包與清單 (/pack, /list) ──────────────────────
         if (commandName === 'pack' || commandName === 'list') {
             fakeMessage.content = `!${commandName}`;
