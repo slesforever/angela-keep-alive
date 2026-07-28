@@ -340,5 +340,4 @@ function setupCommanders(client) {
     });
 }
 
-module.exports = { setupCommanders };
-module.exports = { handleCommands: handleSlashCommands };
+module.exports = { setupCommanders, handleCommands: handleSlashCommands };
