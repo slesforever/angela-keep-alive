@@ -9,7 +9,8 @@ const {
     SlashCommandBuilder,
     PermissionFlagsBits,
     ChannelType,
-    MessageFlags
+    MessageFlags,
+    Collection
 } = require('discord.js');
 const express = require('express');
 const fs      = require('fs');
@@ -73,6 +74,18 @@ const client = new Client({
         GatewayIntentBits.GuildMembers,
     ],
 });
+
+// ─── 載入指令模組（pullmenu.js 等）────────────────────────────
+client.commands = new Collection();
+try {
+    const pullCmd = require('./pullmenu.js');
+    if (pullCmd?.data && typeof pullCmd?.execute === 'function') {
+        client.commands.set(pullCmd.data.name, pullCmd);
+        console.log(`[Startup] ✅ 載入指令: /${pullCmd.data.name}`);
+    }
+} catch (err) {
+    console.error('[Startup] pullmenu.js 載入失敗:', err.message);
+}
 
 // ─── 內建斜線指令 (已去重：僅保留唯一定義) ────────────────────────
 const allSlashCommands = [
