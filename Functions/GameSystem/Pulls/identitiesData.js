@@ -408,6 +408,61 @@ const upTargets = {
         "［次元折斷者］李箱 / Dimension Shredder Yi Sang",
     ],
 };
+// Functions/GameSystem/Pulls/identitiesData.js
+
+// ... (你原本的角色 identityRegistry 清單維持不變) ...
+
+// ─── 🛠️ 動態篩選工具 ──────────────────────────────────────────────
+/**
+ * 根據關鍵字篩選指定稀有度內的角色名稱
+ * @param {string} rarity 稀有度 key ('000', '00', 'Egos' 等)
+ * @param {string} keyword 搜尋關鍵字 (例如: '以實瑪利', 'Ishmael', '腦業公司')
+ */
+function filterIdentities(rarity, keyword) {
+    const list = identityRegistry[rarity] || [];
+    return list
+        .filter(item => item.name.includes(keyword))
+        .map(item => item.name);
+}
+
+// ─── 🎯 卡池設定檔 (新增卡池只需複製貼上下方範本) ─────────────────────
+const BANNERS = {
+    // 1️⃣ 活動卡池範例 (直接指定 UP 角色名稱)
+    'dawn_office': {
+        id: 'dawn_office',
+        name: '黎明事務所 提取 — 梅菲斯特號',
+        description: '黎明事務所成員與限定 E.G.O 概率 UP！',
+        cost: { single: 130, ten: 1300 },
+        rateUp: {
+            S3: ['［黎明事務所 幫手］辛克萊', '［黎明事務所 代表］格里高爾'],
+            EGOS: ['[HE] 炎雀 - 浮士德'],
+            S2: []
+        }
+    },
+
+    // 2️⃣ 罪人特定 PickUp 範例 (自動抓取所有含「以實瑪利」的角色/E.G.O)
+    'ishmael_focus': {
+        id: 'ishmael_focus',
+        name: '罪人特定提取 — 以實瑪利 Focus UP',
+        description: '所有以實瑪利 (Ishmael) 的人格與 E.G.O 出現機率大幅提升！',
+        cost: { single: 130, ten: 1300 },
+        rateUp: {
+            S3: filterIdentities('000', '以實瑪利'),
+            S2: filterIdentities('00', '以實瑪利'),
+            EGOS: filterIdentities('Egos', '以實瑪利')
+        }
+    },
+
+    // 3️⃣ 常駐卡池範例 (無 UP)
+    'standard': {
+        id: 'standard',
+        name: '常駐提取 — 邊獄公司',
+        description: '包含所有基礎人格與 E.G.O 的常駐提取卡池。',
+        cost: { single: 130, ten: 1300 },
+        rateUp: { S3: [], EGOS: [], S2: [] }
+    }
+};
+
 // ─── 自動建構抽卡快取池 ──────────────────────────────────────────
 const pool = {};
 for (const [rarity, arr] of Object.entries(identityRegistry)) {
@@ -424,7 +479,7 @@ function getIdentityData(name) {
     }
     if (!exists) return null;
 
-    const base = { name, ...T() };
+    const base = { name };
     const details = identityDetails[name];
 
     if (details) {
@@ -439,24 +494,11 @@ function getIdentityData(name) {
     return base;
 }
 
-function pullIdentity(rarity) {
-    const arr = pool[rarity] || [];
-    if (!arr.length) return '（該稀有度無資料）';
-    return arr[Math.floor(Math.random() * arr.length)];
-}
-
-function pullUpIdentity(rarity) {
-    const arr = upTargets[rarity] || [];
-    if (!arr.length) return null;
-    return arr[Math.floor(Math.random() * arr.length)];
-}
-
 module.exports = {
     identities: identityDetails,
     registry: identityRegistry,
     pool,
-    upTargets,
+    BANNERS, // 匯出卡池資訊
+    filterIdentities, // 匯出篩選工具
     getIdentityData,
-    pullIdentity,
-    pullUpIdentity,
 };
