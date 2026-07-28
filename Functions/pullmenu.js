@@ -320,7 +320,7 @@ module.exports = {
                     }
 
                     await componentInteraction.deferReply({
-                        ephemeral: true,
+                        ephemeral: false,
                     });
 
                     await executePull(
