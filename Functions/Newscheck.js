@@ -1,5 +1,5 @@
 // Functions/Newscheck.js
-// Twitter Nitter RSS + Steam 官方新聞 API + YouTube 頻道監測
+// Twitter Nitter RSS + Steam 官方新聞 API + YouTube 頻道網址動態監測
 const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
@@ -24,11 +24,9 @@ const STEAM_FETCH_TIMEOUT_MS = Number(process.env.STEAM_FETCH_TIMEOUT_MS || 5000
 // Steam 圖片前綴
 const STEAM_CLAN_IMAGE_BASE = 'https://steamcdn-a.akamaihd.net/steamcommunity/public/images/clans/';
 
-// 🎯 YouTube 設定：正確的 Project Moon 官方頻道 ID (ProjectMoon Official)
-const DEFAULT_PM_CHANNEL_ID = 'UCpqyr6h4RCXCEswHlkSjykA'; 
-const YOUTUBE_CHANNEL_ID_ENV = process.env.YOUTUBE_CHANNEL_ID || DEFAULT_PM_CHANNEL_ID;
+// 🎯 YouTube 設定：完全使用頻道網址進行解析與監測
 const YOUTUBE_HANDLE = (process.env.YOUTUBE_HANDLE || 'ProjectMoonOfficial').replace(/^@/, '');
-const YOUTUBE_PAGE_URL = `https://www.youtube.com/@${YOUTUBE_HANDLE}`;
+const YOUTUBE_PAGE_URL = process.env.YOUTUBE_PAGE_URL || `https://www.youtube.com/@${YOUTUBE_HANDLE}`;
 
 // Nitter 備援節點
 const NITTER_NODES = [
@@ -332,7 +330,7 @@ function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
         ...options,
         signal: controller.signal,
         headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             ...(options.headers || {})
         }
     }).finally(() => clearTimeout(timeout));
@@ -463,14 +461,11 @@ async function fetchTweetItemsFromAllNodes(userId) {
     return merged;
 }
 
-async function resolveYouTubeChannelId() {
-    if (YOUTUBE_CHANNEL_ID_ENV && /^UC[\w-]{22}$/.test(YOUTUBE_CHANNEL_ID_ENV)) {
-        return YOUTUBE_CHANNEL_ID_ENV;
-    }
-
+// 🌐 直接從 YouTube 頻道網址 (https://www.youtube.com/@ProjectMoonOfficial) 動態解析 Channel ID
+async function resolveYouTubeChannelId(pageUrl = YOUTUBE_PAGE_URL) {
     const candidates = [
-        `${YOUTUBE_PAGE_URL}/videos`,
-        YOUTUBE_PAGE_URL,
+        `${pageUrl}/videos`,
+        pageUrl,
     ];
 
     const patterns = [
@@ -478,12 +473,14 @@ async function resolveYouTubeChannelId() {
         /"channelId\\":\\"(UC[^\\"]+)\\"/,
         /"externalId":"(UC[^"]+)"/,
         /"browseId":"(UC[^"]+)"/,
-        /channelId=?(UC[\w-]+)/,
+        /https:\/\/www\.youtube\.com\/channel\/(UC[\w-]+)/,
+        /canonical" href="https:\/\/www\.youtube\.com\/channel\/(UC[\w-]+)"/,
+        /itemprop="identifier" content="(UC[\w-]+)"/
     ];
 
-    for (const url of candidates) {
+    for (const targetUrl of candidates) {
         try {
-            const response = await fetchWithTimeout(url, {}, 12000);
+            const response = await fetchWithTimeout(targetUrl, {}, 12000);
             if (!response.ok) continue;
 
             const html = await response.text();
@@ -494,7 +491,7 @@ async function resolveYouTubeChannelId() {
         } catch (_) {}
     }
 
-    return DEFAULT_PM_CHANNEL_ID;
+    return null;
 }
 
 async function fetchYouTubeItems(channelId) {
@@ -791,7 +788,7 @@ async function checkSteamUpdates(client, isManual = false, messageContext = null
     }
 }
 
-// ── YouTube 頻道監測 ────────────────────────────────────────
+// ── YouTube 頻道監測 (透過網址進行) ────────────────────────
 async function checkYouTubeUpdates(client, isManual = false, messageContext = null) {
     if (youtubeLock) {
         if (!isManual) console.log('⏳ [YouTube] 上一輪尚未完成，略過本輪');
@@ -801,15 +798,39 @@ async function checkYouTubeUpdates(client, isManual = false, messageContext = nu
     youtubeLock = true;
 
     try {
-        // 🔥 自動對齊正確的 Channel ID (UCpqyr6h4RCXCEswHlkSjykA)
-        const targetChannelId = process.env.YOUTUBE_CHANNEL_ID || DEFAULT_PM_CHANNEL_ID;
-        if (youtubeState.channelId !== targetChannelId) {
-            youtubeState.channelId = targetChannelId;
-            saveState();
-            console.log(`📡 [YouTube] 已校正 Channel ID：${youtubeState.channelId}`);
+        // 🎯 1. 每次皆從 YouTube 頻道網址動態抓取 Channel ID
+        let channelId = youtubeState.channelId;
+
+        if (!channelId) {
+            console.log(`📡 [YouTube] 正在從網址解析頻道 ID：${YOUTUBE_PAGE_URL} ...`);
+            channelId = await resolveYouTubeChannelId(YOUTUBE_PAGE_URL);
+            if (channelId) {
+                youtubeState.channelId = channelId;
+                saveState();
+                console.log(`✅ [YouTube] 從網址解析成功，頻道 ID 為：${channelId}`);
+            }
         }
 
-        const feedItems = await fetchYouTubeItems(youtubeState.channelId);
+        if (!channelId) {
+            throw new Error(`無法從網址 ${YOUTUBE_PAGE_URL} 取得頻道 ID`);
+        }
+
+        // 🎯 2. 獲取 RSS，若失效則自動重新連線網址重新解析 ID
+        let feedItems;
+        try {
+            feedItems = await fetchYouTubeItems(channelId);
+        } catch (rssErr) {
+            console.warn(`⚠️ [YouTube] RSS 擷取失敗 (${rssErr.message})，重新從網址解析 Channel ID...`);
+            channelId = await resolveYouTubeChannelId(YOUTUBE_PAGE_URL);
+            if (channelId) {
+                youtubeState.channelId = channelId;
+                saveState();
+                feedItems = await fetchYouTubeItems(channelId);
+            } else {
+                throw rssErr;
+            }
+        }
+
         if (!feedItems.length) {
             if (isManual && messageContext) {
                 await messageContext.reply('❌ 未能獲取到 YouTube 頻道影片。');
@@ -832,7 +853,7 @@ async function checkYouTubeUpdates(client, isManual = false, messageContext = nu
                 return `${idx + 1}. ${titleLine}${item.link}`;
             }).join('\n\n');
 
-            let fullText = `📺 **YouTube 頻道測試：@${YOUTUBE_HANDLE}**\n\n${preview}`;
+            let fullText = `📺 **YouTube 頻道測試 (${YOUTUBE_PAGE_URL})：**\n\n${preview}`;
             if (fullText.length > 1950) {
                 fullText = fullText.slice(0, 1900) + '\n\n*(預覽內容已截斷)*';
             }
