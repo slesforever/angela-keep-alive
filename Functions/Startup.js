@@ -150,7 +150,7 @@ const allSlashCommands = [
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
     new SlashCommandBuilder()
-        .setName('yt')
+        .setName('youtube')
         .setDescription('【伺服器管理員】手動觸發 YouTube 最新影片檢測')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
