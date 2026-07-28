@@ -247,4 +247,91 @@ async function sendHelp(interaction) {
     return interaction.reply({ embeds: [embed] });
 }
 
+'use strict';
+
+const fs = require('fs');
+const path = require('path');
+const { Collection, REST, Routes } = require('discord.js');
+
+/**
+ * 載入並初始化所有指令與 Slash Command 監聽
+ * @param {import('discord.js').Client} client 
+ */
+function setupCommanders(client) {
+    client.commands = new Collection();
+    const commandsArray = [];
+
+    // 同時支援從 Commands 資料夾與 Functions 裡面掛載指令模組
+    const modulesSources = [
+        path.join(__dirname, '../Commands'),
+        __dirname // Functions 目錄本身（包含 pullmenu.js）
+    ];
+
+    for (const sourcePath of modulesSources) {
+        if (!fs.existsSync(sourcePath)) continue;
+        
+        const files = fs.readdirSync(sourcePath).filter(file => file.endsWith('.js'));
+        for (const file of files) {
+            const filePath = path.join(sourcePath, file);
+            try {
+                const command = require(filePath);
+                if (command && 'data' in command && 'execute' in command) {
+                    // 避免重複載入
+                    if (!client.commands.has(command.data.name)) {
+                        client.commands.set(command.data.name, command);
+                        commandsArray.push(command.data.toJSON());
+                        console.log(`[Commanders] 成功載入指令: /${command.data.name} (來源: ${file})`);
+                    }
+                }
+            } catch (err) {
+                // 若檔案不是指令模組（例如純工具檔）則略過
+            }
+        }
+    }
+
+    // 機器人啟動時自動向 Discord API 註冊最新指令
+    client.once('ready', async () => {
+        if (!process.env.DISCORD_TOKEN || !client.user?.id) {
+            console.warn('[Commanders] 缺少 DISCORD_TOKEN 或 client.user 未能讀取，跳過自動 API 註冊。');
+            return;
+        }
+
+        const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
+        try {
+            console.log(`[Commanders] 開始向 Discord API 註冊 ${commandsArray.length} 個 Slash Commands...`);
+            await rest.put(
+                Routes.applicationCommands(client.user.id),
+                { body: commandsArray }
+            );
+            console.log('[Commanders] Slash Commands 註冊完畢！');
+        } catch (error) {
+            console.error('[Commanders] 註冊 Slash Commands 失敗:', error);
+        }
+    });
+
+    // 監聽並轉發 Slash Command 觸發事件
+    client.on('interactionCreate', async interaction => {
+        if (!interaction.isChatInputCommand()) return;
+
+        const command = client.commands.get(interaction.commandName);
+        if (!command) {
+            console.error(`[Commanders] 未找到對應指令: ${interaction.commandName}`);
+            return;
+        }
+
+        try {
+            await command.execute(interaction);
+        } catch (error) {
+            console.error(`[Commanders] 執行指令 /${interaction.commandName} 時發生錯誤:`, error);
+            const content = '❌ 執行此指令時發生內部錯誤。';
+            if (interaction.replied || interaction.deferred) {
+                await interaction.followUp({ content, ephemeral: true }).catch(() => {});
+            } else {
+                await interaction.reply({ content, ephemeral: true }).catch(() => {});
+            }
+        }
+    });
+}
+
+module.exports = { setupCommanders };
 module.exports = { handleCommands: handleSlashCommands };
