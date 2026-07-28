@@ -9,7 +9,7 @@ const PartySystem     = require('./GameSystem/PartySystem.js');
 const BattleSystem    = require('./GameSystem/BattleSystem.js');
 const { checkSteamUpdates, checkTwitterUpdates, checkYouTubeUpdates } = require('./Newscheck.js');
 
-const SUPER_ADMIN_ID = '1330463890122735642'; // 最高權限擁有者 ID
+const SUPER_ADMIN_ID = '1330463890122735642'; // 唯一能改動玩家進度與發放資源的最高主管 ID
 
 // ── 冷卻系統 ──────────────────────────────────────────────────
 const COOLDOWNS = new Map();
@@ -20,7 +20,7 @@ function isOnCooldown(userId, cmd, ms = 3000) {
     return false;
 }
 
-// ── 每日固定指數計算函式 ───────────────────────────────────────
+// ── 每日固定指數計算 ──────────────────────────────────────────
 function getDailyRate(userId, salt) {
     const dateStr = new Date().toISOString().slice(0, 10);
     let hash = 0;
@@ -38,7 +38,7 @@ function createProgressBar(percent) {
     return '█'.repeat(filled) + '░'.repeat(empty);
 }
 
-// ── 相容性轉換器 (Interaction -> Message) ───────────────────────
+// ── 相容性轉型橋接器 (修復 Deferred 衝突 Bug) ─────────────────
 function createPseudoMessage(interaction) {
     return {
         interaction,
@@ -50,15 +50,19 @@ function createPseudoMessage(interaction) {
         client: interaction.client,
         content: '',
 
+        // 🔥 關鍵修復：若系統已 defer，自動切換為 editReply，解決報錯！
         reply: async (options) => {
             const payload = typeof options === 'string' ? { content: options } : { ...options };
             try {
                 if (interaction.deferred || interaction.replied) {
-                    return await interaction.followUp(payload);
+                    return await interaction.editReply(payload);
                 } else {
                     return await interaction.reply(payload);
                 }
             } catch (err) {
+                if (interaction.deferred || interaction.replied) {
+                    return await interaction.editReply(payload).catch(() => {});
+                }
                 return await interaction.followUp(payload).catch(() => {});
             }
         },
@@ -134,31 +138,18 @@ async function handleSlashCommands(client, interaction) {
         if (commandName === 'gayrate') {
             const target = interaction.options.getUser('target') || user;
             let rate = getDailyRate(target.id, 'gay');
-
-            // 🔥 最高特權保護：測到最高管理員一律鎖定為 0%
-            if (target.id === SUPER_ADMIN_ID) rate = 0;
+            if (target.id === SUPER_ADMIN_ID) rate = 0; // Sles 鎖定 0%
 
             const bar = createProgressBar(rate);
-            
-            let comment = '';
-            if (target.id === SUPER_ADMIN_ID) {
-                comment = '「主管專屬認證：鋼鐵般的絕對 0% 直男，系統數據無法改寫。」';
-            } else if (rate < 20) {
-                comment = '「數據顯示：鋼鐵般堅硬直男。」';
-            } else if (rate < 50) {
-                comment = '「有些許隱藏屬性，偶爾顯露出來。」';
-            } else if (rate < 80) {
-                comment = '「成分相當濃烈，已經無法隱藏了。」';
-            } else {
-                comment = '「100% 純度的純真男同！ Angela 判定無誤。」';
-            }
+            let comment = target.id === SUPER_ADMIN_ID 
+                ? '「主管專屬認證：鋼鐵般的絕對 0% 直男，系統數據無法改寫。」'
+                : (rate < 20 ? '「數據顯示：鋼鐵般堅硬直男。」' : rate < 50 ? '「有些許隱藏屬性。」' : rate < 80 ? '「成分相當濃烈。」' : '「100% 純度純真男同！」');
 
             const embed = new EmbedBuilder()
-                .setTitle('男同指數測試 (Gay Rate)')
+                .setTitle('🏳️‍🌈 同性戀指數測試 (Gay Rate)')
                 .setColor(0x3498db)
                 .setDescription(`**${target.username}** 的男同指數為：**${rate}%**\n\n\`[${bar}]\` ${rate}%\n\n> ${comment}`)
-                .setThumbnail(target.displayAvatarURL({ dynamic: true }))
-                .setTimestamp();
+                .setThumbnail(target.displayAvatarURL({ dynamic: true }));
 
             return interaction.reply({ embeds: [embed] });
         }
@@ -166,36 +157,23 @@ async function handleSlashCommands(client, interaction) {
         if (commandName === 'lesbianrate') {
             const target = interaction.options.getUser('target') || user;
             let rate = getDailyRate(target.id, 'lesbian');
-
-            // 🔥 最高特權保護：測到最高管理員一律鎖定為 0%
-            if (target.id === SUPER_ADMIN_ID) rate = 0;
+            if (target.id === SUPER_ADMIN_ID) rate = 0; // Sles 鎖定 0%
 
             const bar = createProgressBar(rate);
-            
-            let comment = '';
-            if (target.id === SUPER_ADMIN_ID) {
-                comment = '「主管專屬認證：絕對 0% 直直到發光，女同屬性完全免疫。」';
-            } else if (rate < 20) {
-                comment = '「姬圈指數較低，極度純粹的直女屬性。」';
-            } else if (rate < 50) {
-                comment = '「有些許女同潛質，值得進一步觀察。」';
-            } else if (rate < 80) {
-                comment = '「女同能量爆棚！極具吸引力。」';
-            } else {
-                comment = '「100% 頂女同霸主！ Angela 認證完畢。」';
-            }
+            let comment = target.id === SUPER_ADMIN_ID 
+                ? '「主管專屬認證：絕對 0% 直直到發光，姬圈屬性完全免疫。」'
+                : (rate < 20 ? '「姬圈指數較低，極度純粹直女。」' : rate < 50 ? '「有些許姬圈潛質。」' : rate < 80 ? '「姬圈能量爆棚！」' : '「100% 頂級姬圈霸主！」');
 
             const embed = new EmbedBuilder()
-                .setTitle('女同指數測試 (Lesbian Rate)')
+                .setTitle('👭 姬圈指數測試 (Lesbian Rate)')
                 .setColor(0xe91e63)
                 .setDescription(`**${target.username}** 的女同指數為：**${rate}%**\n\n\`[${bar}]\` ${rate}%\n\n> ${comment}`)
-                .setThumbnail(target.displayAvatarURL({ dynamic: true }))
-                .setTimestamp();
+                .setThumbnail(target.displayAvatarURL({ dynamic: true }));
 
             return interaction.reply({ embeds: [embed] });
         }
 
-        // ── 8. 社群測試指令 (限該群組「管理員」權限) ───────────────
+        // ── 8. 社群測試指令 (限該伺服器「管理員」執行) ──────────────
         if (['steam', 'tweet', 'yt'].includes(commandName)) {
             const isGuildAdmin = interaction.memberPermissions?.has(PermissionFlagsBits.Administrator);
             if (!isGuildAdmin) {
@@ -205,17 +183,17 @@ async function handleSlashCommands(client, interaction) {
                 });
             }
 
-            await interaction.deferReply();
-            if (commandName === 'steam') return checkSteamUpdates(client, true, interaction);
-            if (commandName === 'tweet') return checkTwitterUpdates(client, true, interaction);
-            if (commandName === 'yt')    return checkYouTubeUpdates(client, true, interaction);
+            await interaction.deferReply(); // 先 deferred，fakeMessage 會自動 editReply 解決報錯！
+            if (commandName === 'steam') return checkSteamUpdates(client, true, fakeMessage);
+            if (commandName === 'tweet') return checkTwitterUpdates(client, true, fakeMessage);
+            if (commandName === 'yt')    return checkYouTubeUpdates(client, true, fakeMessage);
         }
 
-        // ── 9. 最高權限管理員指令 (嚴格限制 ID: 1330463890122735642) ──
+        // ── 9. 最高權限管理員指令 (嚴格限制僅 Sles ID: 1330463890122735642 可執行) ──
         if (['givelunacy', 'givefragments', 'givescrolls', 'givethreads', 'updaterewards', 'updatebuff'].includes(commandName)) {
             if (uid !== SUPER_ADMIN_ID) {
                 return interaction.reply({
-                    content: `⛔ 權限被拒：此指令為最高特權專屬（僅限系統擁有者 Sles 執行）。`,
+                    content: `⛔ 權限被拒：涉及玩家進度與物資發放之指令，僅限最高主管 Sles (ID: ${SUPER_ADMIN_ID}) 執行。`,
                     flags: MessageFlags.Ephemeral
                 });
             }
@@ -225,15 +203,7 @@ async function handleSlashCommands(client, interaction) {
                 const targetUser = interaction.options.getUser('target');
                 const isAll = interaction.options.getBoolean('all') || false;
 
-                let targetArg = '';
-                if (isAll) {
-                    targetArg = 'all';
-                } else if (targetUser) {
-                    targetArg = `<@${targetUser.id}>`;
-                } else {
-                    targetArg = `<@${uid}>`;
-                }
-
+                let targetArg = isAll ? 'all' : (targetUser ? `<@${targetUser.id}>` : `<@${uid}>`);
                 fakeMessage.content = `!${commandName} ${targetArg} ${amount}`;
             } else {
                 fakeMessage.content = `!${commandName}`;
@@ -251,7 +221,7 @@ async function handleSlashCommands(client, interaction) {
         console.error(`[Command Error] 執行 /${commandName} 時發生錯誤:`, error);
         const replyPayload = { content: `❌ 執行指令時發生內部錯誤：${error.message}`, flags: MessageFlags.Ephemeral };
         if (interaction.deferred || interaction.replied) {
-            await interaction.followUp(replyPayload).catch(() => {});
+            await interaction.editReply(replyPayload).catch(() => {});
         } else {
             await interaction.reply(replyPayload).catch(() => {});
         }
@@ -270,9 +240,9 @@ async function sendHelp(interaction) {
             { name: '🪞 鏡光迷宮',   value: '`/md` — 鏡光迷宮系統' },
             { name: '🎲 娛樂功能',   value: '`/gayrate` — 男同指數測試\n`/lesbianrate` — 姬圈指數測試' },
             { name: '📰 社群檢測 (群管理員)', value: '`/steam` ｜ `/tweet` ｜ `/yt` ｜ `/setchannel`' },
-            { name: '👑 特權管理員 (Sles 專屬)', value: '`/givelunacy` ｜ `/givefragments` ｜ `/givescrolls`\n`/givethreads` ｜ `/updaterewards` ｜ `/updatebuff`' }
+            { name: '👑 最高主管特權 (Sles 專屬)', value: '`/givelunacy` ｜ `/givefragments` ｜ `/givescrolls`\n`/givethreads` ｜ `/updaterewards` ｜ `/updatebuff`' }
         )
-        .setFooter({ text: '輸入 / 即可喚出選單 ｜ 特權指令已放置於選單最底端' });
+        .setFooter({ text: '輸入 / 即可喚出選單 ｜ 所有獎勵與倍率修改權限已鎖定為 Sles 專屬' });
 
     return interaction.reply({ embeds: [embed] });
 }
