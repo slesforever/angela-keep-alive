@@ -18,10 +18,58 @@ function isOnCooldown(userId, cmd, ms = 3000) {
     return false;
 }
 
-// ── 處理斜線指令 ──────────────────────────────────────────────
+// ── 相容性轉換器：把 Interaction 包裝成舊子系統看得懂的 Message ──
+function createPseudoMessage(interaction) {
+    // 提煉參數，自動拼出舊系統習慣的文字指令格式（如 "!pull 10"）
+    const optionsData = interaction.options?.data || [];
+    const args = [];
+
+    for (const opt of optionsData) {
+        if (opt.value !== undefined && opt.value !== null) {
+            args.push(opt.value);
+        }
+    }
+
+    const simulatedContent = `!${interaction.commandName} ${args.join(' ')}`.trim();
+
+    return {
+        interaction,
+        author: interaction.user,
+        user: interaction.user,
+        member: interaction.member,
+        guild: interaction.guild,
+        channel: interaction.channel,
+        client: interaction.client,
+        content: simulatedContent, // 🔥 關鍵：補上 content 屬性，防止 message.content.trim() 爆掉
+
+        // 橋接 reply 函式，無縫接軌斜線指令的回覆與延遲機制
+        reply: async (options) => {
+            const payload = typeof options === 'string' ? { content: options } : { ...options };
+            
+            try {
+                if (interaction.deferred || interaction.replied) {
+                    return await interaction.followUp(payload);
+                } else {
+                    return await interaction.reply(payload);
+                }
+            } catch (err) {
+                return await interaction.followUp(payload).catch(() => {});
+            }
+        },
+
+        // 防護：若舊系統有調用 react 或 delete 不致於斷言失敗
+        react: async () => {},
+        delete: async () => {}
+    };
+}
+
+// ── 處理斜線指令分發 ─────────────────────────────────────────
 async function handleSlashCommands(client, interaction) {
     const { commandName, user } = interaction;
     const uid = user.id;
+
+    // 將斜線指令 Interaction 轉包為相容的假 Message 物件
+    const fakeMessage = createPseudoMessage(interaction);
 
     try {
         // ── 抽卡 (/pull) ──────────────────────────────────────
@@ -31,7 +79,10 @@ async function handleSlashCommands(client, interaction) {
             if (isOnCooldown(uid, cdKey)) {
                 return interaction.reply({ content: '⏳ 指令冷卻中，請稍後再試。', flags: MessageFlags.Ephemeral });
             }
-            return PullSystem.executePull(client, interaction, count);
+            if (typeof PullSystem.executePull === 'function') {
+                return PullSystem.executePull(client, fakeMessage, count);
+            }
+            return typeof PullSystem === 'function' ? PullSystem(client, fakeMessage) : PullSystem.handlePull?.(client, fakeMessage);
         }
 
         // ── 背包 / 清單 (/pack, /list) ─────────────────────────
@@ -39,7 +90,7 @@ async function handleSlashCommands(client, interaction) {
             if (isOnCooldown(uid, 'pack')) {
                 return interaction.reply({ content: '⏳ 指令冷卻中，請稍後再試。', flags: MessageFlags.Ephemeral });
             }
-            return PacksAndData.handleInventory(client, interaction);
+            return PacksAndData.handleInventory ? PacksAndData.handleInventory(client, fakeMessage) : PacksAndData(client, fakeMessage);
         }
 
         // ── 戰鬥 (/battle) ────────────────────────────────────
@@ -47,26 +98,26 @@ async function handleSlashCommands(client, interaction) {
             if (isOnCooldown(uid, 'battle', 5000)) {
                 return interaction.reply({ content: '⏳ 戰鬥冷卻中，請稍後再試。', flags: MessageFlags.Ephemeral });
             }
-            return BattleSystem.handleBattle(client, interaction);
+            return BattleSystem.handleBattle ? BattleSystem.handleBattle(client, fakeMessage) : BattleSystem(client, fakeMessage);
         }
 
         // ── 隊伍 (/party) ─────────────────────────────────────
         if (commandName === 'party') {
-            return PartySystem.handleParty(client, interaction);
+            return PartySystem.handleParty ? PartySystem.handleParty(client, fakeMessage) : PartySystem(client, fakeMessage);
         }
 
         // ── 罪人管理 (/sinner, /uptie, /equip, /threads) ───────
         if (commandName === 'sinner') {
-            return CharacterSystem.handleSinner(client, interaction);
+            return CharacterSystem.handleSinner ? CharacterSystem.handleSinner(client, fakeMessage) : CharacterSystem(client, fakeMessage);
         }
         if (commandName === 'uptie') {
-            return CharacterSystem.handleUptie(client, interaction);
+            return CharacterSystem.handleUptie ? CharacterSystem.handleUptie(client, fakeMessage) : CharacterSystem(client, fakeMessage);
         }
         if (commandName === 'equip') {
-            return CharacterSystem.handleEquip(client, interaction);
+            return CharacterSystem.handleEquip ? CharacterSystem.handleEquip(client, fakeMessage) : CharacterSystem(client, fakeMessage);
         }
         if (commandName === 'threads') {
-            return CharacterSystem.handleThreads(client, interaction);
+            return CharacterSystem.handleThreads ? CharacterSystem.handleThreads(client, fakeMessage) : CharacterSystem(client, fakeMessage);
         }
 
         // ── 鏡光迷宮 (/md) ───────────────────────────────────
@@ -74,7 +125,7 @@ async function handleSlashCommands(client, interaction) {
             if (isOnCooldown(uid, 'md', 2000)) {
                 return interaction.reply({ content: '⏳ 指令冷卻中，請稍後再試。', flags: MessageFlags.Ephemeral });
             }
-            return MirrorDungeon.handleMirrorDungeon(client, interaction);
+            return MirrorDungeon.handleMirrorDungeon ? MirrorDungeon.handleMirrorDungeon(client, fakeMessage) : MirrorDungeon(client, fakeMessage);
         }
 
         // ── 管理員發放指令 ────────────────────────────────────
@@ -82,7 +133,7 @@ async function handleSlashCommands(client, interaction) {
             'givelunacy', 'givefragments', 'givescrolls', 
             'givethreads', 'updaterewards', 'updatebuff'
         ].includes(commandName)) {
-            return GiveAwaySystem.handleGiveAway(client, interaction);
+            return GiveAwaySystem.handleGiveAway ? GiveAwaySystem.handleGiveAway(client, fakeMessage) : GiveAwaySystem(client, fakeMessage);
         }
 
         // ── 新聞監測 (/steam, /tweet, /yt) ────────────────────
@@ -106,11 +157,11 @@ async function handleSlashCommands(client, interaction) {
 
     } catch (error) {
         console.error(`[Command Error] 執行 /${commandName} 時發生錯誤:`, error);
-        const replyPayload = { content: '❌ 執行指令時發生內部錯誤。', flags: MessageFlags.Ephemeral };
+        const replyPayload = { content: `❌ 執行指令時發生內部錯誤：${error.message}`, flags: MessageFlags.Ephemeral };
         if (interaction.deferred || interaction.replied) {
-            await interaction.followUp(replyPayload);
+            await interaction.followUp(replyPayload).catch(() => {});
         } else {
-            await interaction.reply(replyPayload);
+            await interaction.reply(replyPayload).catch(() => {});
         }
     }
 }
@@ -118,7 +169,7 @@ async function handleSlashCommands(client, interaction) {
 // ── Help 選單 ─────────────────────────────────────────────────
 async function sendHelp(interaction) {
     const embed = new EmbedBuilder()
-        .setTitle('📋 Angela 指令清單 (Slash Commands)')
+        .setTitle('📋 Angela 指令清單 (Discord 內建斜線選單)')
         .setColor(0x00b4d8)
         .addFields(
             { name: '🎰 抽卡',      value: '`/pull` — 單抽或十連抽卡' },
@@ -130,7 +181,7 @@ async function sendHelp(interaction) {
             { name: '🎮 新聞',      value: '`/steam` Steam最新 ｜ `/tweet` 推特最新 ｜ `/yt` YouTube最新' },
             { name: '🔑 管理員',    value: '`/setchannel` — 設定通知與發射頻道\n`/givelunacy` ｜ `/givefragments` ｜ `/givescrolls` ｜ `/givethreads`\n`/updaterewards` ｜ `/updatebuff`' }
         )
-        .setFooter({ text: '指令冷卻 3s ｜ 輸入 / 即可查看選單' });
+        .setFooter({ text: '指令冷卻 3s ｜ 輸入 / 即可喚出內建選單' });
 
     return interaction.reply({ embeds: [embed] });
 }
