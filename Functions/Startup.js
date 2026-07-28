@@ -108,12 +108,12 @@ const allSlashCommands = [
     // 6. 娛樂小工具
     new SlashCommandBuilder()
         .setName('gayrate')
-        .setDescription('測量目標的男同性戀指數 🏳️‍🌈')
+        .setDescription('測量目標的男同指數')
         .addUserOption(opt => opt.setName('target').setDescription('要測試的目標對象 (預設為自己)')),
 
     new SlashCommandBuilder()
         .setName('lesbianrate')
-        .setDescription('測量目標的女同姬圈指數 👭')
+        .setDescription('測量目標的女同指數')
         .addUserOption(opt => opt.setName('target').setDescription('要測試的目標對象 (預設為自己)')),
 
     // 7. 說明選單
@@ -150,7 +150,7 @@ const allSlashCommands = [
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
     new SlashCommandBuilder()
-        .setName('yt')
+        .setName('youtube')
         .setDescription('【伺服器管理員】手動觸發 YouTube 最新影片檢測')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
