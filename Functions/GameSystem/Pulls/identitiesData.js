@@ -1,4 +1,4 @@
-// Functions/GameSystem/Pulls/identitiesData.js
+'use strict';
 
 // ─── 預設模板函式 ────────────────────────────────────────────
 function T() {
@@ -222,7 +222,6 @@ const identityRegistry = {
         { name: "［邊獄公司 罪人］格里高爾 / LCB Sinner Gregor" },
     ],
     'Egos': [
-        // Yi Sang
         { name: "[ZAYIN] 烏鴉之眼 / Crow's Eye View - 李箱" },
         { name: "[ZAYIN] 往昔歲月 / Bygone Days - 李箱" },
         { name: "[TETH] 第四火焰 / 4th Match Flame - 李箱" },
@@ -232,7 +231,6 @@ const identityRegistry = {
         { name: "[WAW] 太陽雨 / Sunshower - 李箱" },
         { name: "[WAW] 三千大世界 / Great Trichiliocosm - 李箱" },
         { name: "[HE] 莊嚴的哀歌 / Solemn Lament - 李箱" },
-        // Faust
         { name: "[ZAYIN] 表象放射器 / Representation Emitter - 浮士德" },
         { name: "[TETH] 咒釘 / Hex Nail - 浮士德" },
         { name: "[TETH] 9:2 - 浮士德" },
@@ -243,7 +241,6 @@ const identityRegistry = {
         { name: "[HE] 熔毀指令 / Command : Meltdown - 浮士德" },
         { name: "[HE] 熾花星 / Ardor Blossom Star - 浮士德" },
         { name: "[WAW] 永恆 / Everlasting - 浮士德" },
-        // Don Quixote
         { name: "[ZAYIN] 桑丘之血 / La Sangre de Sancho - 唐吉訶德" },
         { name: "[TETH] 一生燉湯 / Lifetime Stew - 唐吉訶德" },
         { name: "[TETH] 願望石冢 / Wishing Cairn - 唐吉訶德" },
@@ -253,7 +250,6 @@ const identityRegistry = {
         { name: "[HE] 紅紙片 / Red Sheet - 唐吉訶德" },
         { name: "[WAW] 渴望-米爾卡拉 / Yearning-Mircalla - 唐吉訶德" },
         { name: "[WAW] 愛與恨之名 / In the Name of Love and Hate - 唐吉訶德" },
-        // Ryoshu
         { name: "[ZAYIN] 森林與火焰 / Forest for the Flames - 良秀" },
         { name: "[ZAYIN] 蘇打 / Soda - 良秀" },
         { name: "[TETH] 紅眼 / Red Eyes - 良秀" },
@@ -263,7 +259,6 @@ const identityRegistry = {
         { name: "[HE] 胸痛 / Thoracalgia - 良秀" },
         { name: "[WAW] 輕蔑，敬畏 / Contempt, Awe - 良秀" },
         { name: "[WAW] 三千大世界 / Great Trichiliocosm - 良秀" },
-        // Meursault
         { name: "[ZAYIN] 他人之繩 / Chains of Others - 默爾索" },
         { name: "[TETH] 亂槍亂打 / Screwloose Wallop - 默爾索" },
         { name: "[TETH] 悔恨 / Regret - 默爾索" },
@@ -273,7 +268,6 @@ const identityRegistry = {
         { name: "[HE] 著影揮刀 / Shadow-Vested Bladesinger - 默爾索" },
         { name: "[WAW] 渴望-米爾卡拉 / Yearning-Mircalla - 默爾索" },
         { name: "[WAW] 壓裂往昔 / Crushbound Past - 默爾索" },
-        // Hong Lu
         { name: "[ZAYIN] 幻境之地 / Land of Illusion - 鴻璐" },
         { name: "[TETH] 玫瑰慾望 / Roseate Desire - 鴻璐" },
         { name: "[TETH] 蘇打 / Soda - 鴻璐" },
@@ -283,7 +277,6 @@ const identityRegistry = {
         { name: "[HE] 泡沫腐蝕 / Effervescent Corrosion - 鴻璐" },
         { name: "[HE] 留住自我 / To Remain Oneself - 鴻璐" },
         { name: "[WAW] 被玷污的血之淚 / Tears of the Tarnished Blood - 鴻璐" },
-        // Heathcliff
         { name: "[ZAYIN] 破布袋 / Bodysack - 希斯克里夫" },
         { name: "[ZAYIN] 假日 / Holiday - 希斯克里夫" },
         { name: "[TETH] AEDD - 希斯克里夫" },
@@ -293,7 +286,6 @@ const identityRegistry = {
         { name: "[HE] 那 Śūnyatā 即 Rūpam / Ya Śūnyatā Tad Rūpam - 希斯克里夫" },
         { name: "[HE] 非對稱慣性 / Asymmetrical Inertia - 希斯克里夫" },
         { name: "[WAW] 束縛 / Binds - 希斯克里夫" },
-        // Ishmael
         { name: "[ZAYIN] 魚叉 / Snagharpoon - 以實瑪利" },
         { name: "[ZAYIN] 百足死亡蛆 / Hundred-Footed Death Maggot - 以實瑪利" },
         { name: "[TETH] 玫瑰慾望 / Roseate Desire - 以實瑪利" },
@@ -304,7 +296,6 @@ const identityRegistry = {
         { name: "[HE] 聖誕惡夢 / Christmas Nightmare - 以實瑪利" },
         { name: "[HE] 潮汐輓歌 / Tidal Elegy - 以實瑪利" },
         { name: "[WAW] 盲目痴迷 / Blind Obsession - 以實瑪利" },
-        // Rodion
         { name: "[ZAYIN] 所謂之物 / What is Cast - 羅佳" },
         { name: "[ZAYIN] 夕陽之下 / Into the Sunset - 羅佳" },
         { name: "[TETH] 霜脊 / Rime Shank - 羅佳" },
@@ -314,7 +305,6 @@ const identityRegistry = {
         { name: "[HE] 咒釘 / Hex Nail - 羅佳" },
         { name: "[WAW] 血色慾望 / Sanguine Desire - 羅佳" },
         { name: "[WAW] 指引者的試煉 / Indicant's Trial - 羅佳" },
-        // Sinclair
         { name: "[ZAYIN] 知識之枝 / Branch of Knowledge - 辛克萊" },
         { name: "[ZAYIN] 空洞哀鳴 / Cavernous Wailing - 辛克萊" },
         { name: "[TETH] 迫近之日 / Impending Day - 辛克萊" },
@@ -324,7 +314,6 @@ const identityRegistry = {
         { name: "[HE] 9:2 - 辛克萊" },
         { name: "[HE] 和諧 / Harmony - 辛克萊" },
         { name: "[WAW] 被玷污的血之淚 / Tears of the Tarnished Blood - 辛克萊" },
-        // Outis
         { name: "[ZAYIN] 知識之路 / To Páthos Máthos - 奧提斯" },
         { name: "[ZAYIN] 我拿剪刀去，你呢？ / I'll Go fer Scissors. How 'Bout You? - 奧提斯" },
         { name: "[TETH] 那 Śūnyatā 即 Rūpam / Ya Śūnyatā Tad Rūpam - 奧提斯" },
@@ -334,7 +323,6 @@ const identityRegistry = {
         { name: "[HE] 次元撕裂者 / Dimension Shredder - 奧提斯" },
         { name: "[HE] 魔彈 / Magic Bullet - 奧提斯" },
         { name: "[WAW] 束縛 / Binds - 奧提斯" },
-        // Gregor
         { name: "[ZAYIN] 突然某日 / Suddenly, One Day - 格里高爾" },
         { name: "[ZAYIN] 苟延殘喘 / Legerdemain - 格里高爾" },
         { name: "[TETH] 燈籠 / Lantern - 格里高爾" },
@@ -345,7 +333,6 @@ const identityRegistry = {
         { name: "[WAW] 荊棘之園 / Garden of Thorns - 格里高爾" },
         { name: "[WAW] 無光榮輝 / Unbrilliant Glory - 格里高爾" },
     ],
-    // ─── 異想體 (Abnormality) 本體分類 — 真正來自 Lobotomy / Limbus 的實體 ─────
     'ABN_ZAYIN': [
         { name: "[O-03-03] 一罪與百善 / One Sin and Hundreds of Good Deeds" },
         { name: "[O-01-12] 禿頭是… / You're Bald..." },
@@ -408,39 +395,28 @@ const upTargets = {
         "［次元折斷者］李箱 / Dimension Shredder Yi Sang",
     ],
 };
-// Functions/GameSystem/Pulls/identitiesData.js
-
-// ... (你原本的角色 identityRegistry 清單維持不變) ...
 
 // ─── 🛠️ 動態篩選工具 ──────────────────────────────────────────────
-/**
- * 根據關鍵字篩選指定稀有度內的角色名稱
- * @param {string} rarity 稀有度 key ('000', '00', 'Egos' 等)
- * @param {string} keyword 搜尋關鍵字 (例如: '以實瑪利', 'Ishmael', '腦業公司')
- */
 function filterIdentities(rarity, keyword) {
     const list = identityRegistry[rarity] || [];
     return list
-        .filter(item => item.name.includes(keyword))
+        .filter(item => item && item.name && item.name.includes(keyword))
         .map(item => item.name);
 }
 
-// ─── 🎯 卡池設定檔 (新增卡池只需複製貼上下方範本) ─────────────────────
+// ─── 🎯 卡池設定檔 ──────────────────────────────────────────────
 const BANNERS = {
-    // 1️⃣ 活動卡池範例 (直接指定 UP 角色名稱)
     'dawn_office': {
         id: 'dawn_office',
         name: '黎明事務所 提取 — 梅菲斯特號',
         description: '黎明事務所成員與限定 E.G.O 概率 UP！',
         cost: { single: 130, ten: 1300 },
         rateUp: {
-            S3: ['［黎明事務所 幫手］辛克萊', '［黎明事務所 代表］格里高爾'],
-            EGOS: ['[HE] 炎雀 - 浮士德'],
+            S3: ['［黎明事務所 幫手］辛克萊 / Dawn Office Fixer Sinclair', '［黎明事務所 代表］格里高爾 / Dawn Office Rep Gregor'],
+            EGOS: ['[HE] 熾花星 / Ardor Blossom Star - 浮士德'],
             S2: []
         }
     },
-
-    // 2️⃣ 罪人特定 PickUp 範例 (自動抓取所有含「以實瑪利」的角色/E.G.O)
     'ishmael_focus': {
         id: 'ishmael_focus',
         name: '罪人特定提取 — 以實瑪利 Focus UP',
@@ -452,8 +428,6 @@ const BANNERS = {
             EGOS: filterIdentities('Egos', '以實瑪利')
         }
     },
-
-    // 3️⃣ 常駐卡池範例 (無 UP)
     'standard': {
         id: 'standard',
         name: '常駐提取 — 邊獄公司',
@@ -498,7 +472,7 @@ module.exports = {
     identities: identityDetails,
     registry: identityRegistry,
     pool,
-    BANNERS, // 匯出卡池資訊
-    filterIdentities, // 匯出篩選工具
-    getIdentityData,
+    BANNERS,
+    filterIdentities,
+    getIdentityData
 };
