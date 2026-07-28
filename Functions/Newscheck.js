@@ -93,6 +93,12 @@ function isRecent(map, id) {
     return map.has(String(id));
 }
 
+function truncateText(str, maxLen = 100) {
+    if (!str) return '';
+    const clean = String(str).trim();
+    return clean.length > maxLen ? clean.slice(0, maxLen) + '...' : clean;
+}
+
 function escapeRegExp(text) {
     return String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -315,7 +321,6 @@ function saveState() {
     }
 }
 
-// ── fetchWithTimeout ─────────────────────────────────────────
 function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -330,7 +335,6 @@ function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
     }).finally(() => clearTimeout(timeout));
 }
 
-// ── 比較兩個 snowflake id ───────────────────────────────────
 function compareSnowflakeIds(a, b) {
     if (a === b) return 0;
 
@@ -346,7 +350,6 @@ function compareSnowflakeIds(a, b) {
     return String(a).localeCompare(String(b));
 }
 
-// ── 解析 RSS / Atom 項目 ────────────────────────────────────
 function parseTwitterItems(xml) {
     const blocks = extractBlock(xml, 'item');
     const items = [];
@@ -395,7 +398,6 @@ function parseYouTubeItems(xml) {
     return items;
 }
 
-// ── 從推文網址抽真正 ID ─────────────────────────────────────
 function extractTweetKey(urlOrId) {
     if (!urlOrId) return null;
 
@@ -410,7 +412,6 @@ function extractTweetKey(urlOrId) {
     return text.replace(/^https:\/\/[^/]+/, '').split('?')[0].split('#')[0];
 }
 
-// ── 抓單一 Nitter 節點所有推文 ──────────────────────────────
 async function fetchTweetItemsFromNode(nodeUrl, userId) {
     const url = `${nodeUrl}/${userId}/rss`;
     const response = await fetchWithTimeout(url, {}, 8000);
@@ -429,7 +430,6 @@ async function fetchTweetItemsFromNode(nodeUrl, userId) {
     return items;
 }
 
-// ── 同時抓所有節點，合併最新的一批項目 ───────────────────────
 async function fetchTweetItemsFromAllNodes(userId) {
     const results = await Promise.allSettled(
         NITTER_NODES.map(async (nodeUrl) => ({
@@ -456,11 +456,10 @@ async function fetchTweetItemsFromAllNodes(userId) {
         throw new Error('所有 Nitter 節點都失敗');
     }
 
-    merged.sort((a, b) => compareSnowflakeIds(b.id, a.id)); // newest first
+    merged.sort((a, b) => compareSnowflakeIds(b.id, a.id));
     return merged;
 }
 
-// ── 解析 YouTube 頻道 ID ───────────────────────────────────
 async function resolveYouTubeChannelId() {
     const candidates = [
         `${YOUTUBE_PAGE_URL}/videos`,
@@ -485,9 +484,7 @@ async function resolveYouTubeChannelId() {
                 const match = html.match(pattern);
                 if (match?.[1]) return match[1];
             }
-        } catch (_) {
-            // continue
-        }
+        } catch (_) {}
     }
 
     throw new Error('無法解析 YouTube Channel ID');
@@ -512,9 +509,6 @@ async function fetchYouTubeItems(channelId) {
 }
 
 // ── Twitter 監測 ─────────────────────────────────────────────
-// targetUserId 可選：
-// - 不傳 => 監測所有 MONITORED_USERS
-// - 傳入 => 只測該 user
 async function checkTwitterUpdates(client, isManual = false, messageContext = null, targetUserId = null) {
     if (twitterLock) {
         if (!isManual) console.log('⏳ [Twitter] 上一輪尚未完成，略過本輪');
@@ -552,7 +546,6 @@ async function checkTwitterUpdates(client, isManual = false, messageContext = nu
                 continue;
             }
 
-            // 首次啟動：只建立快取，不發送
             if (!state.lastFetchedId && !isManual) {
                 state.lastFetchedId = feedItems[0].id;
                 rememberRecent(state.recentIds, feedItems[0].id);
@@ -561,10 +554,9 @@ async function checkTwitterUpdates(client, isManual = false, messageContext = nu
                 continue;
             }
 
-            // 手動測試：只回最新幾則，不影響自動監測快取
             if (isManual) {
                 const preview = feedItems.slice(0, 3).map((item, idx) => {
-                    const titlePart = item.title ? `**${item.title}**\n` : '';
+                    const titlePart = item.title ? `**${truncateText(item.title, 100)}**\n` : '';
                     return `${idx + 1}. ${titlePart}${item.link}`;
                 });
                 manualLines.push(`**@${userId}**\n${preview.join('\n\n')}`);
@@ -581,7 +573,7 @@ async function checkTwitterUpdates(client, isManual = false, messageContext = nu
             }
 
             newItems = [...new Map(newItems.map(item => [item.id, item])).values()];
-            newItems.sort((a, b) => compareSnowflakeIds(a.id, b.id)); // oldest -> newest
+            newItems.sort((a, b) => compareSnowflakeIds(a.id, b.id));
 
             if (!newItems.length) {
                 console.log(`ℹ️ [Twitter][${userId}] 沒有新推文`);
@@ -592,18 +584,35 @@ async function checkTwitterUpdates(client, isManual = false, messageContext = nu
             for (const item of newItems) rememberRecent(state.recentIds, item.id);
             saveState();
 
-            const body = newItems.map((item, idx) => {
-                const titleLine = item.title ? `**${item.title}**\n` : '';
-                return `${idx + 1}. ${titleLine}${item.link}`;
-            }).join('\n\n');
-
+            // 防護措施：超過 1900 字自動分段發送，避免觸發 Discord 2000 字上限
             try {
                 const channel = await client.channels.fetch(notifyChannelId);
                 if (channel) {
-                    await channel.send({
-                        content: `🔔 ${PING_ROLE} **偵測到 @${userId} 發布了 ${newItems.length} 則新訊息：**\n${body}`,
-                        allowedMentions: { parse: ['roles'] }
-                    });
+                    let currentMsg = `🔔 ${PING_ROLE} **偵測到 @${userId} 發布了 ${newItems.length} 則新訊息：**\n\n`;
+                    let isFirst = true;
+
+                    for (const item of newItems) {
+                        const titleLine = item.title ? `**${truncateText(item.title, 120)}**\n` : '';
+                        const itemBlock = `${titleLine}${item.link}\n\n`;
+
+                        if ((currentMsg + itemBlock).length > 1900) {
+                            await channel.send({
+                                content: currentMsg.trim(),
+                                allowedMentions: isFirst ? { parse: ['roles'] } : { parse: [] }
+                            });
+                            currentMsg = itemBlock;
+                            isFirst = false;
+                        } else {
+                            currentMsg += itemBlock;
+                        }
+                    }
+
+                    if (currentMsg.trim()) {
+                        await channel.send({
+                            content: currentMsg.trim(),
+                            allowedMentions: isFirst ? { parse: ['roles'] } : { parse: [] }
+                        });
+                    }
                 }
             } catch (e) {
                 console.error(`[Twitter][${userId}] 發送訊息失敗：${e.message}`);
@@ -612,8 +621,13 @@ async function checkTwitterUpdates(client, isManual = false, messageContext = nu
 
         if (isManual && messageContext) {
             if (manualLines.length) {
+                let fullText = `🔔 ${PING_ROLE} **[推特手動測試成功]**\n\n${manualLines.join('\n\n')}`;
+                if (fullText.length > 1950) {
+                    fullText = fullText.slice(0, 1900) + '\n\n*(部分預覽內容因長度限制已截斷)*';
+                }
+
                 await messageContext.reply({
-                    content: `🔔 ${PING_ROLE} **[推特手動測試成功]**\n${manualLines.join('\n\n')}`,
+                    content: fullText,
                     allowedMentions: { parse: ['roles'] }
                 });
             } else {
@@ -666,11 +680,9 @@ async function checkSteamUpdates(client, isManual = false, messageContext = null
             return;
         }
 
-        // 依照 API 回傳順序，通常是最新在前
         const newestItem = newsItems[0];
         const currentId = String(newestItem.gid);
 
-        // 首次啟動只建立快取
         if (!steamState.lastSteamNewsId && !isManual) {
             steamState.lastSteamNewsId = currentId;
             rememberRecent(steamState.recentIds, currentId);
@@ -693,9 +705,8 @@ async function checkSteamUpdates(client, isManual = false, messageContext = null
         }
 
         const uniqueUnseen = [...new Map(unseen.map(item => [String(item.gid), item])).values()];
-        uniqueUnseen.sort((a, b) => compareSnowflakeIds(String(a.gid), String(b.gid))); // oldest -> newest
+        uniqueUnseen.sort((a, b) => compareSnowflakeIds(String(a.gid), String(b.gid)));
 
-        // 手動測試：永遠回最新，但不影響自動監測快取
         if (isManual) {
             const preview = newsItems.slice(0, 3).map(item => {
                 const images = extractSteamImages(item.contents || '');
@@ -798,7 +809,6 @@ async function checkYouTubeUpdates(client, isManual = false, messageContext = nu
             return;
         }
 
-        // 首次啟動：只建立快取，不發送
         if (!youtubeState.lastVideoId && !isManual) {
             youtubeState.lastVideoId = feedItems[0].id;
             youtubeState.lastPublishedAt = feedItems[0].published || new Date().toISOString();
@@ -808,16 +818,20 @@ async function checkYouTubeUpdates(client, isManual = false, messageContext = nu
             return;
         }
 
-        // 手動測試：顯示最新 3 部
         if (isManual) {
             const preview = feedItems.slice(0, 3).map((item, idx) => {
-                const titleLine = item.title ? `**${item.title}**\n` : '';
+                const titleLine = item.title ? `**${truncateText(item.title, 100)}**\n` : '';
                 return `${idx + 1}. ${titleLine}${item.link}`;
             }).join('\n\n');
 
+            let fullText = `📺 **YouTube 頻道測試：@${YOUTUBE_HANDLE}**\n\n${preview}`;
+            if (fullText.length > 1950) {
+                fullText = fullText.slice(0, 1900) + '\n\n*(預覽內容已截斷)*';
+            }
+
             if (messageContext) {
                 await messageContext.reply({
-                    content: `📺 **YouTube 頻道測試：@${YOUTUBE_HANDLE}**\n${preview}`,
+                    content: fullText,
                     allowedMentions: { parse: [] }
                 });
             }
@@ -838,7 +852,7 @@ async function checkYouTubeUpdates(client, isManual = false, messageContext = nu
         }
 
         newItems = [...new Map(newItems.map(item => [item.id, item])).values()];
-        newItems.reverse(); // oldest -> newest
+        newItems.reverse();
 
         if (!newItems.length) {
             console.log('ℹ️ [YouTube] 沒有新影片');
@@ -850,18 +864,34 @@ async function checkYouTubeUpdates(client, isManual = false, messageContext = nu
         for (const item of newItems) rememberRecent(youtubeState.recentIds, item.id);
         saveState();
 
-        const body = newItems.map((item, idx) => {
-            const titleLine = item.title ? `**${item.title}**\n` : '';
-            return `${idx + 1}. ${titleLine}${item.link}`;
-        }).join('\n\n');
-
         try {
             const channel = await client.channels.fetch(notifyChannelId);
             if (channel) {
-                await channel.send({
-                    content: `🔔 ${PING_ROLE} **@${YOUTUBE_HANDLE} 發布了 ${newItems.length} 部新影片：**\n${body}`,
-                    allowedMentions: { parse: ['roles'] }
-                });
+                let currentMsg = `🔔 ${PING_ROLE} **@${YOUTUBE_HANDLE} 發布了 ${newItems.length} 部新影片：**\n\n`;
+                let isFirst = true;
+
+                for (const item of newItems) {
+                    const titleLine = item.title ? `**${truncateText(item.title, 120)}**\n` : '';
+                    const itemBlock = `${titleLine}${item.link}\n\n`;
+
+                    if ((currentMsg + itemBlock).length > 1900) {
+                        await channel.send({
+                            content: currentMsg.trim(),
+                            allowedMentions: isFirst ? { parse: ['roles'] } : { parse: [] }
+                        });
+                        currentMsg = itemBlock;
+                        isFirst = false;
+                    } else {
+                        currentMsg += itemBlock;
+                    }
+                }
+
+                if (currentMsg.trim()) {
+                    await channel.send({
+                        content: currentMsg.trim(),
+                        allowedMentions: isFirst ? { parse: ['roles'] } : { parse: [] }
+                    });
+                }
             }
         } catch (e) {
             console.error(`[YouTube] 發送訊息失敗：${e.message}`);
@@ -897,7 +927,6 @@ function startNewsCheckLoop(client) {
 
     loadState();
 
-    // 立即執行一次，只建立快取，不會重複發
     void checkTwitterUpdates(client, false, null);
     void checkSteamUpdates(client, false, null);
     void checkYouTubeUpdates(client, false, null);
