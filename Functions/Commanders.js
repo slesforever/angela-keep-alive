@@ -20,7 +20,7 @@ function isOnCooldown(userId, cmd, ms = 3000) {
     return false;
 }
 
-// ── 每日固定指數計算函式 (同個人同一天測數值固定) ─────────────────────
+// ── 每日固定指數計算函式 ───────────────────────────────────────
 function getDailyRate(userId, salt) {
     const dateStr = new Date().toISOString().slice(0, 10);
     let hash = 0;
@@ -38,7 +38,7 @@ function createProgressBar(percent) {
     return '█'.repeat(filled) + '░'.repeat(empty);
 }
 
-// ── 相容性轉換器 (將 Interaction 轉包為相容 Message 物件) ──────────
+// ── 相容性轉換器 (Interaction -> Message) ───────────────────────
 function createPseudoMessage(interaction) {
     return {
         interaction,
@@ -48,7 +48,7 @@ function createPseudoMessage(interaction) {
         guild: interaction.guild,
         channel: interaction.channel,
         client: interaction.client,
-        content: '', // 於分發處動態填充
+        content: '',
 
         reply: async (options) => {
             const payload = typeof options === 'string' ? { content: options } : { ...options };
@@ -133,14 +133,25 @@ async function handleSlashCommands(client, interaction) {
         // ── 7. 男同/姬圈指數 (/gayrate, /lesbianrate) ────────
         if (commandName === 'gayrate') {
             const target = interaction.options.getUser('target') || user;
-            const rate = getDailyRate(target.id, 'gay');
+            let rate = getDailyRate(target.id, 'gay');
+
+            // 🔥 最高特權保護：測到最高管理員一律鎖定為 0%
+            if (target.id === SUPER_ADMIN_ID) rate = 0;
+
             const bar = createProgressBar(rate);
             
             let comment = '';
-            if (rate < 20)      comment = '「數據顯示：鋼鐵般堅硬直男。」';
-            else if (rate < 50) comment = '「有些許隱藏屬性，偶爾顯露出來。」';
-            else if (rate < 80) comment = '「成分相當濃烈，已經無法隱藏了。」';
-            else                comment = '「100% 純度的純真男同！ Angela 判定無誤。」';
+            if (target.id === SUPER_ADMIN_ID) {
+                comment = '「主管專屬認證：鋼鐵般的絕對 0% 直男，系統數據無法改寫。」';
+            } else if (rate < 20) {
+                comment = '「數據顯示：鋼鐵般堅硬直男。」';
+            } else if (rate < 50) {
+                comment = '「有些許隱藏屬性，偶爾顯露出來。」';
+            } else if (rate < 80) {
+                comment = '「成分相當濃烈，已經無法隱藏了。」';
+            } else {
+                comment = '「100% 純度的純真男同！ Angela 判定無誤。」';
+            }
 
             const embed = new EmbedBuilder()
                 .setTitle('男同指數測試 (Gay Rate)')
@@ -154,17 +165,28 @@ async function handleSlashCommands(client, interaction) {
 
         if (commandName === 'lesbianrate') {
             const target = interaction.options.getUser('target') || user;
-            const rate = getDailyRate(target.id, 'lesbian');
+            let rate = getDailyRate(target.id, 'lesbian');
+
+            // 🔥 最高特權保護：測到最高管理員一律鎖定為 0%
+            if (target.id === SUPER_ADMIN_ID) rate = 0;
+
             const bar = createProgressBar(rate);
             
             let comment = '';
-            if (rate < 20)      comment = '「姬圈指數較低，極度純粹的直女屬性。」';
-            else if (rate < 50) comment = '「有些許女同潛質，值得進一步觀察。」';
-            else if (rate < 80) comment = '「同能量爆棚！極具吸引力。」';
-            else                comment = '「100% 頂級女同霸主！ Angela 認證完畢。」';
+            if (target.id === SUPER_ADMIN_ID) {
+                comment = '「主管專屬認證：絕對 0% 直直到發光，女同屬性完全免疫。」';
+            } else if (rate < 20) {
+                comment = '「姬圈指數較低，極度純粹的直女屬性。」';
+            } else if (rate < 50) {
+                comment = '「有些許女同潛質，值得進一步觀察。」';
+            } else if (rate < 80) {
+                comment = '「女同能量爆棚！極具吸引力。」';
+            } else {
+                comment = '「100% 頂女同霸主！ Angela 認證完畢。」';
+            }
 
             const embed = new EmbedBuilder()
-                .setTitle('女同圈指數測試 (Lesbian Rate)')
+                .setTitle('女同指數測試 (Lesbian Rate)')
                 .setColor(0xe91e63)
                 .setDescription(`**${target.username}** 的女同指數為：**${rate}%**\n\n\`[${bar}]\` ${rate}%\n\n> ${comment}`)
                 .setThumbnail(target.displayAvatarURL({ dynamic: true }))
@@ -173,7 +195,7 @@ async function handleSlashCommands(client, interaction) {
             return interaction.reply({ embeds: [embed] });
         }
 
-        // ── 8. 社群測試指令 (限該群組「管理員」權限可用) ─────────
+        // ── 8. 社群測試指令 (限該群組「管理員」權限) ───────────────
         if (['steam', 'tweet', 'yt'].includes(commandName)) {
             const isGuildAdmin = interaction.memberPermissions?.has(PermissionFlagsBits.Administrator);
             if (!isGuildAdmin) {
@@ -198,7 +220,6 @@ async function handleSlashCommands(client, interaction) {
                 });
             }
 
-            // 發放資源類指令：處理全服發放/個人發放邏輯
             if (['givelunacy', 'givefragments', 'givescrolls', 'givethreads'].includes(commandName)) {
                 const amount = interaction.options.getInteger('amount');
                 const targetUser = interaction.options.getUser('target');
@@ -206,11 +227,11 @@ async function handleSlashCommands(client, interaction) {
 
                 let targetArg = '';
                 if (isAll) {
-                    targetArg = 'all'; // 傳遞全服標記給舊發放系統
+                    targetArg = 'all';
                 } else if (targetUser) {
                     targetArg = `<@${targetUser.id}>`;
                 } else {
-                    targetArg = `<@${uid}>`; // 若未選則預設發給自己
+                    targetArg = `<@${uid}>`;
                 }
 
                 fakeMessage.content = `!${commandName} ${targetArg} ${amount}`;
@@ -237,7 +258,7 @@ async function handleSlashCommands(client, interaction) {
     }
 }
 
-// ── Help 選單 (更新分類與權限說明) ─────────────────────────────
+// ── Help 選單 ─────────────────────────────────────────────────
 async function sendHelp(interaction) {
     const embed = new EmbedBuilder()
         .setTitle('📋 Angela 指令清單')
