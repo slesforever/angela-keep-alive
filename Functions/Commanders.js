@@ -212,6 +212,12 @@ async function handleSlashCommands(client, interaction) {
 
                 let targetArg = isAll ? 'all' : (targetUser ? `<@${targetUser.id}>` : `<@${uid}>`);
                 fakeMessage.content = `!${commandName} ${targetArg} ${amount}`;
+                // GiveAwaySystem 需要 mentions.users.first() — fakeMessage 補上
+                fakeMessage.mentions = {
+                    users: {
+                        first: () => isAll ? null : (targetUser || interaction.user)
+                    }
+                };
             } else {
                 fakeMessage.content = `!${commandName}`;
             }
