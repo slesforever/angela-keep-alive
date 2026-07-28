@@ -1,250 +1,979 @@
-// Functions/Commanders.js
-const { EmbedBuilder, MessageFlags, PermissionFlagsBits } = require('discord.js');
-const PacksAndData    = require('./GameSystem/PacksAndData.js');
-const GiveAwaySystem  = require('./GameSystem/GiveAwaySystem.js');
-const MirrorDungeon   = require('./GameSystem/MirrorDungeon.js');
-const PullSystem      = require('./GameSystem/Pulls/PullSystem.js');
-const CharacterSystem = require('./GameSystem/CharacterSystem.js');
-const PartySystem     = require('./GameSystem/PartySystem.js');
-const BattleSystem    = require('./GameSystem/BattleSystem.js');
-const { checkSteamUpdates, checkTwitterUpdates, checkYouTubeUpdates } = require('./Newscheck.js');
+// Functions/Newscheck.js
+// Twitter Nitter RSS + Steam 官方新聞 API + YouTube 頻道網址動態監測
+const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
+const fs = require('fs');
+const path = require('path');
 
-const SUPER_ADMIN_ID = '1330463890122735642'; // 唯一能改動玩家進度與發放資源的最高主管 ID
+const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
-// ── 冷卻系統 ──────────────────────────────────────────────────
-const COOLDOWNS = new Map();
-function isOnCooldown(userId, cmd, ms = 3000) {
-    const key = `${userId}:${cmd}`;
-    if (Date.now() - (COOLDOWNS.get(key) || 0) < ms) return true;
-    COOLDOWNS.set(key, Date.now());
-    return false;
-}
+const MONITORED_USERS = (process.env.TARGET_USERS || 'LimbusCompany_B,ProjMoonStudio')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
 
-// ── 每日固定指數計算 ──────────────────────────────────────────
-function getDailyRate(userId, salt) {
-    const dateStr = new Date().toISOString().slice(0, 10);
-    let hash = 0;
-    const str = `${userId}:${salt}:${dateStr}`;
-    for (let i = 0; i < str.length; i++) {
-        hash = (hash << 5) - hash + str.charCodeAt(i);
-        hash |= 0;
+let notifyChannelId = process.env.NOTIFY_CHANNEL_ID || '1402282604165730348';
+const PING_ROLE = process.env.PING_ROLE_MENTION || '<@&1406984068725211177>';
+const STEAM_APP_ID = '1973530';
+const CHECK_INTERVAL = Number(process.env.CHECK_INTERVAL_MS || 20 * 1000);
+
+// 自動監測預設抓少一點，速度更快；手動測試可多抓
+const STEAM_NEWS_COUNT_AUTO = Number(process.env.STEAM_NEWS_COUNT_AUTO || 3);
+const STEAM_NEWS_COUNT_MANUAL = Number(process.env.STEAM_NEWS_COUNT_MANUAL || 5);
+const STEAM_FETCH_TIMEOUT_MS = Number(process.env.STEAM_FETCH_TIMEOUT_MS || 5000);
+
+// Steam 圖片前綴
+const STEAM_CLAN_IMAGE_BASE = 'https://steamcdn-a.akamaihd.net/steamcommunity/public/images/clans/';
+
+// 🎯 YouTube 設定：完全使用頻道網址進行解析與監測
+const YOUTUBE_HANDLE = (process.env.YOUTUBE_HANDLE || 'ProjectMoonOfficial').replace(/^@/, '');
+const YOUTUBE_PAGE_URL = process.env.YOUTUBE_PAGE_URL || `https://www.youtube.com/@${YOUTUBE_HANDLE}`;
+
+// Nitter 備援節點
+const NITTER_NODES = [
+    'https://nitter.net',
+    'https://nitter.poast.org',
+    'https://nitter.cz',
+    'https://nitter.privacydev.net',
+    'https://nitter.1d4.us',
+    'https://nitter.fdn.fr',
+];
+
+const STATE_FILE = path.join(process.cwd(), 'data', 'newscheck-state.json');
+const RECENT_TTL_MS = 30 * 60 * 1000;
+
+let loopTimer = null;
+let twitterLock = false;
+let steamLock = false;
+let youtubeLock = false;
+
+const userStates = new Map(); // userId -> { lastFetchedId, recentIds: Map<id, ts> }
+const steamState = {
+    lastSteamNewsId: null,
+    recentIds: new Map()
+};
+const youtubeState = {
+    channelId: null,
+    lastVideoId: null,
+    lastPublishedAt: null,
+    recentIds: new Map()
+};
+
+function ensureStateDir() {
+    const dir = path.dirname(STATE_FILE);
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
     }
-    return Math.abs(hash) % 101;
 }
 
-function createProgressBar(percent) {
-    const filled = Math.round(percent / 10);
-    const empty = 10 - filled;
-    return '█'.repeat(filled) + '░'.repeat(empty);
+function getUserState(userId) {
+    if (!userStates.has(userId)) {
+        userStates.set(userId, {
+            lastFetchedId: null,
+            recentIds: new Map()
+        });
+    }
+    return userStates.get(userId);
 }
 
-// ── 相容性轉型橋接器 (修復 Deferred 衝突 Bug) ─────────────────
-function createPseudoMessage(interaction) {
-    return {
-        interaction,
-        author: interaction.user,
-        user: interaction.user,
-        member: interaction.member,
-        guild: interaction.guild,
-        channel: interaction.channel,
-        client: interaction.client,
-        content: '',
+function cleanupRecent(map) {
+    const now = Date.now();
+    for (const [id, ts] of map.entries()) {
+        if (now - ts > RECENT_TTL_MS) {
+            map.delete(id);
+        }
+    }
+}
 
-        // 🔥 關鍵修復：若系統已 defer，自動切換為 editReply，解決報錯！
-        reply: async (options) => {
-            const payload = typeof options === 'string' ? { content: options } : { ...options };
-            try {
-                if (interaction.deferred || interaction.replied) {
-                    return await interaction.editReply(payload);
-                } else {
-                    return await interaction.reply(payload);
+function rememberRecent(map, id) {
+    cleanupRecent(map);
+    map.set(String(id), Date.now());
+}
+
+function isRecent(map, id) {
+    cleanupRecent(map);
+    return map.has(String(id));
+}
+
+function truncateText(str, maxLen = 100) {
+    if (!str) return '';
+    const clean = String(str).trim();
+    return clean.length > maxLen ? clean.slice(0, maxLen) + '...' : clean;
+}
+
+function escapeRegExp(text) {
+    return String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function extractBlock(xml, tagName) {
+    const regex = new RegExp(`<${escapeRegExp(tagName)}\\b[\\s\\S]*?</${escapeRegExp(tagName)}>`, 'g');
+    return [...xml.matchAll(regex)].map(m => m[0]);
+}
+
+function extractTag(block, tagName) {
+    const regex = new RegExp(`<${escapeRegExp(tagName)}(?:\\s[^>]*)?>([\\s\\S]*?)</${escapeRegExp(tagName)}>`, 'i');
+    return block.match(regex)?.[1]?.trim() ?? null;
+}
+
+function extractAttr(block, tagName, attrName) {
+    const regex = new RegExp(`<${escapeRegExp(tagName)}\\b[^>]*${escapeRegExp(attrName)}=["']([^"']+)["'][^>]*>`, 'i');
+    return block.match(regex)?.[1]?.trim() ?? null;
+}
+
+function decodeXmlEntities(text) {
+    return String(text)
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&nbsp;/g, ' ');
+}
+
+function stripHtml(text) {
+    return String(text || '')
+        .replace(/<\/?[^>]+(>|$)/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function normalizeSteamContents(raw = '') {
+    return String(raw).replace(/\{STEAM_CLAN_IMAGE\}/g, STEAM_CLAN_IMAGE_BASE);
+}
+
+function extractSteamImages(raw = '') {
+    const text = normalizeSteamContents(raw);
+    const images = [];
+
+    for (const m of text.matchAll(/\[img\]([\s\S]*?)\[\/img\]/gi)) {
+        const url = m[1].trim();
+        if (/^https?:\/\//i.test(url)) images.push(url);
+    }
+
+    return [...new Set(images)];
+}
+
+function stripSteamContent(raw = '') {
+    return normalizeSteamContents(raw)
+        .replace(/\[img\][\s\S]*?\[\/img\]/gi, '')
+        .replace(/<\/?[^>]+(>|$)/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function guessFileExtension(contentType = '', url = '') {
+    const ct = String(contentType).toLowerCase();
+    if (ct.includes('image/png')) return 'png';
+    if (ct.includes('image/jpeg')) return 'jpg';
+    if (ct.includes('image/jpg')) return 'jpg';
+    if (ct.includes('image/gif')) return 'gif';
+    if (ct.includes('image/webp')) return 'webp';
+
+    const cleanUrl = String(url).split('?')[0].toLowerCase();
+    const match = cleanUrl.match(/\.([a-z0-9]{3,4})$/);
+    if (match?.[1]) return match[1];
+
+    return 'png';
+}
+
+async function downloadSteamImage(url, itemGid, index) {
+    try {
+        const response = await fetchWithTimeout(url, {}, STEAM_FETCH_TIMEOUT_MS);
+        if (!response.ok) return null;
+
+        const contentType = response.headers.get('content-type') || '';
+        const ext = guessFileExtension(contentType, url);
+        const filename = `steam-${itemGid}-${index + 1}.${ext}`;
+        const buffer = Buffer.from(await response.arrayBuffer());
+
+        return new AttachmentBuilder(buffer, { name: filename });
+    } catch (_) {
+        return null;
+    }
+}
+
+async function buildSteamAnnouncementPayload(item) {
+    const imageUrls = extractSteamImages(item.contents || '');
+    const cleanContent = stripSteamContent(item.contents || '');
+
+    const summary = cleanContent.length > 900
+        ? `${cleanContent.slice(0, 900)}...`
+        : (cleanContent || '（沒有內容）');
+
+    const attachments = [];
+    const downloaded = await Promise.all(
+        imageUrls.slice(0, 10).map((url, idx) => downloadSteamImage(url, item.gid, idx))
+    );
+
+    for (const file of downloaded) {
+        if (file) attachments.push(file);
+    }
+
+    const embeds = [];
+
+    const firstEmbed = new EmbedBuilder()
+        .setTitle(`📢 ${item.title}`)
+        .setURL(item.url)
+        .setDescription(summary)
+        .setColor(0x1a3a6c)
+        .setFooter({ text: `來源: Steam 官方新聞中心 | 識別碼: ${item.gid}` })
+        .setTimestamp();
+
+    if (attachments[0]) {
+        firstEmbed.setImage(`attachment://${attachments[0].name}`);
+    }
+
+    embeds.push(firstEmbed);
+
+    for (let i = 1; i < attachments.length && embeds.length < 10; i++) {
+        embeds.push(
+            new EmbedBuilder()
+                .setColor(0x1a3a6c)
+                .setImage(`attachment://${attachments[i].name}`)
+                .setFooter({ text: `圖片 ${i + 1}/${attachments.length}` })
+        );
+    }
+
+    return { embeds, files: attachments };
+}
+
+function loadState() {
+    try {
+        if (!fs.existsSync(STATE_FILE)) return;
+
+        const raw = fs.readFileSync(STATE_FILE, 'utf8');
+        const data = JSON.parse(raw);
+
+        if (data?.users && typeof data.users === 'object') {
+            for (const [userId, info] of Object.entries(data.users)) {
+                const state = getUserState(userId);
+                state.lastFetchedId = info?.lastFetchedId ? String(info.lastFetchedId) : null;
+                state.recentIds.clear();
+
+                if (Array.isArray(info?.recentIds)) {
+                    for (const id of info.recentIds) {
+                        state.recentIds.set(String(id), Date.now());
+                    }
                 }
-            } catch (err) {
-                if (interaction.deferred || interaction.replied) {
-                    return await interaction.editReply(payload).catch(() => {});
-                }
-                return await interaction.followUp(payload).catch(() => {});
             }
-        },
-        react: async () => {},
-        delete: async () => {}
-    };
+        }
+
+        if (data?.steam) {
+            steamState.lastSteamNewsId = data.steam.lastSteamNewsId ? String(data.steam.lastSteamNewsId) : null;
+            steamState.recentIds.clear();
+
+            if (Array.isArray(data.steam.recentIds)) {
+                for (const id of data.steam.recentIds) {
+                    steamState.recentIds.set(String(id), Date.now());
+                }
+            }
+        }
+
+        if (data?.youtube) {
+            youtubeState.channelId = data.youtube.channelId ? String(data.youtube.channelId) : null;
+            youtubeState.lastVideoId = data.youtube.lastVideoId ? String(data.youtube.lastVideoId) : null;
+            youtubeState.lastPublishedAt = data.youtube.lastPublishedAt ? String(data.youtube.lastPublishedAt) : null;
+            youtubeState.recentIds.clear();
+
+            if (Array.isArray(data.youtube.recentIds)) {
+                for (const id of data.youtube.recentIds) {
+                    youtubeState.recentIds.set(String(id), Date.now());
+                }
+            }
+        }
+    } catch (err) {
+        console.warn(`[Newscheck] 載入狀態失敗：${err.message}`);
+    }
 }
 
-// ── 處理斜線指令分發 ─────────────────────────────────────────
-async function handleSlashCommands(client, interaction) {
-    const { commandName, user } = interaction;
-    const uid = user.id;
+function saveState() {
+    try {
+        ensureStateDir();
 
-    const fakeMessage = createPseudoMessage(interaction);
+        const users = {};
+        for (const [userId, state] of userStates.entries()) {
+            cleanupRecent(state.recentIds);
+            users[userId] = {
+                lastFetchedId: state.lastFetchedId,
+                recentIds: [...state.recentIds.keys()].slice(-20)
+            };
+        }
+
+        cleanupRecent(steamState.recentIds);
+        cleanupRecent(youtubeState.recentIds);
+
+        const data = {
+            users,
+            steam: {
+                lastSteamNewsId: steamState.lastSteamNewsId,
+                recentIds: [...steamState.recentIds.keys()].slice(-20)
+            },
+            youtube: {
+                channelId: youtubeState.channelId,
+                lastVideoId: youtubeState.lastVideoId,
+                lastPublishedAt: youtubeState.lastPublishedAt,
+                recentIds: [...youtubeState.recentIds.keys()].slice(-20)
+            },
+            savedAt: new Date().toISOString()
+        };
+
+        fs.writeFileSync(STATE_FILE, JSON.stringify(data, null, 2), 'utf8');
+    } catch (err) {
+        console.warn(`[Newscheck] 儲存狀態失敗：${err.message}`);
+    }
+}
+
+function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    return fetch(url, {
+        ...options,
+        signal: controller.signal,
+        headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            ...(options.headers || {})
+        }
+    }).finally(() => clearTimeout(timeout));
+}
+
+function compareSnowflakeIds(a, b) {
+    if (a === b) return 0;
+
+    const aNum = /^\d+$/.test(String(a));
+    const bNum = /^\d+$/.test(String(b));
+
+    if (aNum && bNum) {
+        const aa = BigInt(a);
+        const bb = BigInt(b);
+        return aa > bb ? 1 : -1;
+    }
+
+    return String(a).localeCompare(String(b));
+}
+
+function parseTwitterItems(xml) {
+    const blocks = extractBlock(xml, 'item');
+    const items = [];
+
+    for (const block of blocks) {
+        const link = extractTag(block, 'link');
+        const guid = extractTag(block, 'guid');
+        const title = extractTag(block, 'title');
+
+        const rawLink = (link || guid || title || '').trim();
+        const cleanLink = rawLink.replace(/^http:\/\//i, 'https://').split('#')[0].split('?')[0];
+        const tweetKey = extractTweetKey(cleanLink) || extractTweetKey(guid) || extractTweetKey(title);
+
+        if (!tweetKey) continue;
+
+        items.push({
+            id: String(tweetKey),
+            link: cleanLink.replace(/^https:\/\/[^/]+/, 'https://vxtwitter.com'),
+            title: title ? decodeXmlEntities(title) : null,
+        });
+    }
+
+    return items;
+}
+
+function parseYouTubeItems(xml) {
+    const blocks = extractBlock(xml, 'entry');
+    const items = [];
+
+    for (const block of blocks) {
+        const videoId = extractTag(block, 'yt:videoId') || extractTag(block, 'videoId');
+        const title = extractTag(block, 'title');
+        const published = extractTag(block, 'published');
+        const link = extractAttr(block, 'link', 'href') || (videoId ? `https://www.youtube.com/watch?v=${videoId}` : null);
+
+        if (!videoId || !link) continue;
+
+        items.push({
+            id: String(videoId),
+            link,
+            title: title ? decodeXmlEntities(title) : null,
+            published: published ? new Date(published).toISOString() : null,
+        });
+    }
+
+    return items;
+}
+
+function extractTweetKey(urlOrId) {
+    if (!urlOrId) return null;
+
+    const text = String(urlOrId).trim();
+
+    const statusMatch = text.match(/status\/(\d+)/i);
+    if (statusMatch) return statusMatch[1];
+
+    const numericMatch = text.match(/\b(\d{10,})\b/);
+    if (numericMatch) return numericMatch[1];
+
+    return text.replace(/^https:\/\/[^/]+/, '').split('?')[0].split('#')[0];
+}
+
+async function fetchTweetItemsFromNode(nodeUrl, userId) {
+    const url = `${nodeUrl}/${userId}/rss`;
+    const response = await fetchWithTimeout(url, {}, 8000);
+
+    if (!response.ok) {
+        throw new Error(`HTTP 錯誤! 狀態碼: ${response.status}`);
+    }
+
+    const text = await response.text();
+    const items = parseTwitterItems(text);
+
+    if (!items.length) {
+        throw new Error('RSS 解析失敗');
+    }
+
+    return items;
+}
+
+async function fetchTweetItemsFromAllNodes(userId) {
+    const results = await Promise.allSettled(
+        NITTER_NODES.map(async (nodeUrl) => ({
+            nodeUrl,
+            items: await fetchTweetItemsFromNode(nodeUrl, userId)
+        }))
+    );
+
+    const merged = [];
+    const seen = new Set();
+
+    for (const result of results) {
+        if (result.status !== 'fulfilled') continue;
+
+        for (const item of result.value.items || []) {
+            if (!item?.id || !item?.link) continue;
+            if (seen.has(item.id)) continue;
+            seen.add(item.id);
+            merged.push(item);
+        }
+    }
+
+    if (!merged.length) {
+        throw new Error('所有 Nitter 節點都失敗');
+    }
+
+    merged.sort((a, b) => compareSnowflakeIds(b.id, a.id));
+    return merged;
+}
+
+// 🌐 直接從 YouTube 頻道網址 (https://www.youtube.com/@ProjectMoonOfficial) 動態解析 Channel ID
+async function resolveYouTubeChannelId(pageUrl = YOUTUBE_PAGE_URL) {
+    const candidates = [
+        `${pageUrl}/videos`,
+        pageUrl,
+    ];
+
+    const patterns = [
+        /"channelId":"(UC[^"]+)"/,
+        /"channelId\\":\\"(UC[^\\"]+)\\"/,
+        /"externalId":"(UC[^"]+)"/,
+        /"browseId":"(UC[^"]+)"/,
+        /https:\/\/www\.youtube\.com\/channel\/(UC[\w-]+)/,
+        /canonical" href="https:\/\/www\.youtube\.com\/channel\/(UC[\w-]+)"/,
+        /itemprop="identifier" content="(UC[\w-]+)"/
+    ];
+
+    for (const targetUrl of candidates) {
+        try {
+            const response = await fetchWithTimeout(targetUrl, {}, 12000);
+            if (!response.ok) continue;
+
+            const html = await response.text();
+            for (const pattern of patterns) {
+                const match = html.match(pattern);
+                if (match?.[1]) return match[1];
+            }
+        } catch (_) {}
+    }
+
+    return null;
+}
+
+async function fetchYouTubeItems(channelId) {
+    const url = `https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`;
+    const response = await fetchWithTimeout(url, {}, 12000);
+
+    if (!response.ok) {
+        throw new Error(`YouTube RSS HTTP 錯誤! 狀態碼: ${response.status} ( Channel ID: ${channelId} )`);
+    }
+
+    const xml = await response.text();
+    const items = parseYouTubeItems(xml);
+
+    if (!items.length) {
+        throw new Error('YouTube RSS 解析失敗');
+    }
+
+    return items;
+}
+
+// ── Twitter 監測 ─────────────────────────────────────────────
+async function checkTwitterUpdates(client, isManual = false, messageContext = null, targetUserId = null) {
+    if (twitterLock) {
+        if (!isManual) console.log('⏳ [Twitter] 上一輪尚未完成，略過本輪');
+        return;
+    }
+
+    twitterLock = true;
 
     try {
-        // ── 1. 抽卡 (/pull) ──────────────────────────────────
-        if (commandName === 'pull') {
-            const count = interaction.options.getInteger('count') || 1;
-            fakeMessage.content = `!pull ${count}`;
-            if (isOnCooldown(uid, count === 10 ? 'pull10' : 'pull')) {
-                return interaction.reply({ content: '⏳ 指令冷卻中，請稍後再試。', flags: MessageFlags.Ephemeral });
+        const usersToCheck = targetUserId ? [targetUserId] : MONITORED_USERS;
+
+        if (!isManual) {
+            console.log(`⏳ Angela 正在檢查官方帳號：${usersToCheck.map(u => '@' + u).join(', ')} ...`);
+        }
+
+        const manualLines = [];
+        const manualErrors = [];
+
+        for (const userId of usersToCheck) {
+            const state = getUserState(userId);
+
+            let feedItems;
+            try {
+                feedItems = await fetchTweetItemsFromAllNodes(userId);
+            } catch (err) {
+                const msg = `@${userId}：${err.message}`;
+                console.warn(`⚠️ [Twitter] ${msg}`);
+                if (isManual) manualErrors.push(msg);
+                continue;
             }
-            if (typeof PullSystem.executePull === 'function') {
-                return PullSystem.executePull(client, fakeMessage, count);
+
+            if (!feedItems?.length) {
+                const msg = `@${userId}：推文資料不完整`;
+                if (isManual) manualErrors.push(msg);
+                continue;
             }
-            return typeof PullSystem === 'function' ? PullSystem(client, fakeMessage) : PullSystem.handlePull?.(client, fakeMessage);
-        }
 
-        // ── 2. 背包與清單 (/pack, /list) ──────────────────────
-        if (commandName === 'pack' || commandName === 'list') {
-            fakeMessage.content = `!${commandName}`;
-            if (isOnCooldown(uid, 'pack')) {
-                return interaction.reply({ content: '⏳ 指令冷卻中，請稍後再試。', flags: MessageFlags.Ephemeral });
+            if (!state.lastFetchedId && !isManual) {
+                state.lastFetchedId = feedItems[0].id;
+                rememberRecent(state.recentIds, feedItems[0].id);
+                saveState();
+                console.log(`📦 [Twitter][${userId}] 建立初始推文快取：${feedItems[0].id}`);
+                continue;
             }
-            return PacksAndData.handleInventory ? PacksAndData.handleInventory(client, fakeMessage) : PacksAndData(client, fakeMessage);
-        }
 
-        // ── 3. 戰鬥 (/battle) ────────────────────────────────
-        if (commandName === 'battle') {
-            fakeMessage.content = '!battle';
-            if (isOnCooldown(uid, 'battle', 5000)) {
-                return interaction.reply({ content: '⏳ 戰鬥冷卻中，請稍後再試。', flags: MessageFlags.Ephemeral });
-            }
-            return BattleSystem.handleBattle ? BattleSystem.handleBattle(client, fakeMessage) : BattleSystem(client, fakeMessage);
-        }
-
-        // ── 4. 隊伍 (/party) ─────────────────────────────────
-        if (commandName === 'party') {
-            fakeMessage.content = '!party';
-            return PartySystem.handleParty ? PartySystem.handleParty(client, fakeMessage) : PartySystem(client, fakeMessage);
-        }
-
-        // ── 5. 罪人管理 (/sinner, /uptie, /equip, /threads) ───
-        if (['sinner', 'uptie', 'equip', 'threads'].includes(commandName)) {
-            fakeMessage.content = `!${commandName}`;
-            if (commandName === 'sinner')  return CharacterSystem.handleSinner ? CharacterSystem.handleSinner(client, fakeMessage) : CharacterSystem(client, fakeMessage);
-            if (commandName === 'uptie')   return CharacterSystem.handleUptie ? CharacterSystem.handleUptie(client, fakeMessage) : CharacterSystem(client, fakeMessage);
-            if (commandName === 'equip')   return CharacterSystem.handleEquip ? CharacterSystem.handleEquip(client, fakeMessage) : CharacterSystem(client, fakeMessage);
-            if (commandName === 'threads') return CharacterSystem.handleThreads ? CharacterSystem.handleThreads(client, fakeMessage) : CharacterSystem(client, fakeMessage);
-        }
-
-        // ── 6. 鏡光迷宮 (/md) ───────────────────────────────
-        if (commandName === 'md') {
-            fakeMessage.content = '!md';
-            if (isOnCooldown(uid, 'md', 2000)) {
-                return interaction.reply({ content: '⏳ 指令冷卻中，請稍後再試。', flags: MessageFlags.Ephemeral });
-            }
-            return MirrorDungeon.handleMirrorDungeon ? MirrorDungeon.handleMirrorDungeon(client, fakeMessage) : MirrorDungeon(client, fakeMessage);
-        }
-
-        // ── 7. 男同/姬圈指數 (/gayrate, /lesbianrate) ────────
-        if (commandName === 'gayrate') {
-            const target = interaction.options.getUser('target') || user;
-            let rate = getDailyRate(target.id, 'gay');
-            if (target.id === SUPER_ADMIN_ID) rate = 0; // Sles 鎖定 0%
-
-            const bar = createProgressBar(rate);
-            let comment = target.id === SUPER_ADMIN_ID 
-                ? '「主管專屬認證：鋼鐵般的絕對 0% 直男，系統數據無法改寫。」'
-                : (rate < 20 ? '「數據顯示：鋼鐵般堅硬直男。」' : rate < 50 ? '「有些許隱藏屬性。」' : rate < 80 ? '「成分相當濃烈。」' : '「100% 純度純真男同！」');
-
-            const embed = new EmbedBuilder()
-                .setTitle('男同指數測試 (Gay Rate)')
-                .setColor(0x3498db)
-                .setDescription(`**${target.username}** 的男同指數為：**${rate}%**\n\n\`[${bar}]\` ${rate}%\n\n> ${comment}`)
-                .setThumbnail(target.displayAvatarURL({ dynamic: true }));
-
-            return interaction.reply({ embeds: [embed] });
-        }
-
-        if (commandName === 'lesbianrate') {
-            const target = interaction.options.getUser('target') || user;
-            let rate = getDailyRate(target.id, 'lesbian');
-            if (target.id === SUPER_ADMIN_ID) rate = 0; // Sles 鎖定 0%
-
-            const bar = createProgressBar(rate);
-            let comment = target.id === SUPER_ADMIN_ID 
-                ? '「主管專屬認證：絕對 0% 直直到發光，姬圈屬性完全免疫。」'
-                : (rate < 20 ? '「姬圈指數較低，極度純粹直女。」' : rate < 50 ? '「有些許潛質。」' : rate < 80 ? '「能量爆棚！」' : '「100% 頂級女同霸主！」');
-
-            const embed = new EmbedBuilder()
-                .setTitle('女同指數測試 (Lesbian Rate)')
-                .setColor(0xe91e63)
-                .setDescription(`**${target.username}** 的女同指數為：**${rate}%**\n\n\`[${bar}]\` ${rate}%\n\n> ${comment}`)
-                .setThumbnail(target.displayAvatarURL({ dynamic: true }));
-
-            return interaction.reply({ embeds: [embed] });
-        }
-
-        // ── 8. 社群測試指令 (限該伺服器「管理員」執行) ──────────────
-        if (['steam', 'tweet', 'yt'].includes(commandName)) {
-            const isGuildAdmin = interaction.memberPermissions?.has(PermissionFlagsBits.Administrator);
-            if (!isGuildAdmin) {
-                return interaction.reply({
-                    content: '❌ 權限不足：此測試指令僅限該 Discord 伺服器的「管理員」權限持有者使用。',
-                    flags: MessageFlags.Ephemeral
+            if (isManual) {
+                const preview = feedItems.slice(0, 3).map((item, idx) => {
+                    const titlePart = item.title ? `**${truncateText(item.title, 100)}**\n` : '';
+                    return `${idx + 1}. ${titlePart}${item.link}`;
                 });
+                manualLines.push(`**@${userId}**\n${preview.join('\n\n')}`);
+                continue;
             }
 
-            await interaction.deferReply(); // 先 deferred，fakeMessage 會自動 editReply 解決報錯！
-            if (commandName === 'steam') return checkSteamUpdates(client, true, fakeMessage);
-            if (commandName === 'tweet') return checkTwitterUpdates(client, true, fakeMessage);
-            if (commandName === 'youtube')    return checkYouTubeUpdates(client, true, fakeMessage);
+            let newItems = [];
+            const seenIndex = feedItems.findIndex(item => item.id === state.lastFetchedId);
+
+            if (seenIndex >= 0) {
+                newItems = feedItems.slice(0, seenIndex);
+            } else if (state.lastFetchedId) {
+                newItems = feedItems.filter(item => compareSnowflakeIds(item.id, state.lastFetchedId) > 0);
+            }
+
+            newItems = [...new Map(newItems.map(item => [item.id, item])).values()];
+            newItems.sort((a, b) => compareSnowflakeIds(a.id, b.id));
+
+            if (!newItems.length) {
+                console.log(`ℹ️ [Twitter][${userId}] 沒有新推文`);
+                continue;
+            }
+
+            state.lastFetchedId = feedItems[0].id;
+            for (const item of newItems) rememberRecent(state.recentIds, item.id);
+            saveState();
+
+            try {
+                const channel = await client.channels.fetch(notifyChannelId);
+                if (channel) {
+                    let currentMsg = `🔔 ${PING_ROLE} **偵測到 @${userId} 發布了 ${newItems.length} 則新訊息：**\n\n`;
+                    let isFirst = true;
+
+                    for (const item of newItems) {
+                        const titleLine = item.title ? `**${truncateText(item.title, 120)}**\n` : '';
+                        const itemBlock = `${titleLine}${item.link}\n\n`;
+
+                        if ((currentMsg + itemBlock).length > 1900) {
+                            await channel.send({
+                                content: currentMsg.trim(),
+                                allowedMentions: isFirst ? { parse: ['roles'] } : { parse: [] }
+                            });
+                            currentMsg = itemBlock;
+                            isFirst = false;
+                        } else {
+                            currentMsg += itemBlock;
+                        }
+                    }
+
+                    if (currentMsg.trim()) {
+                        await channel.send({
+                            content: currentMsg.trim(),
+                            allowedMentions: isFirst ? { parse: ['roles'] } : { parse: [] }
+                        });
+                    }
+                }
+            } catch (e) {
+                console.error(`[Twitter][${userId}] 發送訊息失敗：${e.message}`);
+            }
         }
 
-        // ── 9. 最高權限管理員指令 (嚴格限制僅 Sles ID: 1330463890122735642 可執行) ──
-        if (['givelunacy', 'givefragments', 'givescrolls', 'givethreads', 'updaterewards', 'updatebuff'].includes(commandName)) {
-            if (uid !== SUPER_ADMIN_ID) {
-                return interaction.reply({
-                    content: `⛔ 權限被拒：涉及玩家進度與物資發放之指令，僅限最高主管 Sles (ID: ${SUPER_ADMIN_ID}) 執行。`,
-                    flags: MessageFlags.Ephemeral
+        if (isManual && messageContext) {
+            if (manualLines.length) {
+                let fullText = `🔔 ${PING_ROLE} **[推特手動測試成功]**\n\n${manualLines.join('\n\n')}`;
+                if (fullText.length > 1950) {
+                    fullText = fullText.slice(0, 1900) + '\n\n*(部分預覽內容因長度限制已截斷)*';
+                }
+
+                await messageContext.reply({
+                    content: fullText,
+                    allowedMentions: { parse: ['roles'] }
                 });
-            }
-
-            if (['givelunacy', 'givefragments', 'givescrolls', 'givethreads'].includes(commandName)) {
-                const amount = interaction.options.getInteger('amount');
-                const targetUser = interaction.options.getUser('target');
-                const isAll = interaction.options.getBoolean('all') || false;
-
-                let targetArg = isAll ? 'all' : (targetUser ? `<@${targetUser.id}>` : `<@${uid}>`);
-                fakeMessage.content = `!${commandName} ${targetArg} ${amount}`;
             } else {
-                fakeMessage.content = `!${commandName}`;
+                const extra = manualErrors.length ? `\n\n失敗項目：\n${manualErrors.join('\n')}` : '';
+                await messageContext.reply(`❌ **手動測試未取得有效推文。**${extra}`);
             }
-
-            return GiveAwaySystem.handleGiveAway ? GiveAwaySystem.handleGiveAway(client, fakeMessage) : GiveAwaySystem(client, fakeMessage);
         }
-
-        // ── 10. 說明選單 (/help) ──────────────────────────────
-        if (commandName === 'help') {
-            return sendHelp(interaction);
-        }
-
     } catch (error) {
-        console.error(`[Command Error] 執行 /${commandName} 時發生錯誤:`, error);
-        const replyPayload = { content: `❌ 執行指令時發生內部錯誤：${error.message}`, flags: MessageFlags.Ephemeral };
-        if (interaction.deferred || interaction.replied) {
-            await interaction.editReply(replyPayload).catch(() => {});
-        } else {
-            await interaction.reply(replyPayload).catch(() => {});
+        console.warn(`⚠️ Twitter 擷取異常 (${error.message})`);
+        if (isManual && messageContext) {
+            await messageContext.reply(`❌ 系統執行 Twitter 協定中斷：${error.message}`);
         }
+    } finally {
+        twitterLock = false;
     }
 }
 
-// ── Help 選單 ─────────────────────────────────────────────────
-async function sendHelp(interaction) {
-    const embed = new EmbedBuilder()
-        .setTitle('📋 Angela 指令清單')
-        .setColor(0x00b4d8)
-        .addFields(
-            { name: '🎰 抽卡與背包', value: '`/pull` — 抽卡 ｜ `/pack` — 背包 ｜ `/list` — 機率表' },
-            { name: '⚔️ 戰鬥與隊伍', value: '`/battle` — 出戰關卡 ｜ `/party` — 隊伍管理' },
-            { name: '👤 罪人與資源', value: '`/sinner` — 罪人全覽 ｜ `/uptie` — 提升連結\n`/equip` — 裝備人格 ｜ `/threads` — 絲線查詢' },
-            { name: '🪞 鏡光迷宮',   value: '`/md` — 鏡光迷宮系統' },
-            { name: '🎲 娛樂功能',   value: '`/gayrate` — 男同指數測試\n`/lesbianrate` — 姬圈指數測試' },
-            { name: '📰 社群檢測 (群管理員)', value: '`/steam` ｜ `/tweet` ｜ `/yt` ｜ `/setchannel`' },
-            { name: '👑 最高主管特權 (Sles 專屬)', value: '`/givelunacy` ｜ `/givefragments` ｜ `/givescrolls`\n`/givethreads` ｜ `/updaterewards` ｜ `/updatebuff`' }
-        )
-        .setFooter({ text: '輸入 / 即可喚出選單 ｜ 所有獎勵與倍率修改權限已鎖定為 Sles 專屬' });
+// ── Steam 官方新聞 API ─────────────────────────────────────
+async function checkSteamUpdates(client, isManual = false, messageContext = null) {
+    if (steamLock) {
+        if (!isManual) console.log('⏳ [Steam] 上一輪尚未完成，略過本輪');
+        return;
+    }
 
-    return interaction.reply({ embeds: [embed] });
+    steamLock = true;
+
+    try {
+        const newsCount = isManual ? STEAM_NEWS_COUNT_MANUAL : STEAM_NEWS_COUNT_AUTO;
+
+        const response = await fetchWithTimeout(
+            `https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/?appid=${STEAM_APP_ID}&count=${newsCount}&format=json`,
+            {},
+            STEAM_FETCH_TIMEOUT_MS
+        );
+
+        if (!response.ok) {
+            if (isManual && messageContext) {
+                await messageContext.reply(`❌ Steam API 回應異常，狀態碼: ${response.status}`);
+            }
+            return;
+        }
+
+        const data = await response.json();
+        const newsItems = Array.isArray(data?.appnews?.newsitems) ? data.appnews.newsitems : [];
+
+        if (!newsItems.length) {
+            if (isManual && messageContext) {
+                await messageContext.reply('❌ 未能獲取到 Steam 任何有效公告。');
+            }
+            return;
+        }
+
+        const newestItem = newsItems[0];
+        const currentId = String(newestItem.gid);
+
+        if (!steamState.lastSteamNewsId && !isManual) {
+            steamState.lastSteamNewsId = currentId;
+            rememberRecent(steamState.recentIds, currentId);
+            saveState();
+            console.log(`📦 [Steam News] 成功建立初始公告快取識別碼：${newestItem.gid}`);
+            return;
+        }
+
+        const unseen = [];
+        const seenIndex = newsItems.findIndex(item => String(item.gid) === steamState.lastSteamNewsId);
+
+        if (seenIndex >= 0) {
+            unseen.push(...newsItems.slice(0, seenIndex));
+        } else if (steamState.lastSteamNewsId) {
+            for (const item of newsItems) {
+                if (compareSnowflakeIds(String(item.gid), steamState.lastSteamNewsId) > 0) {
+                    unseen.push(item);
+                }
+            }
+        }
+
+        const uniqueUnseen = [...new Map(unseen.map(item => [String(item.gid), item])).values()];
+        uniqueUnseen.sort((a, b) => compareSnowflakeIds(String(a.gid), String(b.gid)));
+
+        if (isManual) {
+            const preview = newsItems.slice(0, 3).map(item => {
+                const images = extractSteamImages(item.contents || '');
+                const cleanContent = stripSteamContent(item.contents || '').substring(0, 220);
+                const imageNote = images.length ? `\n🖼 ${images.length} 張圖片` : '';
+                return `**${item.title}**\n${cleanContent}${cleanContent.length >= 220 ? '...' : ''}${imageNote}\n${item.url}`;
+            }).join('\n\n');
+
+            const steamEmbed = new EmbedBuilder()
+                .setTitle(`📢 Steam 官方新聞 (手動測試)`)
+                .setURL(newestItem.url)
+                .setDescription(preview || `### **${newestItem.title}**`)
+                .setColor(0x1a3a6c)
+                .setFooter({ text: `來源: Steam 官方新聞中心 | 最新識別碼: ${newestItem.gid}` })
+                .setTimestamp();
+
+            const latestImages = extractSteamImages(newestItem.contents || '');
+            const latestFiles = (await Promise.all(
+                latestImages.slice(0, 10).map((url, idx) => downloadSteamImage(url, newestItem.gid, idx))
+            )).filter(Boolean);
+
+            if (latestFiles[0]) {
+                steamEmbed.setImage(`attachment://${latestFiles[0].name}`);
+            }
+
+            if (messageContext) {
+                await messageContext.reply({
+                    content: `🔔 ${PING_ROLE} **Steam 手動測試成功**`,
+                    embeds: [steamEmbed],
+                    files: latestFiles,
+                    allowedMentions: { parse: ['roles'] }
+                });
+            }
+            return;
+        }
+
+        if (!uniqueUnseen.length) {
+            console.log(`ℹ️ [Steam] 沒有新公告`);
+            return;
+        }
+
+        steamState.lastSteamNewsId = currentId;
+        for (const item of uniqueUnseen) rememberRecent(steamState.recentIds, String(item.gid));
+        saveState();
+
+        try {
+            const channel = await client.channels.fetch(notifyChannelId);
+            if (!channel) return;
+
+            let firstMessage = true;
+
+            for (const item of uniqueUnseen) {
+                const payload = await buildSteamAnnouncementPayload(item);
+
+                await channel.send({
+                    content: firstMessage
+                        ? `🔔 ${PING_ROLE} **監測到邊獄巴士有 ${uniqueUnseen.length} 則全新 Steam 公告發布！**`
+                        : undefined,
+                    embeds: payload.embeds,
+                    files: payload.files,
+                    allowedMentions: firstMessage ? { parse: ['roles'] } : { parse: [] }
+                });
+
+                firstMessage = false;
+            }
+        } catch (e) {
+            console.error(`[Steam] 發送訊息失敗：${e.message}`);
+        }
+    } catch (err) {
+        console.warn(`⚠️ Steam 公告同步故障 (${err.message})`);
+        if (isManual && messageContext) {
+            await messageContext.reply(`❌ Steam 同步失敗：${err.message}`);
+        }
+    } finally {
+        steamLock = false;
+    }
 }
 
-module.exports = { handleCommands: handleSlashCommands };
+// ── YouTube 頻道監測 (透過網址進行) ────────────────────────
+async function checkYouTubeUpdates(client, isManual = false, messageContext = null) {
+    if (youtubeLock) {
+        if (!isManual) console.log('⏳ [YouTube] 上一輪尚未完成，略過本輪');
+        return;
+    }
+
+    youtubeLock = true;
+
+    try {
+        // 🎯 1. 每次皆從 YouTube 頻道網址動態抓取 Channel ID
+        let channelId = youtubeState.channelId;
+
+        if (!channelId) {
+            console.log(`📡 [YouTube] 正在從網址解析頻道 ID：${YOUTUBE_PAGE_URL} ...`);
+            channelId = await resolveYouTubeChannelId(YOUTUBE_PAGE_URL);
+            if (channelId) {
+                youtubeState.channelId = channelId;
+                saveState();
+                console.log(`✅ [YouTube] 從網址解析成功，頻道 ID 為：${channelId}`);
+            }
+        }
+
+        if (!channelId) {
+            throw new Error(`無法從網址 ${YOUTUBE_PAGE_URL} 取得頻道 ID`);
+        }
+
+        // 🎯 2. 獲取 RSS，若失效則自動重新連線網址重新解析 ID
+        let feedItems;
+        try {
+            feedItems = await fetchYouTubeItems(channelId);
+        } catch (rssErr) {
+            console.warn(`⚠️ [YouTube] RSS 擷取失敗 (${rssErr.message})，重新從網址解析 Channel ID...`);
+            channelId = await resolveYouTubeChannelId(YOUTUBE_PAGE_URL);
+            if (channelId) {
+                youtubeState.channelId = channelId;
+                saveState();
+                feedItems = await fetchYouTubeItems(channelId);
+            } else {
+                throw rssErr;
+            }
+        }
+
+        if (!feedItems.length) {
+            if (isManual && messageContext) {
+                await messageContext.reply('❌ 未能獲取到 YouTube 頻道影片。');
+            }
+            return;
+        }
+
+        if (!youtubeState.lastVideoId && !isManual) {
+            youtubeState.lastVideoId = feedItems[0].id;
+            youtubeState.lastPublishedAt = feedItems[0].published || new Date().toISOString();
+            rememberRecent(youtubeState.recentIds, feedItems[0].id);
+            saveState();
+            console.log(`📦 [YouTube] 成功建立初始影片快取：${feedItems[0].id}`);
+            return;
+        }
+
+        if (isManual) {
+            const preview = feedItems.slice(0, 3).map((item, idx) => {
+                const titleLine = item.title ? `**${truncateText(item.title, 100)}**\n` : '';
+                return `${idx + 1}. ${titleLine}${item.link}`;
+            }).join('\n\n');
+
+            let fullText = `📺 **YouTube 頻道測試 (${YOUTUBE_PAGE_URL})：**\n\n${preview}`;
+            if (fullText.length > 1950) {
+                fullText = fullText.slice(0, 1900) + '\n\n*(預覽內容已截斷)*';
+            }
+
+            if (messageContext) {
+                await messageContext.reply({
+                    content: fullText,
+                    allowedMentions: { parse: [] }
+                });
+            }
+            return;
+        }
+
+        let newItems = [];
+        const seenIndex = feedItems.findIndex(item => item.id === youtubeState.lastVideoId);
+
+        if (seenIndex >= 0) {
+            newItems = feedItems.slice(0, seenIndex);
+        } else if (youtubeState.lastPublishedAt) {
+            const lastTime = Date.parse(youtubeState.lastPublishedAt) || 0;
+            newItems = feedItems.filter(item => {
+                const t = item.published ? Date.parse(item.published) : 0;
+                return t > lastTime;
+            });
+        }
+
+        newItems = [...new Map(newItems.map(item => [item.id, item])).values()];
+        newItems.reverse();
+
+        if (!newItems.length) {
+            console.log('ℹ️ [YouTube] 沒有新影片');
+            return;
+        }
+
+        youtubeState.lastVideoId = feedItems[0].id;
+        youtubeState.lastPublishedAt = feedItems[0].published || new Date().toISOString();
+        for (const item of newItems) rememberRecent(youtubeState.recentIds, item.id);
+        saveState();
+
+        try {
+            const channel = await client.channels.fetch(notifyChannelId);
+            if (channel) {
+                let currentMsg = `🔔 ${PING_ROLE} **@${YOUTUBE_HANDLE} 發布了 ${newItems.length} 部新影片：**\n\n`;
+                let isFirst = true;
+
+                for (const item of newItems) {
+                    const titleLine = item.title ? `**${truncateText(item.title, 120)}**\n` : '';
+                    const itemBlock = `${titleLine}${item.link}\n\n`;
+
+                    if ((currentMsg + itemBlock).length > 1900) {
+                        await channel.send({
+                            content: currentMsg.trim(),
+                            allowedMentions: isFirst ? { parse: ['roles'] } : { parse: [] }
+                        });
+                        currentMsg = itemBlock;
+                        isFirst = false;
+                    } else {
+                        currentMsg += itemBlock;
+                    }
+                }
+
+                if (currentMsg.trim()) {
+                    await channel.send({
+                        content: currentMsg.trim(),
+                        allowedMentions: isFirst ? { parse: ['roles'] } : { parse: [] }
+                    });
+                }
+            }
+        } catch (e) {
+            console.error(`[YouTube] 發送訊息失敗：${e.message}`);
+        }
+    } catch (err) {
+        console.warn(`⚠️ YouTube 同步故障 (${err.message})`);
+        if (isManual && messageContext) {
+            await messageContext.reply(`❌ YouTube 同步失敗：${err.message}`);
+        }
+    } finally {
+        youtubeLock = false;
+    }
+}
+
+// ── 頻道動態設定功能 ──────────────────────────────────────────
+function setNotifyChannel(channelId) {
+    if (!channelId) return false;
+    notifyChannelId = String(channelId);
+    return true;
+}
+
+function getNotifyChannel() {
+    return notifyChannelId;
+}
+
+// ── 啟動定時循環 ─────────────────────────────────────────────
+function startNewsCheckLoop(client) {
+    if (globalThis.__NEWSCHECK_LOOP_STARTED__) {
+        console.log('ℹ️ [Newscheck] 已啟動過，略過重複初始化');
+        return;
+    }
+    globalThis.__NEWSCHECK_LOOP_STARTED__ = true;
+
+    loadState();
+
+    void checkTwitterUpdates(client, false, null);
+    void checkSteamUpdates(client, false, null);
+    void checkYouTubeUpdates(client, false, null);
+
+    loopTimer = setInterval(() => {
+        void checkTwitterUpdates(client, false, null);
+        void checkSteamUpdates(client, false, null);
+        void checkYouTubeUpdates(client, false, null);
+    }, CHECK_INTERVAL);
+
+    console.log(`✅ [Newscheck] 監測循環啟動，間隔 ${CHECK_INTERVAL / 1000}s`);
+}
+
+module.exports = {
+    checkTwitterUpdates,
+    checkSteamUpdates,
+    checkYouTubeUpdates,
+    startNewsCheckLoop,
+    setNotifyChannel,
+    getNotifyChannel
+};
