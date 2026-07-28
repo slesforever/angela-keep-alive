@@ -215,4 +215,7 @@ async function executePull(client, user, bannerKey = 'standard', pullCount = 1, 
     return interactionOrMessage.reply({ embeds: [pullEmbed] });
 }
 
+
+
+
 module.exports = { executePull, BASE_WEIGHTS, ABN_WEIGHTS };
