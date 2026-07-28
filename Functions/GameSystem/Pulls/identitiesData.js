@@ -407,25 +407,25 @@ function filterIdentities(rarity, keyword) {
 // ─── 🎯 卡池設定檔 ──────────────────────────────────────────────
 const BANNERS = {
     'dawn_office': {
-        id: 'dawn_office',
-        name: '黎明事務所 提取 — 梅菲斯特號',
-        description: '黎明事務所成員與限定 E.G.O 概率 UP！',
+        id: 'Season-7',
+        name: 'Season-7 賽季池 — 梅菲斯特號',
+        description: '第七賽季人格概率 UP！',
         cost: { single: 130, ten: 1300 },
         rateUp: {
-            S3: ['［黎明事務所 幫手］辛克萊 / Dawn Office Fixer Sinclair', '［黎明事務所 代表］格里高爾 / Dawn Office Rep Gregor'],
-            EGOS: ['[HE] 熾花星 / Ardor Blossom Star - 浮士德'],
+            S3: ['［次元折斷者］李箱 / Dimension Shredder Yi Sang'],
+            EGOS: [],
             S2: []
         }
     },
     'ishmael_focus': {
         id: 'ishmael_focus',
-        name: '罪人特定提取 — 以實瑪利 Focus UP',
-        description: '所有以實瑪利 (Ishmael) 的人格與 E.G.O 出現機率大幅提升！',
+        name: '罪人特定提取 — Rodion Focus UP',
+        description: '所有羅佳 (Rodion) 的人格與 E.G.O 出現機率大幅提升！',
         cost: { single: 130, ten: 1300 },
         rateUp: {
-            S3: filterIdentities('000', '以實瑪利'),
-            S2: filterIdentities('00', '以實瑪利'),
-            EGOS: filterIdentities('Egos', '以實瑪利')
+            S3: filterIdentities('000', '羅佳'),
+            S2: filterIdentities('00', '羅佳'),
+            EGOS: filterIdentities('Egos', '羅佳')
         }
     },
     'standard': {
