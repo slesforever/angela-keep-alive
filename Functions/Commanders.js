@@ -1,5 +1,6 @@
 // Functions/Commanders.js
 const { EmbedBuilder, MessageFlags, PermissionFlagsBits } = require('discord.js');
+const { joinVoiceChannel, getVoiceConnection, VoiceConnectionStatus } = require('@discordjs/voice');
 const PacksAndData    = require('./GameSystem/PacksAndData.js');
 const GiveAwaySystem  = require('./GameSystem/GiveAwaySystem.js');
 const MirrorDungeon   = require('./GameSystem/MirrorDungeon.js');
@@ -50,7 +51,6 @@ function createPseudoMessage(interaction) {
         client: interaction.client,
         content: '',
 
-        // 🔥 關鍵修復：若系統已 defer，自動切換為 editReply，解決報錯！
         reply: async (options) => {
             const payload = typeof options === 'string' ? { content: options } : { ...options };
             try {
@@ -80,25 +80,17 @@ async function handleSlashCommands(client, interaction) {
 
     try {
         // ── 1. 抽卡 (/pull) ──────────────────────────────────
-       if (commandName === 'pull') {
-    const pullCommand =
-        client.commands?.get('pull');
+        if (commandName === 'pull') {
+            const pullCommand = client.commands?.get('pull');
+            if (pullCommand && typeof pullCommand.execute === 'function') {
+                return pullCommand.execute(interaction);
+            }
+            return interaction.reply({
+                content: '❌ 抽卡系統模組尚未成功載入。',
+                ephemeral: true,
+            });
+        }
 
-    if (
-        pullCommand &&
-        typeof pullCommand.execute === 'function'
-    ) {
-        return pullCommand.execute(
-            interaction
-        );
-    }
-
-    return interaction.reply({
-        content:
-            '❌ 抽卡系統模組尚未成功載入。',
-        ephemeral: true,
-    });
-}
         // ── 2. 背包與清單 (/pack, /list) ──────────────────────
         if (commandName === 'pack' || commandName === 'list') {
             fakeMessage.content = `!${commandName}`;
@@ -141,14 +133,14 @@ async function handleSlashCommands(client, interaction) {
             return MirrorDungeon.handleMirrorDungeon ? MirrorDungeon.handleMirrorDungeon(client, fakeMessage) : MirrorDungeon(client, fakeMessage);
         }
 
-        // ── 7. 男同/姬圈指數 (/gayrate, /lesbianrate) ────────
+        // ── 7. 男同/姬圈指數 (/gayrate, /lesbianrate) — 每次隨機 ────
         if (commandName === 'gayrate') {
             const target = interaction.options.getUser('target') || user;
-            let rate = getDailyRate(target.id, 'gay');
+            let rate = Math.floor(Math.random() * 101);
             if (target.id === SUPER_ADMIN_ID) rate = 0; // Sles 鎖定 0%
 
             const bar = createProgressBar(rate);
-            let comment = target.id === SUPER_ADMIN_ID 
+            let comment = target.id === SUPER_ADMIN_ID
                 ? '「主管專屬認證：鋼鐵般的絕對 0% 直男，系統數據無法改寫。」'
                 : (rate < 20 ? '「數據顯示：鋼鐵般堅硬直男。」' : rate < 50 ? '「有些許隱藏屬性。」' : rate < 80 ? '「成分相當濃烈。」' : '「100% 純度純真男同！」');
 
@@ -163,11 +155,11 @@ async function handleSlashCommands(client, interaction) {
 
         if (commandName === 'lesbianrate') {
             const target = interaction.options.getUser('target') || user;
-            let rate = getDailyRate(target.id, 'lesbian');
+            let rate = Math.floor(Math.random() * 101);
             if (target.id === SUPER_ADMIN_ID) rate = 0; // Sles 鎖定 0%
 
             const bar = createProgressBar(rate);
-            let comment = target.id === SUPER_ADMIN_ID 
+            let comment = target.id === SUPER_ADMIN_ID
                 ? '「主管專屬認證：絕對 0% 直直到發光，姬圈屬性完全免疫。」'
                 : (rate < 20 ? '「姬圈指數較低，極度純粹直女。」' : rate < 50 ? '「有些許潛質。」' : rate < 80 ? '「能量爆棚！」' : '「100% 頂級女同霸主！」');
 
@@ -177,6 +169,48 @@ async function handleSlashCommands(client, interaction) {
                 .setDescription(`**${target.username}** 的女同指數為：**${rate}%**\n\n\`[${bar}]\` ${rate}%\n\n> ${comment}`)
                 .setThumbnail(target.displayAvatarURL({ dynamic: true }));
 
+            return interaction.reply({ embeds: [embed] });
+        }
+
+        // ── 7.5 語音頻道控制 (/join, /leave, /status) ────────
+        if (commandName === 'join') {
+            const voiceChannel = interaction.member?.voice?.channel;
+            if (!voiceChannel) {
+                return interaction.reply({ content: '❌ 你必須先加入一個語音頻道。', flags: MessageFlags.Ephemeral });
+            }
+            joinVoiceChannel({
+                channelId: voiceChannel.id,
+                guildId: voiceChannel.guild.id,
+                adapterCreator: voiceChannel.guild.voiceAdapterCreator,
+            });
+            return interaction.reply({ content: `✅ 已加入語音頻道：**${voiceChannel.name}**` });
+        }
+
+        if (commandName === 'leave') {
+            const connection = getVoiceConnection(interaction.guild.id);
+            if (!connection) {
+                return interaction.reply({ content: '❌ 機器人目前不在任何語音頻道中。', flags: MessageFlags.Ephemeral });
+            }
+            connection.destroy();
+            return interaction.reply({ content: '👋 已離開語音頻道。' });
+        }
+
+        if (commandName === 'status') {
+            const connection = getVoiceConnection(interaction.guild.id);
+            const voiceStatus = connection && connection.state.status === VoiceConnectionStatus.Ready
+                ? `✅ 已連接：${interaction.guild.members.me.voice.channel?.name || '未知頻道'}`
+                : '⚪ 未連接語音頻道';
+
+            const uptimeSec = Math.floor(client.uptime / 1000);
+            const embed = new EmbedBuilder()
+                .setTitle('🤖 機器人狀態')
+                .setColor(0x2ecc71)
+                .addFields(
+                    { name: '延遲', value: `${client.ws.ping}ms`, inline: true },
+                    { name: '運行時間', value: `${Math.floor(uptimeSec / 3600)}時${Math.floor((uptimeSec % 3600) / 60)}分`, inline: true },
+                    { name: '伺服器數', value: `${client.guilds.cache.size}`, inline: true },
+                    { name: '語音狀態', value: voiceStatus },
+                );
             return interaction.reply({ embeds: [embed] });
         }
 
@@ -190,7 +224,7 @@ async function handleSlashCommands(client, interaction) {
                 });
             }
 
-            await interaction.deferReply(); // 先 deferred，fakeMessage 會自動 editReply 解決報錯！
+            await interaction.deferReply();
             if (commandName === 'steam') return checkSteamUpdates(client, true, fakeMessage);
             if (commandName === 'tweet') return checkTwitterUpdates(client, true, fakeMessage);
             if (commandName === 'youtube')    return checkYouTubeUpdates(client, true, fakeMessage);
@@ -212,7 +246,6 @@ async function handleSlashCommands(client, interaction) {
 
                 let targetArg = isAll ? 'all' : (targetUser ? `<@${targetUser.id}>` : `<@${uid}>`);
                 fakeMessage.content = `!${commandName} ${targetArg} ${amount}`;
-                // GiveAwaySystem 需要 mentions.users.first() — fakeMessage 補上
                 fakeMessage.mentions = {
                     users: {
                         first: () => isAll ? null : (targetUser || interaction.user)
@@ -252,98 +285,13 @@ async function sendHelp(interaction) {
             { name: '👤 罪人與資源', value: '`/sinner` — 罪人全覽 ｜ `/uptie` — 提升連結\n`/equip` — 裝備人格 ｜ `/threads` — 絲線查詢' },
             { name: '🪞 鏡光迷宮',   value: '`/md` — 鏡光迷宮系統' },
             { name: '🎲 娛樂功能',   value: '`/gayrate` — 男同指數測試\n`/lesbianrate` — 姬圈指數測試' },
+            { name: '🔊 語音控制',   value: '`/join` — 加入語音頻道 ｜ `/leave` — 離開語音頻道 ｜ `/status` — 機器人狀態' },
             { name: '📰 社群檢測 (群管理員)', value: '`/steam` ｜ `/tweet` ｜ `/yt` ｜ `/setchannel`' },
             { name: '👑 最高主管特權 (Sles 專屬)', value: '`/givelunacy` ｜ `/givefragments` ｜ `/givescrolls`\n`/givethreads` ｜ `/updaterewards` ｜ `/updatebuff`' }
         )
         .setFooter({ text: '輸入 / 即可喚出選單 ｜ 所有獎勵與倍率修改權限已鎖定為 Sles 專屬' });
 
     return interaction.reply({ embeds: [embed] });
-}
-
-'use strict';
-
-const fs = require('fs');
-const path = require('path');
-const { Collection, REST, Routes } = require('discord.js');
-
-/**
- * 載入並初始化所有指令與 Slash Command 監聽
- * @param {import('discord.js').Client} client 
- */
-function setupCommanders(client) {
-    client.commands = new Collection();
-    const commandsArray = [];
-
-    // 同時支援從 Commands 資料夾與 Functions 裡面掛載指令模組
-    const modulesSources = [
-        path.join(__dirname, '../Commands'),
-        __dirname // Functions 目錄本身（包含 pullmenu.js）
-    ];
-
-    for (const sourcePath of modulesSources) {
-        if (!fs.existsSync(sourcePath)) continue;
-        
-        const files = fs.readdirSync(sourcePath).filter(file => file.endsWith('.js'));
-        for (const file of files) {
-            const filePath = path.join(sourcePath, file);
-            try {
-                const command = require(filePath);
-                if (command && 'data' in command && 'execute' in command) {
-                    // 避免重複載入
-                    if (!client.commands.has(command.data.name)) {
-                        client.commands.set(command.data.name, command);
-                        commandsArray.push(command.data.toJSON());
-                        console.log(`[Commanders] 成功載入指令: /${command.data.name} (來源: ${file})`);
-                    }
-                }
-            } catch (err) {
-                // 若檔案不是指令模組（例如純工具檔）則略過
-            }
-        }
-    }
-
-    // 機器人啟動時自動向 Discord API 註冊最新指令
-    client.once('ready', async () => {
-        if (!process.env.DISCORD_TOKEN || !client.user?.id) {
-            console.warn('[Commanders] 缺少 DISCORD_TOKEN 或 client.user 未能讀取，跳過自動 API 註冊。');
-            return;
-        }
-
-        const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
-        try {
-            console.log(`[Commanders] 開始向 Discord API 註冊 ${commandsArray.length} 個 Slash Commands...`);
-            await rest.put(
-                Routes.applicationCommands(client.user.id),
-                { body: commandsArray }
-            );
-            console.log('[Commanders] Slash Commands 註冊完畢！');
-        } catch (error) {
-            console.error('[Commanders] 註冊 Slash Commands 失敗:', error);
-        }
-    });
-
-    // 監聽並轉發 Slash Command 觸發事件
-    client.on('interactionCreate', async interaction => {
-        if (!interaction.isChatInputCommand()) return;
-
-        const command = client.commands.get(interaction.commandName);
-        if (!command) {
-            console.error(`[Commanders] 未找到對應指令: ${interaction.commandName}`);
-            return;
-        }
-
-        try {
-            await command.execute(interaction);
-        } catch (error) {
-            console.error(`[Commanders] 執行指令 /${interaction.commandName} 時發生錯誤:`, error);
-            const content = '❌ 執行此指令時發生內部錯誤。';
-            if (interaction.replied || interaction.deferred) {
-                await interaction.followUp({ content, ephemeral: true }).catch(() => {});
-            } else {
-                await interaction.reply({ content, ephemeral: true }).catch(() => {});
-            }
-        }
-    });
 }
 
 module.exports = { setupCommanders, handleCommands: handleSlashCommands };
