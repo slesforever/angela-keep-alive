@@ -10,9 +10,8 @@ const PartySystem     = require('./GameSystem/PartySystem.js');
 const BattleSystem    = require('./GameSystem/BattleSystem.js');
 const { checkSteamUpdates, checkTwitterUpdates, checkYouTubeUpdates } = require('./Newscheck.js');
 
-const SUPER_ADMIN_ID = '1330463890122735642'; // 唯一能改動玩家進度與發放資源的最高主管 ID
+const SUPER_ADMIN_ID = '1330463890122735642';
 
-// ── 冷卻系統 ──────────────────────────────────────────────────
 const COOLDOWNS = new Map();
 function isOnCooldown(userId, cmd, ms = 3000) {
     const key = `${userId}:${cmd}`;
@@ -21,7 +20,6 @@ function isOnCooldown(userId, cmd, ms = 3000) {
     return false;
 }
 
-// ── 每日固定指數計算 ──────────────────────────────────────────
 function getDailyRate(userId, salt) {
     const dateStr = new Date().toISOString().slice(0, 10);
     let hash = 0;
@@ -39,7 +37,6 @@ function createProgressBar(percent) {
     return '█'.repeat(filled) + '░'.repeat(empty);
 }
 
-// ── 相容性轉型橋接器 (修復 Deferred 衝突 Bug) ─────────────────
 function createPseudoMessage(interaction) {
     return {
         interaction,
@@ -50,7 +47,6 @@ function createPseudoMessage(interaction) {
         channel: interaction.channel,
         client: interaction.client,
         content: '',
-
         reply: async (options) => {
             const payload = typeof options === 'string' ? { content: options } : { ...options };
             try {
@@ -71,27 +67,20 @@ function createPseudoMessage(interaction) {
     };
 }
 
-// ── 處理斜線指令分發 ─────────────────────────────────────────
 async function handleSlashCommands(client, interaction) {
     const { commandName, user } = interaction;
     const uid = user.id;
-
     const fakeMessage = createPseudoMessage(interaction);
 
     try {
-        // ── 1. 抽卡 (/pull) ──────────────────────────────────
         if (commandName === 'pull') {
             const pullCommand = client.commands?.get('pull');
             if (pullCommand && typeof pullCommand.execute === 'function') {
                 return pullCommand.execute(interaction);
             }
-            return interaction.reply({
-                content: '❌ 抽卡系統模組尚未成功載入。',
-                ephemeral: true,
-            });
+            return interaction.reply({ content: '❌ 抽卡系統模組尚未成功載入。', ephemeral: true });
         }
 
-        // ── 2. 背包與清單 (/pack, /list) ──────────────────────
         if (commandName === 'pack' || commandName === 'list') {
             fakeMessage.content = `!${commandName}`;
             if (isOnCooldown(uid, 'pack')) {
@@ -100,7 +89,6 @@ async function handleSlashCommands(client, interaction) {
             return PacksAndData.handleInventory ? PacksAndData.handleInventory(client, fakeMessage) : PacksAndData(client, fakeMessage);
         }
 
-        // ── 3. 戰鬥 (/battle) ────────────────────────────────
         if (commandName === 'battle') {
             fakeMessage.content = '!battle';
             if (isOnCooldown(uid, 'battle', 5000)) {
@@ -109,13 +97,11 @@ async function handleSlashCommands(client, interaction) {
             return BattleSystem.handleBattle ? BattleSystem.handleBattle(client, fakeMessage) : BattleSystem(client, fakeMessage);
         }
 
-        // ── 4. 隊伍 (/party) ─────────────────────────────────
         if (commandName === 'party') {
             fakeMessage.content = '!party';
             return PartySystem.handleParty ? PartySystem.handleParty(client, fakeMessage) : PartySystem(client, fakeMessage);
         }
 
-        // ── 5. 罪人管理 (/sinner, /uptie, /equip, /threads) ───
         if (['sinner', 'uptie', 'equip', 'threads'].includes(commandName)) {
             fakeMessage.content = `!${commandName}`;
             if (commandName === 'sinner')  return CharacterSystem.handleSinner ? CharacterSystem.handleSinner(client, fakeMessage) : CharacterSystem(client, fakeMessage);
@@ -124,7 +110,6 @@ async function handleSlashCommands(client, interaction) {
             if (commandName === 'threads') return CharacterSystem.handleThreads ? CharacterSystem.handleThreads(client, fakeMessage) : CharacterSystem(client, fakeMessage);
         }
 
-        // ── 6. 鏡光迷宮 (/md) ───────────────────────────────
         if (commandName === 'md') {
             fakeMessage.content = '!md';
             if (isOnCooldown(uid, 'md', 2000)) {
@@ -133,11 +118,10 @@ async function handleSlashCommands(client, interaction) {
             return MirrorDungeon.handleMirrorDungeon ? MirrorDungeon.handleMirrorDungeon(client, fakeMessage) : MirrorDungeon(client, fakeMessage);
         }
 
-        // ── 7. 男同/姬圈指數 (/gayrate, /lesbianrate) — 每次隨機 ────
         if (commandName === 'gayrate') {
             const target = interaction.options.getUser('target') || user;
             let rate = Math.floor(Math.random() * 101);
-            if (target.id === SUPER_ADMIN_ID) rate = 0; // Sles 鎖定 0%
+            if (target.id === SUPER_ADMIN_ID) rate = 0;
 
             const bar = createProgressBar(rate);
             let comment = target.id === SUPER_ADMIN_ID
@@ -156,7 +140,7 @@ async function handleSlashCommands(client, interaction) {
         if (commandName === 'lesbianrate') {
             const target = interaction.options.getUser('target') || user;
             let rate = Math.floor(Math.random() * 101);
-            if (target.id === SUPER_ADMIN_ID) rate = 0; // Sles 鎖定 0%
+            if (target.id === SUPER_ADMIN_ID) rate = 0;
 
             const bar = createProgressBar(rate);
             let comment = target.id === SUPER_ADMIN_ID
@@ -172,7 +156,6 @@ async function handleSlashCommands(client, interaction) {
             return interaction.reply({ embeds: [embed] });
         }
 
-        // ── 7.5 語音頻道控制 (/join, /leave, /status) ────────
         if (commandName === 'join') {
             const voiceChannel = interaction.member?.voice?.channel;
             if (!voiceChannel) {
@@ -214,7 +197,6 @@ async function handleSlashCommands(client, interaction) {
             return interaction.reply({ embeds: [embed] });
         }
 
-        // ── 8. 社群測試指令 (限該伺服器「管理員」執行) ──────────────
         if (['steam', 'tweet', 'youtube'].includes(commandName)) {
             const isGuildAdmin = interaction.memberPermissions?.has(PermissionFlagsBits.Administrator);
             if (!isGuildAdmin) {
@@ -230,7 +212,6 @@ async function handleSlashCommands(client, interaction) {
             if (commandName === 'youtube')    return checkYouTubeUpdates(client, true, fakeMessage);
         }
 
-        // ── 9. 最高權限管理員指令 (嚴格限制僅 Sles ID: 1330463890122735642 可執行) ──
         if (['givelunacy', 'givefragments', 'givescrolls', 'givethreads', 'updaterewards', 'updatebuff'].includes(commandName)) {
             if (uid !== SUPER_ADMIN_ID) {
                 return interaction.reply({
@@ -258,7 +239,6 @@ async function handleSlashCommands(client, interaction) {
             return GiveAwaySystem.handleGiveAway ? GiveAwaySystem.handleGiveAway(client, fakeMessage) : GiveAwaySystem(client, fakeMessage);
         }
 
-        // ── 10. 說明選單 (/help) ──────────────────────────────
         if (commandName === 'help') {
             return sendHelp(interaction);
         }
@@ -274,7 +254,6 @@ async function handleSlashCommands(client, interaction) {
     }
 }
 
-// ── Help 選單 ─────────────────────────────────────────────────
 async function sendHelp(interaction) {
     const embed = new EmbedBuilder()
         .setTitle('📋 Angela 指令清單')
@@ -294,4 +273,4 @@ async function sendHelp(interaction) {
     return interaction.reply({ embeds: [embed] });
 }
 
-module.exports = { setupCommanders, handleCommands: handleSlashCommands };
+module.exports = { handleCommands: handleSlashCommands };
