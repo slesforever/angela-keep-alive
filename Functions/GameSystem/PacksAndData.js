@@ -786,10 +786,10 @@ function renderPage(pages, idx) {
 
     const base = BASE_RATES[p.r] || 0;
     const lines = p.chunk.map(name => {
-        const isUp = p.upList.includes(name);
-        const pct = ((base * (isUp ? RATE_UP_MULT : 1) / p.totalW) * 100).toFixed(4);
-        return `\`${isUp ? '🔼 ' : '• '}${getShortName(name).padEnd(14)} .....[${pct}%]\``;
-    });
+    const isUp = p.upList.includes(name);
+    const pct = ((base * (isUp ? RATE_UP_MULT : 1) / p.totalW) * 100).toFixed(4);
+    return `\`${isUp ? '🔼 ' : '• '}${name.padEnd(20)} .....[${pct}%]\``;
+});
 
     return new EmbedBuilder()
         .setTitle('🗂️ 核心控制室 — 扭蛋池機率清單')
