@@ -788,7 +788,7 @@ function renderPage(pages, idx) {
     const lines = p.chunk.map(name => {
     const isUp = p.upList.includes(name);
     const pct = ((base * (isUp ? RATE_UP_MULT : 1) / p.totalW) * 100).toFixed(4);
-    return `\`${isUp ? '🔼 ' : '• '}${name.padEnd(20)} .....[${pct}%]\``;
+    return `\`${isUp ? '🔼 ' : '• '}${name.padEnd(20)} [${pct}%]\``;
 });
 
     return new EmbedBuilder()
