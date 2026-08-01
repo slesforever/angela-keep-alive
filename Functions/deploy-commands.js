@@ -24,6 +24,11 @@ const commands = [
     // 鏡光迷宮
     new SlashCommandBuilder().setName('md').setDescription('開啟或查看鏡光迷宮狀態'),
 
+      // 語音頻道控制
+    new SlashCommandBuilder().setName('join').setDescription('讓機器人加入你目前所在的語音頻道'),
+    new SlashCommandBuilder().setName('leave').setDescription('讓機器人離開目前所在的語音頻道'),
+    new SlashCommandBuilder().setName('status').setDescription('查看機器人目前的運行狀態'),
+    
     // 新聞測試
     new SlashCommandBuilder().setName('steam').setDescription('手動觸發測試 Steam 最新公告'),
     new SlashCommandBuilder().setName('tweet').setDescription('手動觸發測試 Twitter 最新推文'),
