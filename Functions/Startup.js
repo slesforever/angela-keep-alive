@@ -130,6 +130,11 @@ const allSlashCommands = [
         .setDescription('測量目標的女同指數')
         .addUserOption(opt => opt.setName('target').setDescription('要測試的目標對象 (預設為自己)')),
 
+       // 6.5 語音頻道控制
+    new SlashCommandBuilder().setName('join').setDescription('讓機器人加入你目前所在的語音頻道'),
+    new SlashCommandBuilder().setName('leave').setDescription('讓機器人離開目前所在的語音頻道'),
+    new SlashCommandBuilder().setName('status').setDescription('查看機器人目前的運行狀態'),
+    
     // 7. 說明選單
     new SlashCommandBuilder().setName('help').setDescription('顯示 Angela 系統全部斜線指令選單'),
 
