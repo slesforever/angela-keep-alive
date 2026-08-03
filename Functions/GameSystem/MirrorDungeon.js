@@ -6,6 +6,7 @@ const {
     EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder
 } = require('discord.js');
 const { getOrCreatePlayer, savePlayerData } = require('./PacksAndData.js');
+const { addXp } = require('./LevelSystem.js');
 const { startBattle } = require('./BattleSystem.js');
 
 const FLOORS = 7;
@@ -600,6 +601,8 @@ async function completeDungeon(client, message, state) {
     player.thread = (player.thread || 0) + totalReward;
     player.dungeon = { completed: true, failed: false, floor: state.maxFloor };
     savePlayerData(null, message.author.id, player);
+    // 鏡牢完成 XP 獎勵
+    addXp(null, message.author.id, message.author.username, 50 + state.gifts.length * 5, message.guild?.id).catch(() => {});
 
     const giftText = state.gifts.length
         ? state.gifts.map(g => `• **${g.name}**：${g.desc}`).join('\n')

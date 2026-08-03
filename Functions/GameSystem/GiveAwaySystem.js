@@ -16,20 +16,20 @@ async function handleGiveAway(client, message) {
     const args    = message.content.trim().split(/\s+/);
     const command = args[0].toLowerCase();
 
-    // !givelunacy @玩家 數量
-    if (command === '!givelunacy') {
+    // !givelightseeds @玩家 數量
+    if (command === '!givelightseeds') {
         const target = message.mentions.users.first();
         const amount = parseInt(args[2]);
         if (!target || isNaN(amount) || amount <= 0)
-            return message.reply('❌ 格式：`!givelunacy @玩家 數量`');
+            return message.reply('❌ 格式：`!givelightseeds @玩家 數量`');
 
         const p = getOrCreatePlayer(client, target.id, target.username);
-        p.lunacy = (p.lunacy || 0) + amount;
+        p.lightSeeds = (p.lightSeeds || 0) + amount;
         savePlayerData(client, target.id, p);
 
         return message.reply({ embeds: [new EmbedBuilder()
-            .setTitle('💎 單人狂氣撥款').setColor(0x00b4d8)
-            .setDescription(`**對象：** <@${target.id}>\n**撥款：** 💎 狂氣 ×${amount}\n**現持有：** ${p.lunacy}`)
+            .setTitle('🌱 單人 LightSeeds 撥款').setColor(0x00b4d8)
+            .setDescription(`**對象：** <@${target.id}>\n**撥款：** 🌱 LightSeeds ×${amount}\n**現持有：** ${p.lightSeeds}`)
             .setTimestamp()] });
     }
 
@@ -91,7 +91,7 @@ async function handleGiveAway(client, message) {
             return message.reply('❌ 格式：`!updaterewards 數量`');
         return message.channel.send({ embeds: [new EmbedBuilder()
             .setTitle('🎁 全伺服器特別補償').setColor(0xffa502)
-            .setDescription(`**全體發放：**\n• 💎 狂氣 ×${amount}\n• 🚂 特別提取券 ×1\n\n「全服維護補償已正式下發。」`)
+            .setDescription(`**全體發放：**\n• 🌱 LightSeeds ×${amount}\n• 🚂 特別提取券 ×1\n\n「全服維護補償已正式下發。」`)
             .setTimestamp()] });
     }
 

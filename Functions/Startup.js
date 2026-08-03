@@ -1,10 +1,10 @@
 // Functions/Startup.js
 'use strict';
-const { 
-    Client, 
-    GatewayIntentBits, 
-    EmbedBuilder, 
-    ActivityType, 
+const {
+    Client,
+    GatewayIntentBits,
+    EmbedBuilder,
+    ActivityType,
     Events,
     SlashCommandBuilder,
     PermissionFlagsBits,
@@ -27,6 +27,7 @@ const defaultConfig = {
     notifyChannelId: process.env.NOTIFY_CHANNEL_ID || '',
     rateUpChannelId: process.env.RATEUP_ANNOUNCE_CHANNEL || '',
     newsChannelId:   process.env.NEWS_CHANNEL_ID || '',
+    backupChannelId: process.env.PLAYER_BACKUP_CHANNEL_ID || '',
 };
 
 function getConfig() {
@@ -53,10 +54,12 @@ function saveConfig(newConfig) {
     }
 }
 
-const identitiesData         = require('./GameSystem/Pulls/identitiesData.js');
-const { startNewsCheckLoop } = require('./Newscheck.js');
-const { handleCommands }     = require('./Commanders.js');
+const identitiesData             = require('./GameSystem/Pulls/identitiesData.js');
+const { startNewsCheckLoop }     = require('./Newscheck.js');
+const { handleCommands }         = require('./Commanders.js');
+const { handleMessageXp, startVoiceXpTimer, trackVoiceJoin, trackVoiceLeave } = require('./GameSystem/LevelSystem.js');
 
+const SUPER_ADMIN_ID = '1330463890122735642';
 const PORT = process.env.PORT || 3000;
 
 // ─── Keep-alive HTTP server ────────────────────────────────────
@@ -72,6 +75,7 @@ const client = new Client({
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.GuildVoiceStates,   // 修復 VC Bug：即時追蹤語音狀態
     ],
 });
 
@@ -87,9 +91,9 @@ try {
     console.error('[Startup] pullmenu.js 載入失敗:', err.message);
 }
 
-// ─── 內建斜線指令 (已去重：僅保留唯一定義) ────────────────────────
+// ─── 斜線指令清單 ─────────────────────────────────────────────
 const allSlashCommands = [
- // 1. 抽卡
+    // 1. 抽卡
     new SlashCommandBuilder()
         .setName('pull')
         .setDescription('進行抽取人格/E.G.O')
@@ -101,13 +105,12 @@ const allSlashCommands = [
                     { name: '十連抽 (10次)', value: 10 }
                 )),
 
-
     // 2. 背包與機率
     new SlashCommandBuilder().setName('pack').setDescription('查看 LC 主頁式背包與資源介面'),
-    new SlashCommandBuilder().setName('list').setDescription('查看當前卡池機率與清單'),
+    new SlashCommandBuilder().setName('list').setDescription('查看當前卡池機率與清單（已修正顯示完整角色名稱）'),
 
     // 3. 戰鬥與隊伍
-    new SlashCommandBuilder().setName('battle').setDescription('選擇難度進入戰鬥並獲取狂氣'),
+    new SlashCommandBuilder().setName('battle').setDescription('選擇難度進入戰鬥並獲取 LightSeeds'),
     new SlashCommandBuilder().setName('party').setDescription('查看與管理出戰隊伍陣容'),
 
     // 4. 罪人管理
@@ -119,26 +122,42 @@ const allSlashCommands = [
     // 5. 鏡光迷宮
     new SlashCommandBuilder().setName('md').setDescription('開啟或查看鏡光迷宮進度'),
 
-    // 6. 娛樂小工具
+    // 6. 等級系統
+    new SlashCommandBuilder()
+        .setName('rank')
+        .setDescription('查看等級與 XP 進度')
+        .addUserOption(opt => opt.setName('target').setDescription('查看其他玩家的等級（預設為自己）')),
+
+    // 7. 賭博
+    new SlashCommandBuilder()
+        .setName('gamble')
+        .setDescription('下注 LightSeeds，50/50 機率翻倍或全損')
+        .addIntegerOption(opt =>
+            opt.setName('amount')
+                .setDescription('下注金額（最少 10，最多 50000）')
+                .setRequired(true)
+                .setMinValue(10)
+                .setMaxValue(50000)),
+
+    // 8. 娛樂小工具
     new SlashCommandBuilder()
         .setName('gayrate')
         .setDescription('測量目標的男同指數')
-        .addUserOption(opt => opt.setName('target').setDescription('要測試的目標對象 (預設為自己)')),
-
+        .addUserOption(opt => opt.setName('target').setDescription('要測試的目標對象（預設為自己）')),
     new SlashCommandBuilder()
         .setName('lesbianrate')
         .setDescription('測量目標的女同指數')
-        .addUserOption(opt => opt.setName('target').setDescription('要測試的目標對象 (預設為自己)')),
+        .addUserOption(opt => opt.setName('target').setDescription('要測試的目標對象（預設為自己）')),
 
-       // 6.5 語音頻道控制
+    // 9. 語音頻道控制
     new SlashCommandBuilder().setName('join').setDescription('讓機器人加入你目前所在的語音頻道'),
     new SlashCommandBuilder().setName('leave').setDescription('讓機器人離開目前所在的語音頻道'),
     new SlashCommandBuilder().setName('status').setDescription('查看機器人目前的運行狀態'),
-    
-    // 7. 說明選單
+
+    // 10. 說明選單
     new SlashCommandBuilder().setName('help').setDescription('顯示 Angela 系統全部斜線指令選單'),
 
-    // ─── 伺服器管理員專用指令 ───────────────────────────────────
+    // ─── 伺服器管理員專用 ──────────────────────────────────────
     new SlashCommandBuilder()
         .setName('setchannel')
         .setDescription('【伺服器管理員】設定 Angela 系統各項通知頻道')
@@ -159,62 +178,91 @@ const allSlashCommands = [
                 .setRequired(true)),
 
     new SlashCommandBuilder()
+        .setName('setlevelchannel')
+        .setDescription('【伺服器管理員】設定升級公告頻道')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .addChannelOption(opt =>
+            opt.setName('channel')
+                .setDescription('選擇升級公告要發送的頻道')
+                .addChannelTypes(ChannelType.GuildText)
+                .setRequired(true)),
+
+    new SlashCommandBuilder()
+        .setName('setannouncechannel')
+        .setDescription('【伺服器管理員】設定接收 Sles 全伺服器公告的頻道')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .addChannelOption(opt =>
+            opt.setName('channel')
+                .setDescription('選擇要接收公告的頻道')
+                .addChannelTypes(ChannelType.GuildText)
+                .setRequired(true)),
+
+    new SlashCommandBuilder()
         .setName('steam')
         .setDescription('【伺服器管理員】手動觸發 Steam 最新更新檢測')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
-
     new SlashCommandBuilder()
         .setName('tweet')
         .setDescription('【伺服器管理員】手動觸發 Twitter 最新推文檢測')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
-
     new SlashCommandBuilder()
         .setName('youtube')
         .setDescription('【伺服器管理員】手動觸發 YouTube 最新影片檢測')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
-    // ─── 最高特權擁有者專用指令 (僅限 Sles ID: 1330463890122735642) ───
+    // ─── Sles 專屬特權指令 ─────────────────────────────────────
     new SlashCommandBuilder()
-        .setName('givelunacy')
-        .setDescription('👑【Sles 專屬】發放狂氣 (可給個人或全伺服器)')
+        .setName('announce')
+        .setDescription('👑【Sles 專屬】向所有設定公告頻道的伺服器發送全域公告')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .addStringOption(opt =>
+            opt.setName('message')
+                .setDescription('公告內容')
+                .setRequired(true)),
+
+    new SlashCommandBuilder()
+        .setName('givelightseeds')
+        .setDescription('👑【Sles 專屬】發放 LightSeeds（可給個人或全伺服器）')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
         .addIntegerOption(opt => opt.setName('amount').setDescription('發放數量').setRequired(true))
-        .addUserOption(opt => opt.setName('target').setDescription('指定目標玩家 (若發給全服可留空)'))
-        .addBooleanOption(opt => opt.setName('all').setDescription('是否發放給伺服器所有玩家 (預設 False)')),
+        .addUserOption(opt => opt.setName('target').setDescription('指定目標玩家（若發給全服可留空）'))
+        .addBooleanOption(opt => opt.setName('all').setDescription('是否發放給伺服器所有玩家（預設 False）')),
 
     new SlashCommandBuilder()
         .setName('givefragments')
-        .setDescription('👑【Sles 專屬】發放碎片 (可給個人或全伺服器)')
+        .setDescription('👑【Sles 專屬】發放人格碎片（可給個人或全伺服器）')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
         .addIntegerOption(opt => opt.setName('amount').setDescription('發放數量').setRequired(true))
-        .addUserOption(opt => opt.setName('target').setDescription('指定目標玩家 (若發給全服可留空)'))
-        .addBooleanOption(opt => opt.setName('all').setDescription('是否發放給伺服器所有玩家 (預設 False)')),
+        .addUserOption(opt => opt.setName('target').setDescription('指定目標玩家（若發給全服可留空）'))
+        .addBooleanOption(opt => opt.setName('all').setDescription('是否發放給伺服器所有玩家（預設 False）')),
 
     new SlashCommandBuilder()
         .setName('givescrolls')
-        .setDescription('👑【Sles 專屬】發放抽卡券 (可給個人或全伺服器)')
+        .setDescription('👑【Sles 專屬】發放抽卡券（可給個人或全伺服器）')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
         .addIntegerOption(opt => opt.setName('amount').setDescription('發放數量').setRequired(true))
-        .addUserOption(opt => opt.setName('target').setDescription('指定目標玩家 (若發給全服可留空)'))
-        .addBooleanOption(opt => opt.setName('all').setDescription('是否發放給伺服器所有玩家 (預設 False)')),
+        .addUserOption(opt => opt.setName('target').setDescription('指定目標玩家（若發給全服可留空）'))
+        .addBooleanOption(opt => opt.setName('all').setDescription('是否發放給伺服器所有玩家（預設 False）')),
 
     new SlashCommandBuilder()
         .setName('givethreads')
-        .setDescription('👑【Sles 專屬】發放絲線 (可給個人或全伺服器)')
+        .setDescription('👑【Sles 專屬】發放絲線（可給個人或全伺服器）')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
         .addIntegerOption(opt => opt.setName('amount').setDescription('發放數量').setRequired(true))
-        .addUserOption(opt => opt.setName('target').setDescription('指定目標玩家 (若發給全服可留空)'))
-        .addBooleanOption(opt => opt.setName('all').setDescription('是否發放給伺服器所有玩家 (預設 False)')),
+        .addUserOption(opt => opt.setName('target').setDescription('指定目標玩家（若發給全服可留空）'))
+        .addBooleanOption(opt => opt.setName('all').setDescription('是否發放給伺服器所有玩家（預設 False）')),
 
     new SlashCommandBuilder()
         .setName('updaterewards')
-        .setDescription('👑【Sles 專屬】更新獎勵設置')
-        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+        .setDescription('👑【Sles 專屬】更新全服獎勵設置')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .addIntegerOption(opt => opt.setName('amount').setDescription('發放數量').setRequired(true)),
 
     new SlashCommandBuilder()
         .setName('updatebuff')
-        .setDescription('👑【Sles 專屬】更新倍率 Buff')
+        .setDescription('👑【Sles 專屬】更新關卡獎勵倍率 Buff')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .addNumberOption(opt => opt.setName('multiplier').setDescription('倍率（例如 2 = 雙倍）').setRequired(true)),
 ];
 
 // ─── 工具函式 ──────────────────────────────────────────────────
@@ -233,16 +281,13 @@ function rarityLabel(rarity) {
 async function announceCurrentRateUps(botClient) {
     const config = getConfig();
     if (!config.rateUpChannelId) return;
-
     try {
         const channel = await botClient.channels.fetch(config.rateUpChannelId);
         if (!channel) return;
-
         const up = identitiesData.upTargets || {};
         const sections = Object.entries(up)
             .filter(([, v]) => Array.isArray(v) && v.length)
             .map(([r, items]) => `### ${rarityLabel(r)}\n${items.map(i => `• ${i}`).join('\n')}`);
-            
         await channel.send({
             embeds: [new EmbedBuilder()
                 .setColor(0xffd166)
@@ -259,30 +304,26 @@ async function announceCurrentRateUps(botClient) {
 client.on(Events.InteractionCreate, async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
 
+    // setchannel 在這裡處理（需要 saveConfig）
     if (interaction.commandName === 'setchannel') {
+        const isGuildAdmin = interaction.memberPermissions?.has(PermissionFlagsBits.Administrator);
+        if (!isGuildAdmin) {
+            return interaction.reply({ content: '❌ 此指令僅限伺服器管理員使用。', flags: MessageFlags.Ephemeral });
+        }
         const type = interaction.options.getString('type');
         const targetChannel = interaction.options.getChannel('target_channel');
-
-        if (type === 'notify') {
-            saveConfig({ notifyChannelId: targetChannel.id });
-            await interaction.reply({
-                content: `「主管，系統上線通知頻道已重定向至 ${targetChannel}。」`,
-                flags: MessageFlags.Ephemeral
-            });
-        } else if (type === 'rateup') {
-            saveConfig({ rateUpChannelId: targetChannel.id });
-            await interaction.reply({
-                content: `「主管，Rate Up 公告發射頻道已重定向至 ${targetChannel}。」`,
-                flags: MessageFlags.Ephemeral
-            });
-        } else if (type === 'news') {
-            saveConfig({ newsChannelId: targetChannel.id });
-            await interaction.reply({
-                content: `「主管，新聞與社群監測頻道已重定向至 ${targetChannel}。」`,
-                flags: MessageFlags.Ephemeral
-            });
-        }
-        return;
+        const typeMap = {
+            notify: { key: 'notifyChannelId', label: '系統上線通知頻道' },
+            rateup: { key: 'rateUpChannelId', label: 'Rate Up 公告頻道' },
+            news:   { key: 'newsChannelId',   label: '新聞與社群動態頻道' },
+        };
+        const entry = typeMap[type];
+        if (!entry) return;
+        saveConfig({ [entry.key]: targetChannel.id });
+        return interaction.reply({
+            content: `「主管，${entry.label}已重定向至 ${targetChannel}。」`,
+            flags: MessageFlags.Ephemeral
+        });
     }
 
     try {
@@ -298,14 +339,41 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
 });
 
-// ─── 上線事件：清除舊全域指令，並重置伺服器區域指令 ─────────────
+// ─── messageCreate：打字 XP ───────────────────────────────────
+client.on(Events.MessageCreate, async (message) => {
+    if (message.author?.bot) return;
+    handleMessageXp(client, message).catch(() => {});
+});
+
+// ─── voiceStateUpdate：語音 XP + VC Bug 修復 ─────────────────
+client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
+    const userId   = newState.member?.user?.id || oldState.member?.user?.id;
+    const username = newState.member?.user?.username || oldState.member?.user?.username;
+    const guildId  = newState.guild?.id || oldState.guild?.id;
+    if (!userId || newState.member?.user?.bot) return;
+
+    const joinedChannel = newState.channelId;
+    const leftChannel   = oldState.channelId;
+
+    if (!leftChannel && joinedChannel) {
+        // 加入語音頻道
+        trackVoiceJoin(userId, username, guildId);
+    } else if (leftChannel && !joinedChannel) {
+        // 離開語音頻道
+        trackVoiceLeave(userId);
+    } else if (leftChannel !== joinedChannel) {
+        // 切換頻道：重設計時器
+        trackVoiceLeave(userId);
+        trackVoiceJoin(userId, username, guildId);
+    }
+});
+
+// ─── 上線事件 ─────────────────────────────────────────────────
 client.once(Events.ClientReady, async () => {
     console.log(`🤖 Angela 系統脈衝對齊。已激活：${client.user.tag}`);
 
     try {
-        // 🔥 關鍵修復：清空舊全域指令，防止 Discord 殘留重複指令
         await client.application.commands.set([]);
-        
         const commandData = allSlashCommands.map(cmd => cmd.toJSON());
         for (const guild of client.guilds.cache.values()) {
             await guild.commands.set(commandData);
@@ -340,13 +408,14 @@ client.once(Events.ClientReady, async () => {
 
     await announceCurrentRateUps(client);
     startNewsCheckLoop(client);
-    console.log('📡 [排程] Newscheck 循環已啟動');
+    startVoiceXpTimer(client);   // 啟動語音 XP 計時器
+    console.log('📡 [排程] Newscheck 循環 & 語音 XP 計時器已啟動');
 });
 
 // ─── 錯誤保護與登入 ───────────────────────────────────────────
 client.on('error', err => console.error('Discord 客戶端錯誤:', err.message));
 process.on('unhandledRejection', err => console.error('未捕捉的 Promise 拒絕:', err?.message || err));
-process.on('uncaughtException', err => console.error('未捕捉的例外錯誤:', err?.message || err));
+process.on('uncaughtException',  err => console.error('未捕捉的例外錯誤:',  err?.message || err));
 
 module.exports = { getConfig, saveConfig };
 

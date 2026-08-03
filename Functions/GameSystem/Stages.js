@@ -1,6 +1,7 @@
 // Functions/GameSystem/Stages.js
 const { EmbedBuilder } = require('discord.js');
 const { getBuffMultiplier } = require('./GiveAwaySystem.js');
+const { addXp } = require('./LevelSystem.js');
 const { getOrCreatePlayer, savePlayerData } = require('./PacksAndData.js');
 
 const STAGE_OUTCOMES = [
@@ -14,22 +15,30 @@ const STAGE_OUTCOMES = [
 async function handleStage(client, message) {
     const outcome = STAGE_OUTCOMES[Math.floor(Math.random() * STAGE_OUTCOMES.length)];
     const buff    = getBuffMultiplier();
-    const lunacy  = Math.floor(outcome.base * buff);
+    const lightSeeds = Math.floor(outcome.base * buff);
     const frags   = outcome.fragments;
 
     // ── 實際儲存獎勵到玩家資料 ─────────────────────────────────
     const player = getOrCreatePlayer(null, message.author.id, message.author.username);
     if (outcome.success) {
-        player.lunacy    = (player.lunacy    || 0) + lunacy;
-        player.fragments = (player.fragments || 0) + frags;
-        savePlayerData(null, message.author.id, player);
+        player.lightSeeds = (player.lightSeeds || 0) + lightSeeds;
+        player.fragments  = (player.fragments  || 0) + frags;
+    }
+    savePlayerData(null, message.author.id, player);
+
+    // 關卡 XP 獎勵
+    if (outcome.success) {
+        const stageXp = lightSeeds >= 200 ? 20 : lightSeeds >= 100 ? 15 : 10;
+        addXp(client, message.author.id, message.author.username, stageXp, message.guild?.id).catch(() => {});
+    } else {
+        addXp(client, message.author.id, message.author.username, 3, message.guild?.id).catch(() => {});
     }
 
     const desc = [
         `**結果：** ${outcome.emoji} ${outcome.text}`,
         '',
         outcome.success
-            ? `**獲得：** 💎 狂氣 ×${lunacy}${frags ? `、📦 人格碎片 ×${frags}` : ''}${buff > 1 ? ` _(×${buff} 加成中)_` : ''}`
+            ? `**獲得：** 🌱 LightSeeds ×${lightSeeds}${frags ? `、📦 人格碎片 ×${frags}` : ''}${buff > 1 ? ` _(×${buff} 加成中)_` : ''}`
             : '**獲得：** ─（撤退無獎勵）',
     ].join('\n');
 
@@ -37,7 +46,7 @@ async function handleStage(client, message) {
         embeds: [new EmbedBuilder()
             .setAuthor({ name: message.author.username, iconURL: message.author.displayAvatarURL() })
             .setTitle('🚨 腦葉收容區 — 抑制戰況回報')
-            .setColor(outcome.success ? (lunacy >= 250 ? 0x2ed573 : 0xeccc68) : 0xff4757)
+            .setColor(outcome.success ? (lightSeeds >= 250 ? 0x2ed573 : 0xeccc68) : 0xff4757)
             .setDescription(desc)
             .setFooter({ text: buff > 1 ? `⚡ 當前獎勵倍率：${buff}×` : '使用 !stage 再次挑戰' })
             .setTimestamp()]

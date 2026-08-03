@@ -10,21 +10,22 @@ const {
     applyStatus, processTurnEnd, processOnHit,
     formatStatuses, isBindRestricted, getKnockdownMultiplier,
 } = require('./Data/StatusEffects.js');
+const { addXp } = require('./LevelSystem.js');
 
 const SKILL_TIMEOUT = 45_000;
 const TYPE_EMOJI = { 斬: '⚔️', 刺: '🗡️', 鈍: '🔨' };
 
 // ─── 5難度設定 ────────────────────────────────────────────────
 const DIFFICULTY = {
-    super_easy: { enemyHpMult: 0.55, enemyAtkMult: 0.70, lunacyReward: 20,  threadReward: 2,  label: '超簡單 🟢' },
-    easy:       { enemyHpMult: 0.75, enemyAtkMult: 0.85, lunacyReward: 40,  threadReward: 5,  label: '簡單 🟡' },
-    normal:     { enemyHpMult: 1.00, enemyAtkMult: 1.00, lunacyReward: 70,  threadReward: 10, label: '一般 🟠' },
-    hard:       { enemyHpMult: 1.40, enemyAtkMult: 1.20, lunacyReward: 130, threadReward: 20, label: '困難 🔴' },
-    insane:     { enemyHpMult: 2.00, enemyAtkMult: 1.50, lunacyReward: 200, threadReward: 35, label: '瘋狂 💀' },
+    super_easy: { enemyHpMult: 0.55, enemyAtkMult: 0.70, lightSeedsReward: 20,  threadReward: 2,  label: '超簡單 🟢' },
+    easy:       { enemyHpMult: 0.75, enemyAtkMult: 0.85, lightSeedsReward: 40,  threadReward: 5,  label: '簡單 🟡' },
+    normal:     { enemyHpMult: 1.00, enemyAtkMult: 1.00, lightSeedsReward: 70,  threadReward: 10, label: '一般 🟠' },
+    hard:       { enemyHpMult: 1.40, enemyAtkMult: 1.20, lightSeedsReward: 130, threadReward: 20, label: '困難 🔴' },
+    insane:     { enemyHpMult: 2.00, enemyAtkMult: 1.50, lightSeedsReward: 200, threadReward: 35, label: '瘋狂 💀' },
     // 相容舊版 MirrorDungeon 呼叫
-    normal_md:  { enemyHpMult: 1.00, enemyAtkMult: 1.00, lunacyReward: 0,   threadReward: 10, label: '一般' },
-    elite:      { enemyHpMult: 1.30, enemyAtkMult: 1.15, lunacyReward: 0,   threadReward: 20, label: '精英' },
-    boss:       { enemyHpMult: 1.80, enemyAtkMult: 1.30, lunacyReward: 0,   threadReward: 35, label: 'BOSS' },
+    normal_md:  { enemyHpMult: 1.00, enemyAtkMult: 1.00, lightSeedsReward: 0,   threadReward: 10, label: '一般' },
+    elite:      { enemyHpMult: 1.30, enemyAtkMult: 1.15, lightSeedsReward: 0,   threadReward: 20, label: '精英' },
+    boss:       { enemyHpMult: 1.80, enemyAtkMult: 1.30, lightSeedsReward: 0,   threadReward: 35, label: 'BOSS' },
 };
 
 function clamp(n, min, max) { return Math.max(min, Math.min(max, n)); }
@@ -143,11 +144,11 @@ async function handleBattle(client, message) {
         .setColor(0x5865f2)
         .setDescription(
             '「主管，敵人的強度各有不同。請做好準備。」\n\n' +
-            '🟢 **超簡單** — 🌙 狂氣 ×20\n' +
-            '🟡 **簡單** — 🌙 狂氣 ×40\n' +
-            '🟠 **一般** — 🌙 狂氣 ×70\n' +
-            '🔴 **困難** — 🌙 狂氣 ×130\n' +
-            '💀 **瘋狂** — 🌙 狂氣 ×200'
+            '🟢 **超簡單** — 🌱 LightSeeds ×20\n' +
+            '🟡 **簡單** — 🌱 LightSeeds ×40\n' +
+            '🟠 **一般** — 🌱 LightSeeds ×70\n' +
+            '🔴 **困難** — 🌱 LightSeeds ×130\n' +
+            '💀 **瘋狂** — 🌱 LightSeeds ×200'
         ).setTimestamp();
 
     const row = new ActionRowBuilder().addComponents(
@@ -202,7 +203,7 @@ async function startBattleFlow(client, message, tier) {
         embeds: [new EmbedBuilder()
             .setTitle(`⚔️ ${diff.label} — 選擇異想體`)
             .setColor(0x5865f2)
-            .setDescription(`難度：**${diff.label}**\n獎勵：🌙 狂氣 ×${diff.lunacyReward}\n\n請選擇你要挑戰的目標：`)
+            .setDescription(`難度：**${diff.label}**\n獎勵：🌱 LightSeeds ×${diff.lightSeedsReward}\n\n請選擇你要挑戰的目標：`)
             .setTimestamp()],
         components: [new ActionRowBuilder().addComponents(menu), new ActionRowBuilder().addComponents(randomBtn)],
     });
@@ -287,14 +288,20 @@ async function startBattle(client, message, tier = 'normal', presetEnemy = null)
         let desc = '';
         if (win) {
             p2.totalWins = (p2.totalWins || 0) + 1;
-            p2.lunacy    = (p2.lunacy  || 0) + diff.lunacyReward;
+            p2.lightSeeds = (p2.lightSeeds || 0) + diff.lightSeedsReward;
             p2.thread    = (p2.thread  || 0) + diff.threadReward;
-            desc = `🎉 **勝利！**\n🌙 狂氣 +${diff.lunacyReward} ｜ 🧵 紡錘 +${diff.threadReward}\n\n${lastLog.slice(-600)}`;
+            desc = `🎉 **勝利！**\n🌱 LightSeeds +${diff.lightSeedsReward} ｜ 🧵 紡錘 +${diff.threadReward}\n\n${lastLog.slice(-600)}`;
         } else {
             desc = `💀 **失敗...** 全員倒下或超時。\n\n${lastLog.slice(-600)}`;
         }
 
         savePlayerData(client, message.author.id, p2);
+        // 戰鬥 XP 獎勵
+        if (win) {
+            const xpMap = { super_easy: 5, easy: 10, normal: 20, hard: 35, insane: 50 };
+            const battleXp = xpMap[tier] || 15;
+            addXp(client, message.author.id, message.author.username, battleXp, message.guild?.id).catch(() => {});
+        }
 
         await battleMsg.edit({
             embeds: [new EmbedBuilder()
@@ -304,7 +311,7 @@ async function startBattle(client, message, tier = 'normal', presetEnemy = null)
             components: [],
         }).catch(() => {});
 
-        resolvePromise({ win, lunacyReward: win ? diff.lunacyReward : 0, threadReward: win ? diff.threadReward : 0, tier, state });
+        resolvePromise({ win, lightSeedsReward: win ? diff.lightSeedsReward : 0, threadReward: win ? diff.threadReward : 0, tier, state });
     }
 
     async function processTurn() {
@@ -473,7 +480,7 @@ async function startBattle(client, message, tier = 'normal', presetEnemy = null)
         clearTurnTimer();
         if (!finished) {
             if (reason !== 'end') await endBattle(false, '⏰ 戰鬥超時。').catch(() => {});
-            else { await battleMsg.edit({ components: [] }).catch(() => {}); resolvePromise({ win: false, lunacyReward: 0, threadReward: 0, tier, state }); }
+            else { await battleMsg.edit({ components: [] }).catch(() => {}); resolvePromise({ win: false, lightSeedsReward: 0, threadReward: 0, tier, state }); }
         }
     });
 

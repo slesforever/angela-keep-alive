@@ -63,7 +63,7 @@ async function handleSinner(client, message) {
                     { name: '🧵 紡錘', value: `${player.thread || 0}`, inline: true },
                     { name: '📦 人格碎片', value: `${player.fragments || 0}`, inline: true },
                     { name: '📜 經驗卷', value: `${player.expScrolls || 0}`, inline: true },
-                    { name: '💎 狂氣', value: `${player.lunacy || 0}`, inline: true },
+                    { name: '🌱 LightSeeds', value: `${player.lightSeeds || 0}`, inline: true },
                 )
                 .setFooter({ text: '!sinner [罪人名] 查看詳細 ｜ !uptie [名] 連結提升 ｜ !equip [罪人名] | [人格名稱]' })
                 .setTimestamp()]
@@ -188,7 +188,7 @@ async function handleThreads(client, message) {
                 { name: '🧵 紡錘', value: `${player.thread || 0}`, inline: true },
                 { name: '📦 人格碎片', value: `${player.fragments || 0}`, inline: true },
                 { name: '📜 經驗卷', value: `${player.expScrolls || 0}`, inline: true },
-                { name: '💎 狂氣', value: `${player.lunacy || 0}`, inline: true },
+                { name: '🌱 LightSeeds', value: `${player.lightSeeds || 0}`, inline: true },
             )
             .setDescription(
                 '**連結提升費用：**\nT1→T2：×20　T2→T3：×40　T3→T4：×80\n\n' +

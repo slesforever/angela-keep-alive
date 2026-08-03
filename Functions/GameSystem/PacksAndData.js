@@ -330,7 +330,7 @@ function defaultPlayer(username) {
 
     return {
         username,
-        lunacy:         1300,
+        lightSeeds:     1300,
         identities:     [...base],
         egos:           [],
         team:           [...base].slice(0, 4),
@@ -344,6 +344,7 @@ function defaultPlayer(username) {
         level:          1,
         exp:            0,
         stageProgress:  1,
+        xp:             0,
     };
 }
 
@@ -386,7 +387,13 @@ function getOrCreatePlayer(client, userId, username) {
     p.party          ??= [];
     p.totalPulls     ??= 0;
     p.identities     ??= [];
-    p.lunacy         ??= 1300;
+    // 舊資料遷移：lunacy -> lightSeeds
+    if (p.lunacy !== undefined) {
+        p.lightSeeds = (p.lightSeeds || 0) + p.lunacy;
+        delete p.lunacy;
+    }
+    p.lightSeeds     ??= 1300;
+    p.xp             ??= 0;
     if (!p.identities.length) {
         const pool = getIdData().pool || {};
         const base = (pool['0'] || pool['S1'] || []).slice(0, 12);
@@ -420,7 +427,7 @@ function lobbyEmbed(player) {
             { name: '👤 主管',     value: player.username, inline: true },
             { name: '⭐ 等級',     value: `Lv.${player.level}`, inline: true },
             { name: '🎰 提取次數', value: `${player.totalPulls || 0} 次`, inline: true },
-            { name: '💎 狂氣',     value: `${player.lunacy}`, inline: true },
+            { name: '🌱 LightSeeds', value: `${player.lightSeeds}`, inline: true },
             { name: '🧵 紡錘',     value: `${player.thread}`, inline: true },
             { name: '\u200b',      value: '\u200b', inline: true },
             { name: '📦 人格碎片', value: `${player.fragments}`, inline: true },
@@ -734,6 +741,23 @@ const BASE_RATES = {
 };
 const RATE_UP_MULT = 5;
 
+
+// ─── /list 顯示名稱（保留完整角色識別符）────────────────────────
+function getListDisplayName(name) {
+    const s = String(name || '');
+    // 格式：［內容］罪人名 / English → 顯示 ［內容］罪人名
+    const m = s.match(/[[［【](.+?)[]］】]s*([^/]+)/);
+    if (m) {
+        const bracket = m[1].trim();
+        const sinner  = m[2].trim();
+        return `［${bracket}］${sinner}`.slice(0, 40);
+    }
+    // LCB 格式：LCB 罪人 李箱 → 顯示全名
+    const lcb = s.match(/^(LCBs+S+s+S+)/);
+    if (lcb) return lcb[1];
+    // 斜線前
+    return s.split('/')[0].trim().slice(0, 40);
+}
 function buildListPages() {
     const pages = [];
     const pool = getIdData().pool || {};
@@ -786,10 +810,11 @@ function renderPage(pages, idx) {
 
     const base = BASE_RATES[p.r] || 0;
     const lines = p.chunk.map(name => {
-    const isUp = p.upList.includes(name);
-    const pct = ((base * (isUp ? RATE_UP_MULT : 1) / p.totalW) * 100).toFixed(4);
-    return `\`${isUp ? '🔼 ' : '• '}${name.padEnd(20)} [${pct}%]\``;
-});
+        const isUp = p.upList.includes(name);
+        const pct = ((base * (isUp ? RATE_UP_MULT : 1) / p.totalW) * 100).toFixed(4);
+        const displayName = getListDisplayName(name);
+        return `${isUp ? '🔼' : '•'} **${displayName}** \`${pct}%\``;
+    });
 
     return new EmbedBuilder()
         .setTitle('🗂️ 核心控制室 — 扭蛋池機率清單')
