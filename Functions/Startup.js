@@ -75,7 +75,8 @@ const client = new Client({
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildMembers,
-        GatewayIntentBits.GuildVoiceStates,   // 修復 VC Bug：即時追蹤語音狀態
+        GatewayIntentBits.GuildVoiceStates, // 修復 VC Bug：即時追蹤語音狀態
+        GatewayIntentBits.GuildMessageReactions, 
     ],
 });
 
