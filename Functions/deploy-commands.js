@@ -3,9 +3,7 @@ const { REST, Routes, SlashCommandBuilder, PermissionFlagsBits } = require('disc
 
 const commands = [
     // 抽卡
-    new SlashCommandBuilder()
-        .setName('pull')
-        .setDescription('開啟狂氣提取介面'),
+    new SlashCommandBuilder().setName('pull').setDescription('開啟狂狂的抽取介面'),
 
     // 背包 & 清單
     new SlashCommandBuilder().setName('pack').setDescription('查看 LC 主頁式背包介面'),
@@ -24,40 +22,57 @@ const commands = [
     // 鏡光迷宮
     new SlashCommandBuilder().setName('md').setDescription('開啟或查看鏡光迷宮狀態'),
 
-      // 語音頻道控制
+    // 語音頻道控制
     new SlashCommandBuilder().setName('join').setDescription('讓機器人加入你目前所在的語音頻道'),
     new SlashCommandBuilder().setName('leave').setDescription('讓機器人離開目前所在的語音頻道'),
     new SlashCommandBuilder().setName('status').setDescription('查看機器人目前的運行狀態'),
-    
+
     // 新聞測試
     new SlashCommandBuilder().setName('steam').setDescription('手動觸發測試 Steam 最新公告'),
     new SlashCommandBuilder().setName('tweet').setDescription('手動觸發測試 Twitter 最新推文'),
     new SlashCommandBuilder().setName('yt').setDescription('手動觸發測試 YouTube 最新影片'),
 
+    // 等級系統
+    new SlashCommandBuilder().setName('rank').setDescription('查看你的等級與 XP 進度'),
+    new SlashCommandBuilder().setName('leaderboard').setDescription('查看 XP 等級排行榜 Top 10'),
+    new SlashCommandBuilder().setName('gamble').setDescription('50/50 賭博 LightSeeds'),
+
     // 管理員指令
     new SlashCommandBuilder()
-        .setName('givelunacy')
-        .setDescription('[管理員] 發放狂氣')
+        .setName('setchannel')
+        .setDescription('設定 Angela 系統各項頻道')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+    new SlashCommandBuilder()
+        .setName('setlevelchannel')
+        .setDescription('設定升級公告頻道')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+    new SlashCommandBuilder()
+        .setName('setannouncechannel')
+        .setDescription('設定接收全域公告頻道')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+    new SlashCommandBuilder()
+        .setName('givelightseeds')
+        .setDescription('發放 LightSeeds')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
     new SlashCommandBuilder()
         .setName('givefragments')
-        .setDescription('[管理員] 發放碎片')
+        .setDescription('發放碎片')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
     new SlashCommandBuilder()
         .setName('givescrolls')
-        .setDescription('[管理員] 發放抽卡券')
+        .setDescription('發放抽卡券')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
     new SlashCommandBuilder()
         .setName('givethreads')
-        .setDescription('[管理員] 發放絲線')
+        .setDescription('發放絲線')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
     new SlashCommandBuilder()
         .setName('updaterewards')
-        .setDescription('[管理員] 更新獎勵設置')
+        .setDescription('更新獎勵設置')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
     new SlashCommandBuilder()
         .setName('updatebuff')
-        .setDescription('[管理員] 更新倍率 Buff')
+        .setDescription('更新倍率 Buff')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
     // Help
@@ -73,8 +88,8 @@ const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
             Routes.applicationCommands(process.env.CLIENT_ID),
             { body: commands }
         );
-        console.log('✅ 所有斜線指令註冊成功！');
-    } catch (error) {
-        console.error('❌ 指令註冊失敗:', error);
+        console.log('✅ 斜線指令註冊成功');
+    } catch (err) {
+        console.error('❌ 註冊失敗:', err);
     }
 })();
