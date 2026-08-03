@@ -8,7 +8,7 @@ const { EmbedBuilder } = require('discord.js');
 
 const LEVEL_CONFIG_PATH = path.join(process.cwd(), 'data', 'level-config.json');
 
-// ─── XP 公式 ──────────────────────────────────────────────────
+// ─── XP 公式 ───────────────────────────────────────────────
 // 升到下一級所需 XP = 當前等級 × 150（最高 100 級）
 function xpNeededForLevel(level) {
     return level * 150;
@@ -26,7 +26,7 @@ function getLevelFromXp(totalXp) {
     return { level, xpIntoLevel: remaining, xpNeeded: xpNeededForLevel(level + 1) };
 }
 
-// ─── 設定檔 ───────────────────────────────────────────────────
+// ─── 設定檔 ──────────────────────────────────────────────────
 function getLevelConfig() {
     try {
         if (fs.existsSync(LEVEL_CONFIG_PATH)) {
@@ -55,7 +55,7 @@ function getLevelChannel(guildId) {
     return getLevelConfig()[guildId] || null;
 }
 
-// ─── 升級公告 ────────────────────────────────────────────────
+// ─── 升級公告 ───────────────────────────────────────────────
 async function announceLevelUp(client, userId, username, newLevel, guildId) {
     try {
         const channelId = getLevelChannel(guildId);
@@ -131,6 +131,28 @@ function trackVoiceLeave(userId) {
     voiceJoinTimes.delete(userId);
 }
 
+// 🐛 VC Bug 修復：機器人上線時預載已在語音的成員
+function bootstrapVoiceTracking(client) {
+    let count = 0;
+    for (const guild of client.guilds.cache.values()) {
+        const states = guild.voiceStates?.cache;
+        if (!states) continue;
+        for (const [userId, state] of states) {
+            if (!state.channelId) continue;
+            const member = state.member || guild.members.cache.get(userId);
+            if (!member || member.user?.bot) continue;
+            voiceJoinTimes.set(userId, {
+                joinedAt: Date.now(),
+                guildId: guild.id,
+                username: member.user.username,
+            });
+            count++;
+        }
+    }
+    console.log(`[LevelSystem] 預載 ${count} 位語音成員進入 XP 追蹤`);
+    return count;
+}
+
 // 每分鐘呼叫一次，給在語音的玩家加 XP
 async function processVoiceXpTick(client) {
     for (const [userId, data] of voiceJoinTimes) {
@@ -178,6 +200,42 @@ async function handleRank(client, interaction) {
     return interaction.reply({ embeds: [embed] });
 }
 
+// ─── /leaderboard 排行榜 ─────────────────────────────────────
+async function handleLeaderboard(client, interaction) {
+    const PLAYERS_DIR = path.join(process.cwd(), 'data', 'players');
+    if (!fs.existsSync(PLAYERS_DIR)) {
+        return interaction.reply({ content: '目前還沒有任何玩家資料。', ephemeral: true });
+    }
+    const entries = [];
+    for (const f of fs.readdirSync(PLAYERS_DIR)) {
+        if (!f.endsWith('.json')) continue;
+        try {
+            const p = JSON.parse(fs.readFileSync(path.join(PLAYERS_DIR, f), 'utf8'));
+            entries.push({ id: f.slice(0, -5), username: p.username || 'Player', xp: p.xp || 0 });
+        } catch {}
+    }
+    entries.sort((a, b) => b.xp - a.xp);
+    const top = entries.slice(0, 10);
+    if (!top.length) return interaction.reply({ content: '目前還沒有玩家資料。', ephemeral: true });
+
+    const medals = ['🥇', '🥈', '🥉'];
+    const lines = top.map((e, i) =>
+        `${medals[i] || `**#${i + 1}**`} <@${e.id}> — **${e.xp.toLocaleString()} XP** • Lv.${getLevelFromXp(e.xp).level}`
+    ).join('\n');
+
+    const myIdx = entries.findIndex(e => e.id === interaction.user.id);
+    const footer = myIdx >= 0 ? `你的排名：第 ${myIdx + 1} / ${entries.length} 名` : '未在資料中找到你';
+
+    const embed = new EmbedBuilder()
+        .setTitle('🏆 等級排行榜 — XP TOP 10')
+        .setColor(0xf1c40f)
+        .setDescription(lines)
+        .setFooter({ text: footer })
+        .setTimestamp();
+
+    return interaction.reply({ embeds: [embed] });
+}
+
 // 啟動語音 XP 定時器（每 60 秒）
 function startVoiceXpTimer(client) {
     setInterval(() => processVoiceXpTick(client).catch(console.error), 60_000);
@@ -187,9 +245,11 @@ module.exports = {
     addXp,
     handleMessageXp,
     handleRank,
+    handleLeaderboard,
     setLevelChannel,
     getLevelChannel,
     trackVoiceJoin,
     trackVoiceLeave,
+    bootstrapVoiceTracking,
     startVoiceXpTimer,
 };
