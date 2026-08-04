@@ -34,6 +34,16 @@ function ownedIdentities(player) {
     return Array.isArray(player?.identities) ? player.identities : [];
 }
 
+// EGO 不應作為人格出擊：名稱含 E.G.O:: 或稀有度為 Egos/EGOS
+function isEgoIdentity(name) {
+    return /E.G.O::/i.test(String(name || ''));
+}
+
+// 可出擊的人格（排除 EGO）
+function battleIdentities(player) {
+    return ownedIdentities(player).filter(id => !isEgoIdentity(id));
+}
+
 function getOwnedSinners(player) {
     return [...new Set(ownedIdentities(player).map(inferSinnerKey).filter(Boolean))];
 }
@@ -56,7 +66,7 @@ function getEquippedIdentity(player, sinnerName) {
 }
 
 function getOwnedIdentityOptionsForSinner(player, sinnerName) {
-    return ownedIdentities(player).filter(id => inferSinnerKey(id) === sinnerName);
+    return battleIdentities(player).filter(id => inferSinnerKey(id) === sinnerName);
 }
 
 function buildOverviewEmbed(player, note = '') {

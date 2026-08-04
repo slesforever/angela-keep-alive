@@ -61,11 +61,14 @@ function inferSinnerFromIdentity(identityName) {
 
 function resolveBattleRoster(player) {
     const used = new Set();
-    let identities = Array.isArray(player.team) ? player.team.filter(Boolean) : [];
+    let identities = Array.isArray(player.team)
+        ? player.team.filter(id => id && !/E\.G\.O::/i.test(id))
+        : [];
 
     if (!identities.length) {
         const party = Array.isArray(player.party) ? player.party : [];
-        identities = party.map(s => !SINNERS[s] ? null : player.sinners?.[s]?.equippedIdentity || `LCB ${s}`).filter(Boolean);
+        identities = party.map(s => !SINNERS[s] ? null : player.sinners?.[s]?.equippedIdentity || `LCB ${s}`)
+            .filter(id => id && !/E\.G\.O::/i.test(id));
     }
     if (!identities.length) {
         identities = SINNER_NAMES.slice(0, 4).map(s => `LCB ${s}`);

@@ -850,6 +850,131 @@ async function handleInventory(client, message) {
     return showPack(client, message);
 }
 
+
+// ─── 從 Discord 備份頻道還原玩家資料 ─────────────────────────
+// 啟動時如果本地玩家資料不存在/為空，自動從備份頻道拉取最新快照還原
+async function restoreFromBackupChannel(client) {
+    if (!client) return 0;
+
+    // 確認本地資料是否已存在（有玩家就不需要還原）
+    if (fs.existsSync(DATA_DIR)) {
+        const existing = fs.readdirSync(DATA_DIR).filter(f => f.endsWith('.json'));
+        if (existing.length > 0) {
+            console.log(`[Pack] 本地已有 ${existing.length} 位玩家資料，跳過從備份頻道還原。`);
+            return 0;
+        }
+    }
+
+    console.log('[Pack] 本地玩家資料為空，嘗試從備份頻道還原...');
+
+    const channelId = BACKUP_CHANNEL_ID;
+    const channel = await client.channels.fetch(channelId).catch(() => null);
+    if (!channel) {
+        console.warn('[Pack] 找不到備份頻道，略過還原。');
+        return 0;
+    }
+
+    // 抓最近 50 則訊息，找最新的備份附件
+    const messages = await channel.messages.fetch({ limit: 50 }).catch(() => null);
+    if (!messages?.size) return 0;
+
+    // 按時間排序，最新的在前
+    const sorted = [...messages.values()].sort((a, b) => b.createdTimestamp - a.createdTimestamp);
+
+    // 找最新一批備份（同一時間戳的所有 part）
+    let backupFiles = [];
+    let targetStamp = null;
+
+    for (const msg of sorted) {
+        if (!msg.attachments?.size) continue;
+        const attachments = [...msg.attachments.values()].filter(a => a.name?.endsWith('.txt') && a.name?.includes('players_backup'));
+        if (!attachments.length) continue;
+
+        // 取得時間戳（從檔名提取）
+        const stampMatch = attachments[0].name.match(/players_backup_([^_]+_[^_]+_[^_]+)/);
+        const stamp = stampMatch?.[1] || msg.createdTimestamp.toString();
+
+        if (!targetStamp) targetStamp = stamp;
+        if (stamp !== targetStamp) break; // 只取同一批次
+
+        backupFiles.push(...attachments);
+    }
+
+    if (!backupFiles.length) {
+        console.warn('[Pack] 備份頻道中找不到有效備份檔案。');
+        return 0;
+    }
+
+    console.log(`[Pack] 找到備份檔案 ${backupFiles.length} 個，開始還原...`);
+
+    // 下載並解析每個備份檔
+    let restoredCount = 0;
+    const nodeFetch = (() => { try { return require('node-fetch'); } catch { return null; } })();
+    const fetchFn = nodeFetch || ((...args) => import('node-fetch').then(m => m.default(...args)));
+
+    for (const attachment of backupFiles) {
+        try {
+            const res = await fetchFn(attachment.url);
+            if (!res.ok) continue;
+            const text = await res.text();
+
+            // 解析格式：每個玩家以 === USER ID: xxx === 分隔
+            const blocks = text.split('==================================================');
+            let currentUserId = null;
+            let jsonBuffer = [];
+            let inJson = false;
+
+            for (const line of text.split('\n')) {
+                const trimmed = line.trim();
+                if (trimmed.startsWith('USER ID: ')) {
+                    currentUserId = trimmed.slice('USER ID: '.length).trim();
+                    jsonBuffer = [];
+                    inJson = false;
+                } else if (currentUserId && trimmed === '{') {
+                    inJson = true;
+                    jsonBuffer = ['{'];
+                } else if (inJson && trimmed === '') {
+                    // 嘗試解析已收集的 JSON
+                    if (jsonBuffer.length > 1) {
+                        try {
+                            const data = JSON.parse(jsonBuffer.join('\n'));
+                            const file = path.join(DATA_DIR, `${currentUserId}.json`);
+                            if (!fs.existsSync(file)) {
+                                fs.mkdirSync(path.dirname(file), { recursive: true });
+                                fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf8');
+                                restoredCount++;
+                            }
+                        } catch {}
+                        jsonBuffer = [];
+                        inJson = false;
+                        currentUserId = null;
+                    }
+                } else if (inJson) {
+                    jsonBuffer.push(line);
+                }
+            }
+
+            // 處理最後一個 block
+            if (inJson && currentUserId && jsonBuffer.length > 1) {
+                try {
+                    const data = JSON.parse(jsonBuffer.join('\n'));
+                    const file = path.join(DATA_DIR, `${currentUserId}.json`);
+                    if (!fs.existsSync(file)) {
+                        fs.mkdirSync(path.dirname(file), { recursive: true });
+                        fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf8');
+                        restoredCount++;
+                    }
+                } catch {}
+            }
+        } catch (err) {
+            console.error('[Pack] 下載備份檔案失敗:', err.message);
+        }
+    }
+
+    console.log(`[Pack] 還原完成，成功還原 ${restoredCount} 位玩家。`);
+    return restoredCount;
+}
+
 module.exports = {
     handleInventory,
     loadPlayerData,
@@ -861,4 +986,5 @@ module.exports = {
     calcLevelCost,
     // 需要手動強制同步時可以從外部呼叫
     sendBackupTxtToChannel,
+    restoreFromBackupChannel,
 };

@@ -57,7 +57,9 @@ function saveConfig(newConfig) {
 const identitiesData             = require('./GameSystem/Pulls/identitiesData.js');
 const { startNewsCheckLoop }     = require('./Newscheck.js');
 const { handleCommands }         = require('./Commanders.js');
-const { handleMessageXp, startVoiceXpTimer, trackVoiceJoin, trackVoiceLeave } = require('./GameSystem/LevelSystem.js');
+const { handleMessageXp, startVoiceXpTimer, trackVoiceJoin, trackVoiceLeave, bootstrapVoiceTracking } = require('./GameSystem/LevelSystem.js');
+const { handleStarboardReaction, setStarboardChannel: _setStarboard } = require('./GameSystem/StarboardSystem.js');
+const { restoreFromBackupChannel } = require('./GameSystem/PacksAndData.js');
 
 const SUPER_ADMIN_ID = '1330463890122735642';
 const PORT = process.env.PORT || 3000;
@@ -171,6 +173,9 @@ const allSlashCommands = [
                     { name: '🟢 系統上線通知頻道', value: 'notify' },
                     { name: '📢 Rate Up 抽卡公告頻道', value: 'rateup' },
                     { name: '📰 新聞與社群動態頻道', value: 'news' },
+                    { name: '⬆️ 升級公告頻道', value: 'level' },
+                    { name: '📣 Sles 公告接收頻道', value: 'announce' },
+                    { name: '⭐ 星星榜頻道', value: 'starboard' },
                 ))
         .addChannelOption(option =>
             option.setName('target_channel')
@@ -179,24 +184,8 @@ const allSlashCommands = [
                 .setRequired(true)),
 
     new SlashCommandBuilder()
-        .setName('setlevelchannel')
-        .setDescription('【伺服器管理員】設定升級公告頻道')
-        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-        .addChannelOption(opt =>
-            opt.setName('channel')
-                .setDescription('選擇升級公告要發送的頻道')
-                .addChannelTypes(ChannelType.GuildText)
-                .setRequired(true)),
-
-    new SlashCommandBuilder()
-        .setName('setannouncechannel')
-        .setDescription('【伺服器管理員】設定接收 Sles 全伺服器公告的頻道')
-        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-        .addChannelOption(opt =>
-            opt.setName('channel')
-                .setDescription('選擇要接收公告的頻道')
-                .addChannelTypes(ChannelType.GuildText)
-                .setRequired(true)),
+        .setName('leaderboard')
+        .setDescription('查看等級排行榜 TOP 10'),
 
     new SlashCommandBuilder()
         .setName('steam')
@@ -313,18 +302,29 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
         const type = interaction.options.getString('type');
         const targetChannel = interaction.options.getChannel('target_channel');
-        const typeMap = {
+        const configTypeMap = {
             notify: { key: 'notifyChannelId', label: '系統上線通知頻道' },
             rateup: { key: 'rateUpChannelId', label: 'Rate Up 公告頻道' },
             news:   { key: 'newsChannelId',   label: '新聞與社群動態頻道' },
         };
-        const entry = typeMap[type];
-        if (!entry) return;
-        saveConfig({ [entry.key]: targetChannel.id });
-        return interaction.reply({
-            content: `「主管，${entry.label}已重定向至 ${targetChannel}。」`,
-            flags: MessageFlags.Ephemeral
-        });
+        if (configTypeMap[type]) {
+            saveConfig({ [configTypeMap[type].key]: targetChannel.id });
+            return interaction.reply({ content: `「主管，${configTypeMap[type].label}已重定向至 ${targetChannel}。」`, flags: MessageFlags.Ephemeral });
+        }
+        const { setLevelChannel: _setLvCh } = require('./GameSystem/LevelSystem.js');
+        const { setAnnounceChannel: _setAnnCh } = require('./GameSystem/AnnounceSystem.js');
+        if (type === 'level') {
+            _setLvCh(interaction.guild.id, targetChannel.id);
+            return interaction.reply({ content: `✅ 升級公告頻道已設定至 ${targetChannel}。`, flags: MessageFlags.Ephemeral });
+        }
+        if (type === 'announce') {
+            _setAnnCh(interaction.guild.id, targetChannel.id);
+            return interaction.reply({ content: `✅ Sles 公告接收頻道已設定至 ${targetChannel}。`, flags: MessageFlags.Ephemeral });
+        }
+        if (type === 'starboard') {
+            _setStarboard(interaction.guild.id, targetChannel.id);
+            return interaction.reply({ content: `✅ 星星榜頻道已設定至 ${targetChannel}。達到 3 顆 ⭐ 的訊息將自動轉發。`, flags: MessageFlags.Ephemeral });
+        }
     }
 
     try {
@@ -344,6 +344,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
 client.on(Events.MessageCreate, async (message) => {
     if (message.author?.bot) return;
     handleMessageXp(client, message).catch(() => {});
+});
+
+// ─── messageReactionAdd：星星榜 ──────────────────────────────
+client.on(Events.MessageReactionAdd, async (reaction, user) => {
+    if (user.bot) return;
+    handleStarboardReaction(client, reaction, user).catch(() => {});
 });
 
 // ─── voiceStateUpdate：語音 XP + VC Bug 修復 ─────────────────
@@ -407,10 +413,17 @@ client.once(Events.ClientReady, async () => {
         }
     }
 
+    // ─── 從備份頻道還原玩家資料（重啟後恢復存檔）────────
+    try {
+        const restored = await restoreFromBackupChannel(client);
+        if (restored > 0) console.log(`📂 [Startup] 從備份頻道還原了 ${restored} 位玩家的資料`);
+    } catch (e) { console.error('[Startup] 備份還原失敗（忽略）:', e.message); }
+
     await announceCurrentRateUps(client);
     startNewsCheckLoop(client);
-    startVoiceXpTimer(client);   // 啟動語音 XP 計時器
-    console.log('📡 [排程] Newscheck 循環 & 語音 XP 計時器已啟動');
+    bootstrapVoiceTracking(client);  // 🐛 修復：預載語音中的成員
+    startVoiceXpTimer(client);
+    console.log('📡 [排程] Newscheck / 語音 XP 計時器已啟動');
 });
 
 // ─── 錯誤保護與登入 ───────────────────────────────────────────

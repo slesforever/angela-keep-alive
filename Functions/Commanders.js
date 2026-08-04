@@ -10,8 +10,9 @@ const CharacterSystem = require('./GameSystem/CharacterSystem.js');
 const PartySystem     = require('./GameSystem/PartySystem.js');
 const BattleSystem    = require('./GameSystem/BattleSystem.js');
 const { handleGamble }       = require('./GameSystem/GamblingSystem.js');
-const { handleRank, setLevelChannel } = require('./GameSystem/LevelSystem.js');
+const { handleRank, handleLeaderboard, setLevelChannel } = require('./GameSystem/LevelSystem.js');
 const { broadcastAnnouncement, setAnnounceChannel } = require('./GameSystem/AnnounceSystem.js');
+const { handleGiveAllPlayers, handleGiveSinglePlayer } = require('./GameSystem/GiveAwaySystem.js');
 const { checkSteamUpdates, checkTwitterUpdates, checkYouTubeUpdates } = require('./Newscheck.js');
 
 const SUPER_ADMIN_ID = '1330463890122735642';
@@ -233,31 +234,6 @@ async function handleSlashCommands(client, interaction) {
             });
         }
 
-        // ─── 設定升級公告頻道（伺服器管理員）────────────────────
-        if (commandName === 'setlevelchannel') {
-            const isGuildAdmin = interaction.memberPermissions?.has(PermissionFlagsBits.Administrator);
-            if (!isGuildAdmin) {
-                return interaction.reply({ content: '❌ 此指令僅限伺服器管理員使用。', flags: MessageFlags.Ephemeral });
-            }
-            const targetChannel = interaction.options.getChannel('channel');
-            setLevelChannel(interaction.guild.id, targetChannel.id);
-            return interaction.reply({ content: `✅ 升級公告頻道已設定至 ${targetChannel}。`, flags: MessageFlags.Ephemeral });
-        }
-
-        // ─── 設定公告接收頻道（伺服器管理員）────────────────────
-        if (commandName === 'setannouncechannel') {
-            const isGuildAdmin = interaction.memberPermissions?.has(PermissionFlagsBits.Administrator);
-            if (!isGuildAdmin) {
-                return interaction.reply({ content: '❌ 此指令僅限伺服器管理員使用。', flags: MessageFlags.Ephemeral });
-            }
-            const targetChannel = interaction.options.getChannel('channel');
-            setAnnounceChannel(interaction.guild.id, targetChannel.id);
-            return interaction.reply({
-                content: `✅ 公告接收頻道已設定至 ${targetChannel}。\nSles 發布公告時，訊息將傳送至此頻道。`,
-                flags: MessageFlags.Ephemeral
-            });
-        }
-
         // ─── 全伺服器公告（僅限 Sles）────────────────────────────
         if (commandName === 'announce') {
             if (uid !== SUPER_ADMIN_ID) {
@@ -301,21 +277,32 @@ async function handleSlashCommands(client, interaction) {
             const targetUser = interaction.options.getUser('target');
             const isAll     = interaction.options.getBoolean('all') || false;
 
-            if (['givelightseeds', 'givefragments', 'givescrolls', 'givethreads'].includes(commandName)) {
-                let targetArg = isAll ? 'all' : (targetUser ? `<@${targetUser.id}>` : `<@${uid}>`);
-                fakeMessage.content = `!${commandName} ${targetArg} ${amount}`;
-                fakeMessage.mentions = {
-                    users: {
-                        first: () => isAll ? null : (targetUser || interaction.user)
-                    }
-                };
-            } else {
-                fakeMessage.content = `!${commandName} ${amount}`.trim();
+            // updaterewards / updatebuff 走前綴相容路
+            if (commandName === 'updaterewards') {
+                fakeMessage.content = '!updaterewards ' + amount;
+                return GiveAwaySystem.handleGiveAway(client, fakeMessage);
+            }
+            if (commandName === 'updatebuff') {
+                const mult = interaction.options.getNumber?.('multiplier') ?? amount;
+                fakeMessage.content = '!updatebuff ' + mult;
+                return GiveAwaySystem.handleGiveAway(client, fakeMessage);
             }
 
-            return GiveAwaySystem.handleGiveAway
-                ? GiveAwaySystem.handleGiveAway(client, fakeMessage)
-                : GiveAwaySystem(client, fakeMessage);
+            // give 類：全服 or 單人（修復 all=true 格式錯誤）
+            if (!amount || amount <= 0) {
+                return interaction.reply({ content: '❌ 請輸入有效數量（必須 > 0）。', flags: MessageFlags.Ephemeral });
+            }
+            await interaction.deferReply();
+            if (isAll) {
+                return handleGiveAllPlayers(client, commandName, amount, interaction);
+            }
+            const actualTarget = targetUser || interaction.user;
+            return handleGiveSinglePlayer(client, commandName, amount, actualTarget, interaction);
+        }
+
+        // ─── 等級排行榜 ────────────────────────────────────────
+        if (commandName === 'leaderboard') {
+            return handleLeaderboard(client, interaction);
         }
 
         // ─── 說明 ────────────────────────────────────────────────
@@ -347,7 +334,8 @@ async function sendHelp(interaction) {
             { name: '🎰 賭博',              value: '`/gamble <金額>` — 下注 🌱 LightSeeds，50/50 勝負' },
             { name: '🎲 娛樂功能',           value: '`/gayrate` — 男同指數 ｜ `/lesbianrate` — 姬圈指數' },
             { name: '🔊 語音控制',           value: '`/join` ｜ `/leave` ｜ `/status`' },
-            { name: '📰 社群檢測 (伺服器管理員)', value: '`/steam` ｜ `/tweet` ｜ `/youtube` ｜ `/setchannel`\n`/setlevelchannel` — 升級公告頻道\n`/setannouncechannel` — 接收 Sles 公告頻道' },
+            { name: '📊 排行榜', value: '`/leaderboard` — 等級 XP 排行榜 TOP 10' },
+            { name: '📰 社群檢測 (伺服器管理員)', value: '`/steam` ｜ `/tweet` ｜ `/youtube`\n`/setchannel` — 統一設定所有通知/功能頻道' },
             { name: '👑 最高主管特權 (Sles 專屬)', value: '`/givelightseeds` ｜ `/givefragments` ｜ `/givescrolls`\n`/givethreads` ｜ `/updaterewards` ｜ `/updatebuff`\n`/announce` — 全伺服器公告' }
         )
         .setFooter({ text: '輸入 / 即可喚出選單 ｜ 所有特權指令已鎖定為 Sles 專屬' });
