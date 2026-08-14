@@ -236,14 +236,12 @@ const allSlashCommands = [
 
     // ─── Sles 專屬特權指令 ─────────────────────────────────────
     new SlashCommandBuilder()
-        .setName('announce')
-        .setDescription('👑【Sles 專屬】向所有設定公告頻道的伺服器發送全域公告')
-        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-        .addStringOption(opt =>
-            opt.setName('message')
-                .setDescription('公告內容')
-                .setRequired(true)),
-
+    .setName('announce')
+    .setDescription('👑 Sles 專屬：向所有設定公告頻道的伺服器發送全域公告')
+    .setDefaultMemberPermissions(
+        PermissionFlagsBits.Administrator
+    ),
+    
     new SlashCommandBuilder()
         .setName('givestarcoins')
         .setDescription('👑【Sles 專屬】發放 Starcoins')
@@ -340,23 +338,82 @@ async function announceCurrentRateUps(botClient) {
 
 // ─── 處理斜線指令 (InteractionCreate) ─────────────────────────
 client.on(Events.InteractionCreate, async (interaction) => {
-    if (!interaction.isChatInputCommand()) return;
+    // ─────────────────────────────────────
+    // /announce Modal
+    // ─────────────────────────────────────
+
+    if (
+        interaction.isModalSubmit() &&
+        interaction.customId === 'announce_modal'
+    ) {
+        try {
+            const {
+                broadcastAnnouncement
+            } = require(
+                './GameSystem/AnnounceSystem.js'
+            );
+
+            const messageText =
+                interaction.fields.getTextInputValue(
+                    'announce_content'
+                );
+
+            const isSles =
+                interaction.user.id ===
+                SUPER_ADMIN_ID;
+
+            if (!isSles) {
+                return interaction.reply({
+                    content:
+                        '❌ 只有 Angela 系統最高主管可以使用公告功能。',
+                    flags:
+                        MessageFlags.Ephemeral
+                });
+            }
+
+            await broadcastAnnouncement(
+                client,
+                interaction,
+                messageText
+            );
+
+        } catch (err) {
+            console.error(
+                '[Announce] Modal 執行失敗:',
+                err
+            );
+
+            if (
+                interaction.deferred ||
+                interaction.replied
+            ) {
+                await interaction
+                    .editReply({
+                        content:
+                            `❌ 公告發送失敗：${err.message}`
+                    })
+                    .catch(() => {});
+            } else {
+                await interaction
+                    .reply({
+                        content:
+                            `❌ 公告發送失敗：${err.message}`,
+                        flags:
+                            MessageFlags.Ephemeral
+                    })
+                    .catch(() => {});
+            }
+        }
+
+        return;
+    }
+
+    // 不是 Slash Command 就到這裡結束
+    if (!interaction.isChatInputCommand()) {
+        return;
+    }
+
     localizeInteraction(interaction);
-
-    if (interaction.commandName === 'setstoragechannel') {
-        const isGuildAdmin = interaction.memberPermissions?.has(PermissionFlagsBits.Administrator);
-        if (!isGuildAdmin) {
-            return interaction.reply({ content: '❌ 此指令僅限伺服器管理員使用。', flags: MessageFlags.Ephemeral });
-        }
-
-        const targetChannel = interaction.options.getChannel('target_channel');
-        const saved = await setStorageChannel(client, interaction.guild, targetChannel.id);
-        if (!saved) {
-            return interaction.reply({
-                content: '❌ 設定頻道失敗。請確認 Angela 能查看、讀取歷史訊息、發送訊息與嵌入連結。',
-                flags: MessageFlags.Ephemeral
-            });
-        }
 
         // 將舊版本機設定一併搬進 Discord，避免第一次啟用儲存頻道時遺失既有設定。
         const legacy = getConfig();
