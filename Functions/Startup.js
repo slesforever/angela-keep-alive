@@ -61,6 +61,7 @@ const { handleMessageXp, startVoiceXpTimer, trackVoiceJoin, trackVoiceLeave, boo
 const { handleStarboardReaction, setStarboardChannel: _setStarboard } = require('./GameSystem/StarboardSystem.js');
 const { setAuditChannel, logMessageDelete, logVoiceChange, logMemberChange, logGuildChange } = require('./GameSystem/AuditSystem.js');
 const { setTranslationOutput, toggleTranslationSource, handleTranslationMessage } = require('./GameSystem/TranslationSystem.js');
+const { localizeInteraction } = require('./GameSystem/LanguageSystem.js');
 const { restoreFromBackupChannel } = require('./GameSystem/PacksAndData.js');
 
 const SUPER_ADMIN_ID = '1330463890122735642';
@@ -315,6 +316,7 @@ async function announceCurrentRateUps(botClient) {
 // ─── 處理斜線指令 (InteractionCreate) ─────────────────────────
 client.on(Events.InteractionCreate, async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
+    localizeInteraction(interaction);
 
     // setchannel 在這裡處理（需要 saveConfig）
     if (interaction.commandName === 'setchannel') {
