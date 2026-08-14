@@ -64,6 +64,447 @@ const { setTranslationOutput, toggleTranslationSource, handleTranslationMessage 
 const { localizeInteraction } = require('./GameSystem/LanguageSystem.js');
 const { restoreFromBackupChannel } = require('./GameSystem/PacksAndData.js');
 
+// ─────────────────────────────────────────────
+// Discord 伺服器設定儲存
+// 不使用玩家資料。
+// 會把設定存到指定的私人 Discord 頻道。
+// Bot 重啟 / 更新後會重新掃描並恢復。
+// ─────────────────────────────────────────────
+
+const SERVER_CONFIG_MARKER = 'ANGELA_SERVER_CONFIG_V1';
+
+const serverConfigCache = new Map();
+
+function getServerConfig(guildId) {
+    return serverConfigCache.get(guildId) || {
+        storageChannelId: '',
+        notifyChannelId: '',
+        rateUpChannelId: '',
+        newsChannelId: '',
+        levelChannelId: '',
+        announceChannelId: '',
+        starboardChannelId: '',
+        auditChannelId: '',
+        translationOutputChannelId: '',
+        translationSourceChannelIds: []
+    };
+}
+
+function setServerConfig(guildId, patch = {}) {
+    const current = getServerConfig(guildId);
+
+    const updated = {
+        ...current,
+        ...patch
+    };
+
+    if (!Array.isArray(updated.translationSourceChannelIds)) {
+        updated.translationSourceChannelIds = [];
+    }
+
+    serverConfigCache.set(
+        guildId,
+        updated
+    );
+
+    return updated;
+}
+
+async function findServerConfigMessage(channel, guildId) {
+    if (!channel?.isTextBased?.()) {
+        return null;
+    }
+
+    let before = null;
+
+    for (let page = 0; page < 10; page++) {
+        const options = {
+            limit: 100
+        };
+
+        if (before) {
+            options.before = before;
+        }
+
+        const messages =
+            await channel.messages
+                .fetch(options)
+                .catch(() => null);
+
+        if (!messages?.size) {
+            break;
+        }
+
+        for (const message of messages.values()) {
+            if (!message.author?.bot) {
+                continue;
+            }
+
+            const embed = message.embeds?.[0];
+
+            if (
+                embed?.footer?.text !==
+                SERVER_CONFIG_MARKER
+            ) {
+                continue;
+            }
+
+            const field =
+                embed.fields?.find(
+                    f => f.name === 'Guild ID'
+                );
+
+            if (!field) {
+                continue;
+            }
+
+            const storedGuildId =
+                field.value
+                    .replace(/`/g, '')
+                    .trim();
+
+            if (
+                storedGuildId ===
+                String(guildId)
+            ) {
+                return message;
+            }
+        }
+
+        const oldest = messages.last();
+
+        if (!oldest) {
+            break;
+        }
+
+        before = oldest.id;
+
+        if (messages.size < 100) {
+            break;
+        }
+    }
+
+    return null;
+}
+
+async function saveServerConfigToDiscord(client, guildId) {
+    const config = getServerConfig(guildId);
+
+    if (!config.storageChannelId) {
+        console.log(
+            `[ServerConfig] Guild ${guildId} 尚未設定儲存頻道`
+        );
+        return false;
+    }
+
+    const channel =
+        await client.channels
+            .fetch(config.storageChannelId)
+            .catch(() => null);
+
+    if (!channel?.isTextBased?.()) {
+        console.error(
+            `[ServerConfig] 儲存頻道無法取得: ${config.storageChannelId}`
+        );
+        return false;
+    }
+
+    const payload = {
+        marker: SERVER_CONFIG_MARKER,
+        version: 1,
+        guildId: String(guildId),
+        updatedAt: new Date().toISOString(),
+        config
+    };
+
+    const content =
+        '```json\n' +
+        JSON.stringify(
+            payload,
+            null,
+            2
+        ) +
+        '\n```';
+
+    const embed =
+        new EmbedBuilder()
+            .setColor(0x5865f2)
+            .setTitle('🔒 Angela Server Configuration')
+            .setDescription(
+                'Angela 伺服器設定資料。\n' +
+                '請勿手動修改此訊息。Bot 更新後會自動掃描恢復。'
+            )
+            .addFields({
+                name: 'Guild ID',
+                value: `\`${guildId}\``,
+                inline: false
+            })
+            .setFooter({
+                text: SERVER_CONFIG_MARKER
+            })
+            .setTimestamp();
+
+    let message =
+        await findServerConfigMessage(
+            channel,
+            guildId
+        );
+
+    if (message) {
+        await message.edit({
+            content,
+            embeds: [embed],
+            allowedMentions: {
+                parse: []
+            }
+        });
+
+        console.log(
+            `[ServerConfig] ♻️ ${guildId} 設定已更新`
+        );
+
+        return true;
+    }
+
+    await channel.send({
+        content,
+        embeds: [embed],
+        allowedMentions: {
+            parse: []
+        }
+    });
+
+    console.log(
+        `[ServerConfig] 💾 ${guildId} 設定已寫入 Discord`
+    );
+
+    return true;
+}
+
+async function restoreServerConfigs(client) {
+    console.log(
+        '[ServerConfig] 🔍 開始掃描 Discord 儲存設定...'
+    );
+
+    for (
+        const guild of client.guilds.cache.values()
+    ) {
+        let channels;
+
+        try {
+            channels =
+                await guild.channels.fetch();
+        } catch (err) {
+            console.error(
+                `[ServerConfig] ${guild.name} 頻道掃描失敗:`,
+                err.message
+            );
+            continue;
+        }
+
+        let restored = false;
+
+        for (
+            const channel of channels.values()
+        ) {
+            if (
+                !channel ||
+                !channel.isTextBased?.()
+            ) {
+                continue;
+            }
+
+            const message =
+                await findServerConfigMessage(
+                    channel,
+                    guild.id
+                );
+
+            if (!message) {
+                continue;
+            }
+
+            const match =
+                String(message.content || '')
+                    .match(
+                        /```json\s*([\s\S]*?)\s*```/i
+                    );
+
+            if (!match) {
+                continue;
+            }
+
+            try {
+                const payload =
+                    JSON.parse(match[1]);
+
+                if (
+                    payload.marker !==
+                    SERVER_CONFIG_MARKER
+                ) {
+                    continue;
+                }
+
+                if (
+                    String(payload.guildId) !==
+                    String(guild.id)
+                ) {
+                    continue;
+                }
+
+                const config = {
+                    ...payload.config,
+                    storageChannelId:
+                        channel.id
+                };
+
+                setServerConfig(
+                    guild.id,
+                    config
+                );
+
+                console.log(
+                    `[ServerConfig] ✅ ${guild.name} 設定已恢復`
+                );
+
+                // ─────────────────────────
+                // 同步回目前各模組的設定檔
+                // 這樣不用改其他模組。
+                // ─────────────────────────
+
+                if (config.notifyChannelId) {
+                    saveConfig({
+                        notifyChannelId:
+                            config.notifyChannelId
+                    });
+                }
+
+                if (config.rateUpChannelId) {
+                    saveConfig({
+                        rateUpChannelId:
+                            config.rateUpChannelId
+                    });
+                }
+
+                if (config.newsChannelId) {
+                    saveConfig({
+                        newsChannelId:
+                            config.newsChannelId
+                    });
+                }
+
+                if (config.levelChannelId) {
+                    const {
+                        setLevelChannel
+                    } = require(
+                        './GameSystem/LevelSystem.js'
+                    );
+
+                    setLevelChannel(
+                        guild.id,
+                        config.levelChannelId
+                    );
+                }
+
+                if (config.announceChannelId) {
+                    const {
+                        setAnnounceChannel
+                    } = require(
+                        './GameSystem/AnnounceSystem.js'
+                    );
+
+                    setAnnounceChannel(
+                        guild.id,
+                        config.announceChannelId
+                    );
+                }
+
+                if (config.starboardChannelId) {
+                    _setStarboard(
+                        guild.id,
+                        config.starboardChannelId
+                    );
+                }
+
+                if (config.auditChannelId) {
+                    setAuditChannel(
+                        guild.id,
+                        config.auditChannelId
+                    );
+                }
+
+                if (
+                    config.translationOutputChannelId
+                ) {
+                    setTranslationOutput(
+                        guild.id,
+                        config.translationOutputChannelId
+                    );
+                }
+
+                if (
+                    Array.isArray(
+                        config.translationSourceChannelIds
+                    )
+                ) {
+                    for (
+                        const sourceId
+                        of config.translationSourceChannelIds
+                    ) {
+                        const {
+                            getTranslationConfig
+                        } = require(
+                            './GameSystem/TranslationSystem.js'
+                        );
+
+                        const current =
+                            getTranslationConfig(
+                                guild.id
+                            );
+
+                        const sources =
+                            Array.isArray(
+                                current.sources
+                            )
+                                ? current.sources
+                                : [];
+
+                        if (
+                            !sources.includes(
+                                sourceId
+                            )
+                        ) {
+                            toggleTranslationSource(
+                                guild.id,
+                                sourceId
+                            );
+                        }
+                    }
+                }
+
+                restored = true;
+                break;
+
+            } catch (err) {
+                console.error(
+                    `[ServerConfig] ${guild.name} 設定解析失敗:`,
+                    err.message
+                );
+            }
+        }
+
+        if (!restored) {
+            console.log(
+                `[ServerConfig] ${guild.name} 沒找到已儲存設定`
+            );
+        }
+    }
+
+    console.log(
+        '[ServerConfig] ✅ Discord 設定掃描完成'
+    );
+}
+
 const SUPER_ADMIN_ID = '1330463890122735642';
 const PORT = process.env.PORT || 3000;
 
