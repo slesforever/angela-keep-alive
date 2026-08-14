@@ -468,6 +468,68 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     // setchannel 在這裡處理（需要 saveConfig）
     if (interaction.commandName === 'setchannel') {
+        // ─────────────────────────────────────────────
+// /announce
+// Sles 專屬 → 開啟多行公告 Modal
+// ─────────────────────────────────────────────
+
+if (
+    interaction.commandName ===
+    'announce'
+) {
+    const isSles =
+        interaction.user.id ===
+        SUPER_ADMIN_ID;
+
+    if (!isSles) {
+        return interaction.reply({
+            content:
+                '❌ 只有 Angela 系統最高主管可以使用公告功能。',
+            flags:
+                MessageFlags.Ephemeral
+        });
+    }
+
+    const modal =
+        new ModalBuilder()
+            .setCustomId(
+                'announce_modal'
+            )
+            .setTitle(
+                '📢 Angela 系統公告'
+            );
+
+    const announcementInput =
+        new TextInputBuilder()
+            .setCustomId(
+                'announce_content'
+            )
+            .setLabel(
+                '公告內容'
+            )
+            .setStyle(
+                TextInputStyle.Paragraph
+            )
+            .setPlaceholder(
+                '在這裡輸入公告內容，可以直接換行……'
+            )
+            .setRequired(true)
+            .setMaxLength(4000);
+
+    const row =
+        new ActionRowBuilder()
+            .addComponents(
+                announcementInput
+            );
+
+    modal.addComponents(
+        row
+    );
+
+    return interaction.showModal(
+        modal
+    );
+}
         const isGuildAdmin = interaction.memberPermissions?.has(PermissionFlagsBits.Administrator);
         if (!isGuildAdmin) {
             return interaction.reply({ content: '❌ 此指令僅限伺服器管理員使用。', flags: MessageFlags.Ephemeral });
