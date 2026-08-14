@@ -9,8 +9,9 @@ const PullSystem      = require('./GameSystem/Pulls/PullSystem.js');
 const CharacterSystem = require('./GameSystem/CharacterSystem.js');
 const PartySystem     = require('./GameSystem/PartySystem.js');
 const BattleSystem    = require('./GameSystem/BattleSystem.js');
-const { handleGamble }       = require('./GameSystem/GamblingSystem.js');
+const { handleGamble, handleSc, giveStarCoins } = require('./GameSystem/GamblingSystem.js');
 const { handleRank, handleLeaderboard, setLevelChannel } = require('./GameSystem/LevelSystem.js');
+const { getLanguage, setLanguage, languageName } = require('./GameSystem/LanguageSystem.js');
 const { broadcastAnnouncement, setAnnounceChannel } = require('./GameSystem/AnnounceSystem.js');
 const { handleGiveAllPlayers, handleGiveSinglePlayer } = require('./GameSystem/GiveAwaySystem.js');
 const { checkSteamUpdates, checkTwitterUpdates, checkYouTubeUpdates } = require('./Newscheck.js');
@@ -142,9 +143,17 @@ async function handleSlashCommands(client, interaction) {
             return handleRank(client, interaction);
         }
 
-        // ─── 賭博 ────────────────────────────────────────────────
+        // ─── Starcoins 經濟 ──────────────────────────────────────
+        if (commandName === 'sc') {
+            return handleSc(client, interaction);
+        }
         if (commandName === 'gamble') {
             return handleGamble(client, interaction);
+        }
+
+        if (commandName === 'language') {
+            const language = setLanguage(uid, interaction.options.getString('language'));
+            return interaction.reply({ content: language === 'en' ? '✅ Language set to English.' : '✅ 語言已設定為繁體中文。', ephemeral: true });
         }
 
         // ─── 娛樂：男同/女同指數 ─────────────────────────────────
@@ -265,6 +274,22 @@ async function handleSlashCommands(client, interaction) {
         }
 
         // ─── Sles 專屬特權指令 ────────────────────────────────────
+        if (commandName === 'givestarcoins' || commandName === 'takelightseeds') {
+            if (uid !== SUPER_ADMIN_ID) return interaction.reply({ content: '⛔ 此指令僅限 Sles 使用。', flags: MessageFlags.Ephemeral });
+            const amount = interaction.options.getInteger('amount');
+            const target = interaction.options.getUser('target');
+            if (!target || !amount || amount <= 0) return interaction.reply({ content: '❌ 請提供目標玩家和有效數量。', flags: MessageFlags.Ephemeral });
+            const player = PacksAndData.getOrCreatePlayer(null, target.id, target.username);
+            if (commandName === 'givestarcoins') {
+                giveStarCoins(target.id, amount, target.username);
+                return interaction.reply({ content: `✅ 已給 <@${target.id}> 🌟 **${amount.toLocaleString()} Starcoins**。` });
+            }
+            const before = Number(player.lightSeeds) || 0;
+            player.lightSeeds = Math.max(0, before - amount);
+            PacksAndData.savePlayerData(null, target.id, player);
+            return interaction.reply({ content: `✅ 已從 <@${target.id}> 扣除 🌱 **${Math.min(before, amount).toLocaleString()} LightSeeds**。目前餘額：🌱 **${player.lightSeeds.toLocaleString()}**。` });
+        }
+
         if (['givelightseeds', 'givefragments', 'givescrolls', 'givethreads', 'updaterewards', 'updatebuff'].includes(commandName)) {
             if (uid !== SUPER_ADMIN_ID) {
                 return interaction.reply({
