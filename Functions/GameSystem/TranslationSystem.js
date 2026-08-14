@@ -45,7 +45,7 @@ async function handleTranslationMessage(client, message) {
     const config = getTranslationConfig(message.guild.id);
     const targetId = config.output;
     const sources = Array.isArray(config.sources) ? config.sources : [];
-    if (!targetId || targetId === message.channel.id || (sources.length && !sources.includes(message.channel.id))) return;
+    if (!targetId || targetId === message.channel.id || !sources.includes(message.channel.id)) return;
     const text = message.content || '';
     const attachmentLines = [...(message.attachments?.values?.() || [])].map(a => a.url).join('\n');
     if (!text.trim() && !attachmentLines) return;
