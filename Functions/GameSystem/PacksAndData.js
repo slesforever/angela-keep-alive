@@ -331,6 +331,9 @@ function defaultPlayer(username) {
     return {
         username,
         lightSeeds:     1300,
+        starCoins:      0,
+        bankStarCoins:  0,
+        bankLastInterestAt: Date.now(),
         identities:     [...base],
         egos:           [],
         team:           [...base].slice(0, 4),
@@ -393,6 +396,10 @@ function getOrCreatePlayer(client, userId, username) {
         delete p.lunacy;
     }
     p.lightSeeds     ??= 1300;
+    p.starCoins      ??= p.starcoins ?? 0;
+    p.bankStarCoins  ??= 0;
+    p.bankLastInterestAt ??= Date.now();
+    delete p.starcoins;
     p.xp             ??= 0;
     if (!p.identities.length) {
         const pool = getIdData().pool || {};
@@ -428,6 +435,8 @@ function lobbyEmbed(player) {
             { name: '⭐ 等級',     value: `Lv.${player.level}`, inline: true },
             { name: '🎰 提取次數', value: `${player.totalPulls || 0} 次`, inline: true },
             { name: '🌱 LightSeeds', value: `${player.lightSeeds}`, inline: true },
+            { name: '🌟 Starcoins', value: `${player.starCoins || 0}`, inline: true },
+            { name: '🏦 銀行 Starcoins', value: `${player.bankStarCoins || 0}`, inline: true },
             { name: '🧵 紡錘',     value: `${player.thread}`, inline: true },
             { name: '\u200b',      value: '\u200b', inline: true },
             { name: '📦 人格碎片', value: `${player.fragments}`, inline: true },
