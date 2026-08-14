@@ -15,11 +15,15 @@ function pick(language, zh, en) { return language === 'en' ? en : zh; }
 async function translateText(text) {
     const value = String(text ?? '');
     if (!value.trim() || value.length > 1500) return value;
-    const base = process.env.TRANSLATE_API_URL || 'https://api.mymemory.translated.net/get';
     try {
-        const response = await fetch(`${base}?q=${encodeURIComponent(value)}&langpair=zh-TW|en`, { headers: { Accept: 'application/json' } });
-        const data = await response.json();
-        return data?.responseData?.translatedText || value;
+        const gRes = await fetch(
+            `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=en&dt=t&q=${encodeURIComponent(value)}`,
+            { headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' } }
+        );
+        const gData = await gRes.json();
+        const segments = Array.isArray(gData?.[0]) ? gData[0] : [];
+        const out = segments.map(s => (Array.isArray(s) ? s[0] : '')).join('');
+        return out.trim() ? out : value;
     } catch { return value; }
 }
 
