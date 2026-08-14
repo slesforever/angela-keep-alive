@@ -28,17 +28,21 @@ function getTranslationChannel(guildId) { return getTranslationConfig(guildId).o
 async function translate(text, target) {
     const clean = String(text || '').trim().slice(0, 1500);
     if (!clean) return '（無文字內容）';
-    const base = process.env.TRANSLATE_API_URL || 'https://api.mymemory.translated.net/get';
-    const url = `${base}?q=${encodeURIComponent(clean)}&langpair=auto|${encodeURIComponent(target)}`;
     try {
-        const response = await fetch(url, { headers: { Accept: 'application/json' } });
-        const data = await response.json();
-        return data?.responseData?.translatedText || clean;
+        const gRes = await fetch(
+            `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${encodeURIComponent(target)}&dt=t&q=${encodeURIComponent(clean)}`,
+            { headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' } }
+        );
+        const gData = await gRes.json();
+        const segments = Array.isArray(gData?.[0]) ? gData[0] : [];
+        const out = segments.map(s => (Array.isArray(s) ? s[0] : '')).join('');
+        return out.trim() ? out : clean;
     } catch (err) {
-        console.error('[Translation] 翻譯失敗:', err.message);
+        console.error('[Translation] Google 翻譯失敗:', err.message);
         return clean;
     }
 }
+
 
 async function handleTranslationMessage(client, message) {
     if (!message?.guild || message.author?.bot || message.webhookId) return;
