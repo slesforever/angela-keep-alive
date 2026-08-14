@@ -808,9 +808,9 @@ function buildListPages() {
     }
     return pages;
 }
-
-function renderPage(pages, idx) {
+function renderPage(pages, idx, userId) {
     const p = pages[idx];
+    const lang = userId ? getLanguage(userId) : 'zh';
     const foot = `分頁 ${idx + 1}/${pages.length}`;
 
     if (p.type === 'summary') {
@@ -825,8 +825,8 @@ function renderPage(pages, idx) {
     const lines = p.chunk.map(name => {
         const isUp = p.upList.includes(name);
         const pct = ((base * (isUp ? RATE_UP_MULT : 1) / p.totalW) * 100).toFixed(4);
-        const displayName = getListDisplayName(name);
-        return `${isUp ? '🔼' : '•'} **${displayName}** \`${pct}%\``;
+        const displayName = getListDisplayName(name, lang);
+        return `${isUp ? '📌' : '•'} **${displayName}** \`${pct}%\``;
     });
 
     return new EmbedBuilder()
@@ -835,7 +835,6 @@ function renderPage(pages, idx) {
         .setDescription(`### ${RARITY_LABEL[p.r]} (${p.ci + 1}/${p.ct})\n共 ${p.total} 件 ｜ 總機率 \`${(base * 100).toFixed(4)}%\`\n\n${lines.join('\n')}`)
         .setFooter({ text: foot });
 }
-
 async function showList(message) {
     const pages = buildListPages();
     let idx = 0;
