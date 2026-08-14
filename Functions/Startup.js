@@ -10,7 +10,11 @@ const {
     PermissionFlagsBits,
     ChannelType,
     MessageFlags,
-    Collection
+    Collection,
+    ModalBuilder,
+    TextInputBuilder,
+    TextInputStyle,
+    ActionRowBuilder
 } = require('discord.js');
 const express = require('express');
 const fs      = require('fs');
