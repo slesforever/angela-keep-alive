@@ -10,6 +10,16 @@ function readConfig() { try { return fs.existsSync(CONFIG_PATH) ? JSON.parse(fs.
 function writeConfig(data) { fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true }); fs.writeFileSync(CONFIG_PATH, JSON.stringify(data, null, 2), 'utf8'); }
 function setTranslationChannel(guildId, channelId) { const c = readConfig(); c[guildId] = { ...(typeof c[guildId] === 'object' ? c[guildId] : {}), output: channelId }; writeConfig(c); }
 function setTranslationOutput(guildId, channelId) { setTranslationChannel(guildId, channelId); }
+function setTranslationConfig(guildId, config = {}) {
+    const c = readConfig();
+    c[guildId] = {
+        output: config.output ? String(config.output) : null,
+        sources: Array.isArray(config.sources)
+            ? [...new Set(config.sources.filter(Boolean).map(String))]
+            : []
+    };
+    writeConfig(c);
+}
 function toggleTranslationSource(guildId, channelId) {
     const c = readConfig();
     const entry = typeof c[guildId] === 'object' ? c[guildId] : { output: c[guildId] || null };
@@ -69,4 +79,4 @@ async function handleTranslationMessage(client, message) {
     await target.send({ embeds: [embed] }).catch(err => console.error('[Translation] 發送失敗:', err.message));
 }
 
-module.exports = { setTranslationChannel, setTranslationOutput, toggleTranslationSource, getTranslationConfig, getTranslationChannel, handleTranslationMessage };
+module.exports = { setTranslationChannel, setTranslationOutput, setTranslationConfig, toggleTranslationSource, getTranslationConfig, getTranslationChannel, handleTranslationMessage };

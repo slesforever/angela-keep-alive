@@ -55,14 +55,20 @@ function saveConfig(newConfig) {
 }
 
 const identitiesData             = require('./GameSystem/Pulls/identitiesData.js');
-const { startNewsCheckLoop }     = require('./Newscheck.js');
+const { startNewsCheckLoop, setNotifyChannel } = require('./Newscheck.js');
 const { handleCommands }         = require('./Commanders.js');
 const { handleMessageXp, startVoiceXpTimer, trackVoiceJoin, trackVoiceLeave, bootstrapVoiceTracking } = require('./GameSystem/LevelSystem.js');
 const { handleStarboardReaction, setStarboardChannel: _setStarboard } = require('./GameSystem/StarboardSystem.js');
 const { setAuditChannel, logMessageDelete, logVoiceChange, logMemberChange, logGuildChange } = require('./GameSystem/AuditSystem.js');
-const { setTranslationOutput, toggleTranslationSource, handleTranslationMessage } = require('./GameSystem/TranslationSystem.js');
+const { setTranslationOutput, setTranslationConfig, toggleTranslationSource, getTranslationConfig, handleTranslationMessage } = require('./GameSystem/TranslationSystem.js');
 const { localizeInteraction } = require('./GameSystem/LanguageSystem.js');
 const { restoreFromBackupChannel } = require('./GameSystem/PacksAndData.js');
+const {
+    getGuildConfig,
+    saveGuildConfigToDiscord,
+    restoreAllGuildConfigs,
+    setStorageChannel
+} = require('./GameSystem/ServerConfigStorage.js');
 
 const SUPER_ADMIN_ID = '1330463890122735642';
 const PORT = process.env.PORT || 3000;
@@ -193,6 +199,21 @@ const allSlashCommands = [
                 .setRequired(true)),
 
     new SlashCommandBuilder()
+        .setName('setstoragechannel')
+        .setDescription('【伺服器管理員】設定 Angela 設定資料的永久儲存頻道')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .addChannelOption(option =>
+            option.setName('target_channel')
+                .setDescription('選擇一個只有管理員與 Angela 可見的文字頻道')
+                .addChannelTypes(ChannelType.GuildText)
+                .setRequired(true)),
+
+    new SlashCommandBuilder()
+        .setName('serverconfig')
+        .setDescription('【伺服器管理員】查看 Angela 目前儲存的頻道設定')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+    new SlashCommandBuilder()
         .setName('leaderboard')
         .setDescription('查看等級排行榜 TOP 10'),
 
@@ -318,6 +339,72 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
     localizeInteraction(interaction);
 
+    if (interaction.commandName === 'setstoragechannel') {
+        const isGuildAdmin = interaction.memberPermissions?.has(PermissionFlagsBits.Administrator);
+        if (!isGuildAdmin) {
+            return interaction.reply({ content: '❌ 此指令僅限伺服器管理員使用。', flags: MessageFlags.Ephemeral });
+        }
+
+        const targetChannel = interaction.options.getChannel('target_channel');
+        const saved = await setStorageChannel(client, interaction.guild, targetChannel.id);
+        if (!saved) {
+            return interaction.reply({
+                content: '❌ 設定頻道失敗。請確認 Angela 能查看、讀取歷史訊息、發送訊息與嵌入連結。',
+                flags: MessageFlags.Ephemeral
+            });
+        }
+
+        // 將舊版本機設定一併搬進 Discord，避免第一次啟用儲存頻道時遺失既有設定。
+        const legacy = getConfig();
+        const { getLevelChannel } = require('./GameSystem/LevelSystem.js');
+        const { getAnnounceConfig } = require('./GameSystem/AnnounceSystem.js');
+        const { getStarboardChannel } = require('./GameSystem/StarboardSystem.js');
+        const { getAuditChannel } = require('./GameSystem/AuditSystem.js');
+        const translation = getTranslationConfig(interaction.guild.id);
+        const legacyPatch = {
+            notifyChannelId: legacy.notifyChannelId || '',
+            rateUpChannelId: legacy.rateUpChannelId || '',
+            newsChannelId: legacy.newsChannelId || '',
+            levelChannelId: getLevelChannel(interaction.guild.id) || '',
+            announceChannelId: getAnnounceConfig()[interaction.guild.id] || '',
+            starboardChannelId: getStarboardChannel(interaction.guild.id) || '',
+            auditChannelId: getAuditChannel(interaction.guild.id) || '',
+            translationOutputChannelId: translation.output || '',
+            translationSourceChannelIds: translation.sources || []
+        };
+        await saveGuildConfigToDiscord(client, interaction.guild.id, legacyPatch);
+
+        return interaction.reply({
+            content: `✅ 設定儲存頻道為 ${targetChannel}。之後頻道設定會寫入 Discord，重啟後會自動恢復。`,
+            flags: MessageFlags.Ephemeral
+        });
+    }
+
+    if (interaction.commandName === 'serverconfig') {
+        const config = getGuildConfig(interaction.guild?.id);
+        const channel = id => id ? `<#${id}>` : '未設定';
+        const sourceChannels = config.translationSourceChannelIds.length
+            ? config.translationSourceChannelIds.map(id => `<#${id}>`).join(', ')
+            : '未設定';
+
+        return interaction.reply({
+            content: [
+                '**Angela 伺服器頻道設定**',
+                `儲存頻道：${channel(config.storageChannelId)}`,
+                `系統上線：${channel(config.notifyChannelId)}`,
+                `Rate Up 公告：${channel(config.rateUpChannelId)}`,
+                `新聞動態：${channel(config.newsChannelId)}`,
+                `升級公告：${channel(config.levelChannelId)}`,
+                `Sles 公告：${channel(config.announceChannelId)}`,
+                `星星榜：${channel(config.starboardChannelId)}`,
+                `紀錄：${channel(config.auditChannelId)}`,
+                `翻譯輸出：${channel(config.translationOutputChannelId)}`,
+                `翻譯來源：${sourceChannels}`
+            ].join('\n'),
+            flags: MessageFlags.Ephemeral
+        });
+    }
+
     // setchannel 在這裡處理（需要 saveConfig）
     if (interaction.commandName === 'setchannel') {
         const isGuildAdmin = interaction.memberPermissions?.has(PermissionFlagsBits.Administrator);
@@ -332,39 +419,53 @@ client.on(Events.InteractionCreate, async (interaction) => {
             news:   { key: 'newsChannelId',   label: '新聞與社群動態頻道' },
         };
         if (configTypeMap[type]) {
-            saveConfig({ [configTypeMap[type].key]: targetChannel.id });
-            return interaction.reply({ content: `「主管，${configTypeMap[type].label}已重定向至 ${targetChannel}。」`, flags: MessageFlags.Ephemeral });
+            const patch = { [configTypeMap[type].key]: targetChannel.id };
+            saveConfig(patch);
+            const persisted = await saveGuildConfigToDiscord(client, interaction.guild.id, patch);
+            return interaction.reply({
+                content: `「主管，${configTypeMap[type].label}已重定向至 ${targetChannel}。」${persisted ? '' : '（提醒：尚未設定 Discord 儲存頻道，請先使用 /setstoragechannel。）'}`,
+                flags: MessageFlags.Ephemeral
+            });
         }
         const { setLevelChannel: _setLvCh } = require('./GameSystem/LevelSystem.js');
         const { setAnnounceChannel: _setAnnCh } = require('./GameSystem/AnnounceSystem.js');
         if (type === 'level') {
             _setLvCh(interaction.guild.id, targetChannel.id);
-            return interaction.reply({ content: `✅ 升級公告頻道已設定至 ${targetChannel}。`, flags: MessageFlags.Ephemeral });
+            const persisted = await saveGuildConfigToDiscord(client, interaction.guild.id, { levelChannelId: targetChannel.id });
+            return interaction.reply({ content: `✅ 升級公告頻道已設定至 ${targetChannel}。${persisted ? '' : '（請先使用 /setstoragechannel 才能跨重啟保存。）'}`, flags: MessageFlags.Ephemeral });
         }
         if (type === 'announce') {
             _setAnnCh(interaction.guild.id, targetChannel.id);
-            return interaction.reply({ content: `✅ Sles 公告接收頻道已設定至 ${targetChannel}。`, flags: MessageFlags.Ephemeral });
+            const persisted = await saveGuildConfigToDiscord(client, interaction.guild.id, { announceChannelId: targetChannel.id });
+            return interaction.reply({ content: `✅ Sles 公告接收頻道已設定至 ${targetChannel}。${persisted ? '' : '（請先使用 /setstoragechannel 才能跨重啟保存。）'}`, flags: MessageFlags.Ephemeral });
         }
         if (type === 'starboard') {
             _setStarboard(interaction.guild.id, targetChannel.id);
-            return interaction.reply({ content: `✅ 星星榜頻道已設定至 ${targetChannel}。達到 3 顆 ⭐ 的訊息將自動轉發。`, flags: MessageFlags.Ephemeral });
+            const persisted = await saveGuildConfigToDiscord(client, interaction.guild.id, { starboardChannelId: targetChannel.id });
+            return interaction.reply({ content: `✅ 星星榜頻道已設定至 ${targetChannel}。達到 3 顆 ⭐ 的訊息將自動轉發。${persisted ? '' : '（請先使用 /setstoragechannel 才能跨重啟保存。）'}`, flags: MessageFlags.Ephemeral });
         }
         if (type === 'audit') {
             setAuditChannel(interaction.guild.id, targetChannel.id);
-            return interaction.reply({ content: `✅ 紀錄頻道已設定至 ${targetChannel}。`, flags: MessageFlags.Ephemeral });
+            const persisted = await saveGuildConfigToDiscord(client, interaction.guild.id, { auditChannelId: targetChannel.id });
+            return interaction.reply({ content: `✅ 紀錄頻道已設定至 ${targetChannel}。${persisted ? '' : '（請先使用 /setstoragechannel 才能跨重啟保存。）'}`, flags: MessageFlags.Ephemeral });
         }
         if (type === 'translate-output') {
             setTranslationOutput(interaction.guild.id, targetChannel.id);
-            return interaction.reply({ content: `✅ 翻譯輸出頻道已設定為 ${targetChannel}。`, flags: MessageFlags.Ephemeral });
+            const persisted = await saveGuildConfigToDiscord(client, interaction.guild.id, { translationOutputChannelId: targetChannel.id });
+            return interaction.reply({ content: `✅ 翻譯輸出頻道已設定為 ${targetChannel}。${persisted ? '' : '（請先使用 /setstoragechannel 才能跨重啟保存。）'}`, flags: MessageFlags.Ephemeral });
         }
         if (type === 'translate-source') {
             const enabled = toggleTranslationSource(interaction.guild.id, targetChannel.id);
-            return interaction.reply({ content: `✅ 已${enabled ? '加入' : '移除'}翻譯來源頻道：${targetChannel}。`, flags: MessageFlags.Ephemeral });
+            const translationConfig = getTranslationConfig(interaction.guild.id);
+            const persisted = await saveGuildConfigToDiscord(client, interaction.guild.id, {
+                translationSourceChannelIds: translationConfig.sources
+            });
+            return interaction.reply({ content: `✅ 已${enabled ? '加入' : '移除'}翻譯來源頻道：${targetChannel}。${persisted ? '' : '（請先使用 /setstoragechannel 才能跨重啟保存。）'}`, flags: MessageFlags.Ephemeral });
         }
     }
 
     try {
-        const adminCommands = ['setchannel', 'setlevelchannel', 'setannouncechannel', 'givelightseeds', 'givestarcoins', 'takelightseeds', 'givefragments', 'givescrolls', 'givethreads', 'updaterewards', 'updatebuff', 'announce'];
+        const adminCommands = ['setchannel', 'setstoragechannel', 'serverconfig', 'setlevelchannel', 'setannouncechannel', 'givelightseeds', 'givestarcoins', 'takelightseeds', 'givefragments', 'givescrolls', 'givethreads', 'updaterewards', 'updatebuff', 'announce'];
         if (interaction.guild && adminCommands.includes(interaction.commandName)) {
             const { logAudit } = require('./GameSystem/AuditSystem.js');
             logAudit(client, interaction.guild.id, '🛡️ 管理操作', `<@${interaction.user.id}> 執行 /${interaction.commandName}`, { color: 0xfee75c }).catch(() => {});
@@ -450,6 +551,45 @@ client.once(Events.ClientReady, async () => {
         status: 'idle',
         activities: [{ name: 'customstatus', type: ActivityType.Custom, state: '羅蘭。我不能在這裡停下。哪怕這是一條沒有盡頭的荊棘之路，哪怕最後只能迎來毫無意義的毀滅……我也要親手為這長達百年的悲劇畫上句號' }],
     });
+
+    // Discord 儲存頻道是頻道設定的來源；本機 JSON 只保留相容快取。
+    try {
+        await restoreAllGuildConfigs(client);
+
+        const {
+            setLevelChannel,
+        } = require('./GameSystem/LevelSystem.js');
+        const {
+            setAnnounceChannel,
+        } = require('./GameSystem/AnnounceSystem.js');
+
+        for (const guild of client.guilds.cache.values()) {
+            const stored = getGuildConfig(guild.id);
+            const localPatch = {};
+
+            if (stored.notifyChannelId) {
+                localPatch.notifyChannelId = stored.notifyChannelId;
+                setNotifyChannel(stored.notifyChannelId);
+            }
+            if (stored.rateUpChannelId) localPatch.rateUpChannelId = stored.rateUpChannelId;
+            if (stored.newsChannelId) localPatch.newsChannelId = stored.newsChannelId;
+            if (Object.keys(localPatch).length) saveConfig(localPatch);
+
+            if (stored.levelChannelId) setLevelChannel(guild.id, stored.levelChannelId);
+            if (stored.announceChannelId) setAnnounceChannel(guild.id, stored.announceChannelId);
+            if (stored.starboardChannelId) _setStarboard(guild.id, stored.starboardChannelId);
+            if (stored.auditChannelId) setAuditChannel(guild.id, stored.auditChannelId);
+
+            if (stored.translationOutputChannelId || stored.translationSourceChannelIds.length) {
+                setTranslationConfig(guild.id, {
+                    output: stored.translationOutputChannelId,
+                    sources: stored.translationSourceChannelIds
+                });
+            }
+        }
+    } catch (err) {
+        console.error('[Startup] Discord 伺服器設定還原失敗:', err.message);
+    }
 
     const config = getConfig();
     if (config.notifyChannelId) {

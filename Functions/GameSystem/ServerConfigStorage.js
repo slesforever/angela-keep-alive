@@ -14,6 +14,8 @@ const {
     EmbedBuilder,
     PermissionFlagsBits
 } = require('discord.js');
+const fs = require('fs');
+const path = require('path');
 
 const STORAGE_MARKER = 'ANGELA_SERVER_CONFIG_V1';
 const STORAGE_TITLE = '🔒 Angela Server Configuration';
@@ -27,6 +29,39 @@ const STORAGE_TITLE = '🔒 Angela Server Configuration';
 // ─────────────────────────────────────────────
 
 const serverConfigs = new Map();
+const KNOWN_STORAGE_PATH = process.env.ANGELA_STORAGE_CHANNELS_PATH ||
+    path.join(process.cwd(), 'data', 'server-storage-channels.json');
+
+function loadKnownStorageChannels() {
+    try {
+        if (!fs.existsSync(KNOWN_STORAGE_PATH)) return {};
+        const parsed = JSON.parse(fs.readFileSync(KNOWN_STORAGE_PATH, 'utf8'));
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (err) {
+        console.warn('[ServerConfig] 讀取儲存頻道索引失敗:', err.message);
+        return {};
+    }
+}
+
+function rememberStorageChannel(guildId, channelId) {
+    if (!guildId || !channelId) return;
+
+    try {
+        const known = loadKnownStorageChannels();
+        known[String(guildId)] = String(channelId);
+        fs.mkdirSync(path.dirname(KNOWN_STORAGE_PATH), { recursive: true });
+        fs.writeFileSync(KNOWN_STORAGE_PATH, JSON.stringify(known, null, 2), 'utf8');
+    } catch (err) {
+        // Discord discovery below is the durable fallback when the host filesystem is ephemeral.
+        console.warn('[ServerConfig] 儲存頻道索引寫入失敗:', err.message);
+    }
+}
+
+function getKnownStorageChannel(guildId) {
+    const known = loadKnownStorageChannels();
+    return known[String(guildId)] || process.env.ANGELA_STORAGE_CHANNEL_ID ||
+        process.env.STORAGE_CHANNEL_ID || '';
+}
 
 // ─────────────────────────────────────────────
 // 預設結構
@@ -73,9 +108,13 @@ function normalizeConfig(config = {}) {
 
 function getMemoryEntry(guildId) {
     if (!serverConfigs.has(guildId)) {
+        const storageChannelId = getKnownStorageChannel(guildId);
         serverConfigs.set(guildId, {
-            storageChannelId: '',
-            config: createDefaultConfig()
+            storageChannelId,
+            config: {
+                ...createDefaultConfig(),
+                storageChannelId
+            }
         });
     }
 
@@ -102,6 +141,10 @@ function setGuildConfig(guildId, config) {
     if (entry.config.storageChannelId) {
         entry.storageChannelId =
             entry.config.storageChannelId;
+        rememberStorageChannel(
+            guildId,
+            entry.config.storageChannelId
+        );
     }
 }
 
@@ -219,6 +262,18 @@ async function findConfigMessage(
     return null;
 }
 
+function isConfigMessageForGuild(message, guildId) {
+    if (message?.author?.bot !== true) return false;
+    if (message.embeds?.[0]?.footer?.text !== STORAGE_MARKER) return false;
+
+    const guildField = message.embeds[0]?.fields?.find(
+        field => field.name === 'Guild ID'
+    );
+    if (!guildField) return false;
+
+    return guildField.value.replace(/`/g, '').trim() === String(guildId);
+}
+
 // ─────────────────────────────────────────────
 // 將設定寫入 Discord
 // ─────────────────────────────────────────────
@@ -309,6 +364,7 @@ async function saveGuildConfigToDiscord(
         );
 
     if (existingMessage) {
+        let edited = true;
         await existingMessage
             .edit({
                 content,
@@ -318,17 +374,20 @@ async function saveGuildConfigToDiscord(
                 }
             })
             .catch(err => {
+                edited = false;
                 console.error(
                     `[ServerConfig] 更新 Guild ${guildId} 設定訊息失敗:`,
                     err.message
                 );
             });
 
-        console.log(
-            `[ServerConfig] ♻️ Guild ${guildId} 設定已更新`
-        );
+        if (edited) {
+            console.log(
+                `[ServerConfig] ♻️ Guild ${guildId} 設定已更新`
+            );
+        }
 
-        return true;
+        return edited;
     }
 
     const sent =
@@ -460,6 +519,7 @@ async function restoreGuildConfig(
     restored.storageChannelId =
         String(channelId);
 
+    rememberStorageChannel(guildId, channelId);
     setGuildConfig(
         guildId,
         restored
@@ -503,6 +563,7 @@ async function setStorageChannel(
     config.storageChannelId =
         String(channelId);
 
+    rememberStorageChannel(guild.id, channelId);
     setGuildConfig(
         guild.id,
         config
@@ -557,6 +618,37 @@ async function setStorageChannel(
     );
 }
 
+async function discoverStorageChannel(client, guild) {
+    if (!client || !guild) return null;
+
+    const known = getKnownStorageChannel(guild.id) ||
+        getMemoryEntry(guild.id).storageChannelId;
+
+    if (known) {
+        const channel = await client.channels.fetch(known).catch(() => null);
+        if (channel?.isTextBased?.()) return String(known);
+    }
+
+    const channels = guild.channels.cache.filter(channel =>
+        channel.isTextBased?.() &&
+        channel.viewable !== false
+    );
+
+    for (const channel of channels.values()) {
+        const messages = await channel.messages.fetch({ limit: 100 }).catch(() => null);
+        if (!messages) continue;
+
+        for (const message of messages.values()) {
+            if (isConfigMessageForGuild(message, guild.id)) {
+                rememberStorageChannel(guild.id, channel.id);
+                return channel.id;
+            }
+        }
+    }
+
+    return null;
+}
+
 // ─────────────────────────────────────────────
 // 啟動時掃描所有 Guild
 // ─────────────────────────────────────────────
@@ -580,18 +672,16 @@ async function restoreAllGuildConfigs(
         const guild
         of client.guilds.cache.values()
     ) {
-        // 如果 memory 沒有設定 storage，
-        // 暫時無法知道 storage 在哪。
-        //
-        // 所以第一次使用時需要 /setstoragechannel。
         const memory =
             serverConfigs.get(
                 guild.id
             );
 
-        if (
-            !memory?.storageChannelId
-        ) {
+        const storageChannelId =
+            memory?.storageChannelId ||
+            await discoverStorageChannel(client, guild);
+
+        if (!storageChannelId) {
             continue;
         }
 
@@ -599,7 +689,7 @@ async function restoreAllGuildConfigs(
             await restoreGuildConfig(
                 client,
                 guild.id,
-                memory.storageChannelId
+                storageChannelId
             );
 
         if (ok) {
@@ -640,5 +730,6 @@ module.exports = {
     setStorageChannel,
     saveGuildConfigToDiscord,
     restoreGuildConfig,
-    restoreAllGuildConfigs
+    restoreAllGuildConfigs,
+    discoverStorageChannel
 };
