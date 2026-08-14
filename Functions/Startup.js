@@ -421,6 +421,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
         if (configTypeMap[type]) {
             const patch = { [configTypeMap[type].key]: targetChannel.id };
             saveConfig(patch);
+            if (configTypeMap[type].key === 'notifyChannelId') {
+                setNotifyChannel(targetChannel.id);
+            }
             const persisted = await saveGuildConfigToDiscord(client, interaction.guild.id, patch);
             return interaction.reply({
                 content: `「主管，${configTypeMap[type].label}已重定向至 ${targetChannel}。」${persisted ? '' : '（提醒：尚未設定 Discord 儲存頻道，請先使用 /setstoragechannel。）'}`,
@@ -592,6 +595,9 @@ client.once(Events.ClientReady, async () => {
     }
 
     const config = getConfig();
+    if (config.notifyChannelId) {
+        setNotifyChannel(config.notifyChannelId);
+    }
     if (config.notifyChannelId) {
         try {
             const channel = await client.channels.fetch(config.notifyChannelId);
