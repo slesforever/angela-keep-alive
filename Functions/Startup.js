@@ -59,6 +59,8 @@ const { startNewsCheckLoop }     = require('./Newscheck.js');
 const { handleCommands }         = require('./Commanders.js');
 const { handleMessageXp, startVoiceXpTimer, trackVoiceJoin, trackVoiceLeave, bootstrapVoiceTracking } = require('./GameSystem/LevelSystem.js');
 const { handleStarboardReaction, setStarboardChannel: _setStarboard } = require('./GameSystem/StarboardSystem.js');
+const { setAuditChannel, logMessageDelete, logVoiceChange, logMemberChange, logGuildChange } = require('./GameSystem/AuditSystem.js');
+const { setTranslationOutput, toggleTranslationSource, handleTranslationMessage } = require('./GameSystem/TranslationSystem.js');
 const { restoreFromBackupChannel } = require('./GameSystem/PacksAndData.js');
 
 const SUPER_ADMIN_ID = '1330463890122735642';
@@ -99,14 +101,7 @@ const allSlashCommands = [
     // 1. 抽卡
     new SlashCommandBuilder()
         .setName('pull')
-        .setDescription('進行抽取人格/E.G.O')
-        .addIntegerOption(option =>
-            option.setName('count')
-                .setDescription('選擇抽卡次數')
-                .addChoices(
-                    { name: '單抽 (1次)', value: 1 },
-                    { name: '十連抽 (10次)', value: 10 }
-                )),
+        .setDescription('開啟狂氣提取介面'),
 
     // 2. 背包與機率
     new SlashCommandBuilder().setName('pack').setDescription('查看 LC 主頁式背包與資源介面'),
@@ -130,17 +125,27 @@ const allSlashCommands = [
         .setName('rank')
         .setDescription('查看等級與 XP 進度')
         .addUserOption(opt => opt.setName('target').setDescription('查看其他玩家的等級（預設為自己）')),
+    new SlashCommandBuilder()
+        .setName('language')
+        .setDescription('選擇指令顯示語言')
+        .addStringOption(opt => opt.setName('language').setDescription('語言').setRequired(true).addChoices({ name: '繁體中文', value: 'zh' }, { name: 'English', value: 'en' })),
 
-    // 7. 賭博
+    // 7. Starcoins 經濟系統
+    new SlashCommandBuilder()
+        .setName('sc')
+        .setDescription('🌟 Starcoins 經濟系統')
+        .addSubcommand(sub => sub.setName('pay').setDescription('支付 Starcoins 給其他玩家')
+            .addUserOption(opt => opt.setName('target').setDescription('收款玩家').setRequired(true))
+            .addIntegerOption(opt => opt.setName('amount').setDescription('支付金額').setRequired(true).setMinValue(1)))
+        .addSubcommand(sub => sub.setName('work').setDescription('工作取得 Starcoins'))
+        .addSubcommand(sub => sub.setName('bank').setDescription('存入、提出或查看銀行 Starcoins')
+            .addStringOption(opt => opt.setName('action').setDescription('銀行操作').setRequired(true)
+                .addChoices({ name: '存錢', value: 'deposit' }, { name: '拿錢', value: 'withdraw' }, { name: '查看餘額', value: 'balance' }))
+            .addIntegerOption(opt => opt.setName('amount').setDescription('金額（存錢/拿錢時需要）').setMinValue(1))),
     new SlashCommandBuilder()
         .setName('gamble')
-        .setDescription('下注 LightSeeds，50/50 機率翻倍或全損')
-        .addIntegerOption(opt =>
-            opt.setName('amount')
-                .setDescription('下注金額（最少 10，最多 50000）')
-                .setRequired(true)
-                .setMinValue(10)
-                .setMaxValue(50000)),
+        .setDescription('使用 Starcoins 進行 50/50 賭博')
+        .addIntegerOption(opt => opt.setName('amount').setDescription('下注金額（10–50000）').setRequired(true).setMinValue(10).setMaxValue(50000)),
 
     // 8. 娛樂小工具
     new SlashCommandBuilder()
@@ -176,6 +181,9 @@ const allSlashCommands = [
                     { name: '⬆️ 升級公告頻道', value: 'level' },
                     { name: '📣 Sles 公告接收頻道', value: 'announce' },
                     { name: '⭐ 星星榜頻道', value: 'starboard' },
+                    { name: '📚 紀錄頻道', value: 'audit' },
+                    { name: '🌐 翻譯輸出頻道', value: 'translate-output' },
+                    { name: '🌐 切換翻譯來源頻道', value: 'translate-source' },
                 ))
         .addChannelOption(option =>
             option.setName('target_channel')
@@ -209,6 +217,20 @@ const allSlashCommands = [
             opt.setName('message')
                 .setDescription('公告內容')
                 .setRequired(true)),
+
+    new SlashCommandBuilder()
+        .setName('givestarcoins')
+        .setDescription('👑【Sles 專屬】發放 Starcoins')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .addIntegerOption(opt => opt.setName('amount').setDescription('發放數量').setRequired(true).setMinValue(1))
+        .addUserOption(opt => opt.setName('target').setDescription('指定目標玩家').setRequired(true)),
+
+    new SlashCommandBuilder()
+        .setName('takelightseeds')
+        .setDescription('👑【Sles 專屬】扣除玩家 LightSeeds')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .addIntegerOption(opt => opt.setName('amount').setDescription('扣除數量').setRequired(true).setMinValue(1))
+        .addUserOption(opt => opt.setName('target').setDescription('指定目標玩家').setRequired(true)),
 
     new SlashCommandBuilder()
         .setName('givelightseeds')
@@ -325,9 +347,26 @@ client.on(Events.InteractionCreate, async (interaction) => {
             _setStarboard(interaction.guild.id, targetChannel.id);
             return interaction.reply({ content: `✅ 星星榜頻道已設定至 ${targetChannel}。達到 3 顆 ⭐ 的訊息將自動轉發。`, flags: MessageFlags.Ephemeral });
         }
+        if (type === 'audit') {
+            setAuditChannel(interaction.guild.id, targetChannel.id);
+            return interaction.reply({ content: `✅ 紀錄頻道已設定至 ${targetChannel}。`, flags: MessageFlags.Ephemeral });
+        }
+        if (type === 'translate-output') {
+            setTranslationOutput(interaction.guild.id, targetChannel.id);
+            return interaction.reply({ content: `✅ 翻譯輸出頻道已設定為 ${targetChannel}。`, flags: MessageFlags.Ephemeral });
+        }
+        if (type === 'translate-source') {
+            const enabled = toggleTranslationSource(interaction.guild.id, targetChannel.id);
+            return interaction.reply({ content: `✅ 已${enabled ? '加入' : '移除'}翻譯來源頻道：${targetChannel}。`, flags: MessageFlags.Ephemeral });
+        }
     }
 
     try {
+        const adminCommands = ['setchannel', 'setlevelchannel', 'setannouncechannel', 'givelightseeds', 'givestarcoins', 'takelightseeds', 'givefragments', 'givescrolls', 'givethreads', 'updaterewards', 'updatebuff', 'announce'];
+        if (interaction.guild && adminCommands.includes(interaction.commandName)) {
+            const { logAudit } = require('./GameSystem/AuditSystem.js');
+            logAudit(client, interaction.guild.id, '🛡️ 管理操作', `<@${interaction.user.id}> 執行 /${interaction.commandName}`, { color: 0xfee75c }).catch(() => {});
+        }
         await handleCommands(client, interaction);
     } catch (err) {
         console.error('❌ 斜線指令執行錯誤:', err.stack || err.message);
@@ -344,6 +383,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 client.on(Events.MessageCreate, async (message) => {
     if (message.author?.bot) return;
     handleMessageXp(client, message).catch(() => {});
+    handleTranslationMessage(client, message).catch(() => {});
 });
 
 // ─── messageReactionAdd：星星榜 ──────────────────────────────
@@ -351,6 +391,19 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
     if (user.bot) return;
     handleStarboardReaction(client, reaction, user).catch(() => {});
 });
+client.on(Events.MessageReactionRemove, async (reaction, user) => {
+    if (user.bot) return;
+    handleStarboardReaction(client, reaction, user).catch(() => {});
+});
+client.on(Events.MessageDelete, message => logMessageDelete(client, message).catch(() => {}));
+client.on(Events.GuildMemberAdd, member => logMemberChange(client, member, true).catch(() => {}));
+client.on(Events.GuildMemberRemove, member => logMemberChange(client, member, false).catch(() => {}));
+client.on(Events.ChannelCreate, channel => logGuildChange(client, null, channel, '頻道建立').catch(() => {}));
+client.on(Events.ChannelDelete, channel => logGuildChange(client, channel, null, '頻道刪除').catch(() => {}));
+client.on(Events.ChannelUpdate, (oldChannel, newChannel) => logGuildChange(client, oldChannel, newChannel, '頻道').catch(() => {}));
+client.on(Events.RoleCreate, role => logGuildChange(client, null, role, '身分組建立').catch(() => {}));
+client.on(Events.RoleDelete, role => logGuildChange(client, role, null, '身分組刪除').catch(() => {}));
+client.on(Events.RoleUpdate, (oldRole, newRole) => logGuildChange(client, oldRole, newRole, '身分組').catch(() => {}));
 
 // ─── voiceStateUpdate：語音 XP + VC Bug 修復 ─────────────────
 client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
@@ -358,6 +411,7 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
     const username = newState.member?.user?.username || oldState.member?.user?.username;
     const guildId  = newState.guild?.id || oldState.guild?.id;
     if (!userId || newState.member?.user?.bot) return;
+    logVoiceChange(client, oldState, newState).catch(() => {});
 
     const joinedChannel = newState.channelId;
     const leftChannel   = oldState.channelId;
@@ -367,10 +421,10 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
         trackVoiceJoin(userId, username, guildId);
     } else if (leftChannel && !joinedChannel) {
         // 離開語音頻道
-        trackVoiceLeave(userId);
+        trackVoiceLeave(userId, guildId);
     } else if (leftChannel !== joinedChannel) {
         // 切換頻道：重設計時器
-        trackVoiceLeave(userId);
+        trackVoiceLeave(userId, guildId);
         trackVoiceJoin(userId, username, guildId);
     }
 });
