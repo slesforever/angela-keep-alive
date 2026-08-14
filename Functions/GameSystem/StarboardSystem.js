@@ -1,12 +1,19 @@
 // Functions/GameSystem/StarboardSystem.js
-// 星星榜：訊息累積 3 顆 ⭐ 後轉發
+// 星星榜系統
+// 支援 Discord 論壇頻道（Forum Channel）中的貼文 / Thread
 // 支援純文字、圖片、影片與附件
-// 第一次達到門檻時 Tag 原訊息作者一次
+// ⭐ 達到 3 顆後進入星星榜
+// 第一次進榜會 Tag 原作者
+// 後續增加星星只更新數量，不會再次 Tag
 'use strict';
 
 const fs = require('fs');
 const path = require('path');
 const { EmbedBuilder } = require('discord.js');
+
+// ─────────────────────────────────────────────
+// 路徑
+// ─────────────────────────────────────────────
 
 const CONFIG_PATH = path.join(
     process.cwd(),
@@ -20,6 +27,7 @@ const POSTS_PATH = path.join(
     'starboard-posts.json'
 );
 
+// 需要幾顆星才上榜
 const STAR_THRESHOLD = 3;
 
 // ─────────────────────────────────────────────
@@ -32,11 +40,16 @@ function loadJson(file, fallback) {
             return fallback;
         }
 
-        const data = fs.readFileSync(file, 'utf8');
-        return JSON.parse(data);
+        const raw = fs.readFileSync(file, 'utf8');
+
+        if (!raw.trim()) {
+            return fallback;
+        }
+
+        return JSON.parse(raw);
     } catch (err) {
         console.error(
-            `[Starboard] 讀取 JSON 失敗 ${file}:`,
+            `[Starboard] 讀取 JSON 失敗: ${file}`,
             err.message
         );
 
@@ -48,7 +61,9 @@ function saveJson(file, value) {
     try {
         fs.mkdirSync(
             path.dirname(file),
-            { recursive: true }
+            {
+                recursive: true
+            }
         );
 
         fs.writeFileSync(
@@ -58,82 +73,116 @@ function saveJson(file, value) {
         );
     } catch (err) {
         console.error(
-            `[Starboard] 儲存失敗 ${file}:`,
+            `[Starboard] 儲存 JSON 失敗: ${file}`,
             err.message
         );
     }
 }
 
 // ─────────────────────────────────────────────
-// 設定
+// Starboard 設定
 // ─────────────────────────────────────────────
 
 function getStarboardConfig() {
-    return loadJson(CONFIG_PATH, {});
+    return loadJson(
+        CONFIG_PATH,
+        {}
+    );
 }
 
-function setStarboardChannel(guildId, channelId) {
-    const config = getStarboardConfig();
+function setStarboardChannel(
+    guildId,
+    channelId
+) {
+    const config =
+        getStarboardConfig();
 
     config[guildId] = channelId;
 
-    saveJson(CONFIG_PATH, config);
+    saveJson(
+        CONFIG_PATH,
+        config
+    );
 
     console.log(
-        `[Starboard] Guild ${guildId} 星星榜頻道設定為 ${channelId}`
+        `[Starboard] ✅ Guild ${guildId} 星星榜頻道已設定為 ${channelId}`
     );
 }
 
 function getStarboardChannel(guildId) {
-    const config = getStarboardConfig();
+    const config =
+        getStarboardConfig();
 
     return config[guildId] || null;
 }
 
 // ─────────────────────────────────────────────
-// 上榜訊息資料
+// 已上榜訊息
+// original message ID → starboard message ID
 // ─────────────────────────────────────────────
 
 function getPosts() {
-    return loadJson(POSTS_PATH, {});
+    return loadJson(
+        POSTS_PATH,
+        {}
+    );
 }
 
-function setPost(originalId, starboardId) {
-    const posts = getPosts();
+function setPost(
+    originalId,
+    starboardId
+) {
+    const posts =
+        getPosts();
 
     posts[originalId] = starboardId;
 
-    saveJson(POSTS_PATH, posts);
+    saveJson(
+        POSTS_PATH,
+        posts
+    );
 }
 
 function removePost(originalId) {
-    const posts = getPosts();
+    const posts =
+        getPosts();
 
     delete posts[originalId];
 
-    saveJson(POSTS_PATH, posts);
+    saveJson(
+        POSTS_PATH,
+        posts
+    );
 }
 
 // ─────────────────────────────────────────────
-// 附件
+// 附件工具
 // ─────────────────────────────────────────────
 
 function getAttachments(message) {
-    if (!message?.attachments?.values) {
+    if (
+        !message ||
+        !message.attachments ||
+        typeof message.attachments.values !== 'function'
+    ) {
         return [];
     }
 
-    return [...message.attachments.values()];
+    return [
+        ...message.attachments.values()
+    ];
 }
 
 function isImage(attachment) {
-    const contentType = String(
-        attachment?.contentType || ''
-    );
+    const contentType =
+        String(
+            attachment?.contentType || ''
+        );
 
-    const url = String(
-        attachment?.url || ''
-    );
+    const url =
+        String(
+            attachment?.url || ''
+        );
 
     return (
         contentType.startsWith('image/') ||
@@ -142,13 +191,15 @@ function isImage(attachment) {
 }
 
 function isVideo(attachment) {
-    const contentType = String(
-        attachment?.contentType || ''
-    );
+    const contentType =
+        String(
+            attachment?.contentType || ''
+        );
 
-    const url = String(
-        attachment?.url || ''
-    );
+    const url =
+        String(
+            attachment?.url || ''
+        );
 
     return (
         contentType.startsWith('video/') ||
@@ -157,7 +208,7 @@ function isVideo(attachment) {
 }
 
 // ─────────────────────────────────────────────
-// Starboard Reaction Handler
+// Reaction Handler
 // ─────────────────────────────────────────────
 
 async function handleStarboardReaction(
@@ -166,154 +217,311 @@ async function handleStarboardReaction(
     user
 ) {
     try {
-        // Reaction 是 partial 時抓完整資料
-        if (reaction?.partial) {
-            await reaction.fetch().catch(() => null);
-        }
+        console.log(
+            '[Starboard] 📥 收到 Reaction 事件'
+        );
+
+        // ─────────────────────────────────────
+        // 基本檢查
+        // ─────────────────────────────────────
 
         if (!reaction) {
+            console.log(
+                '[Starboard] reaction 不存在'
+            );
             return;
         }
 
+        // ─────────────────────────────────────
+        // Partial Reaction
+        // ─────────────────────────────────────
+
+        if (reaction.partial) {
+            console.log(
+                '[Starboard] Reaction 是 partial，正在 fetch...'
+            );
+
+            const fetchedReaction =
+                await reaction
+                    .fetch()
+                    .catch(err => {
+                        console.error(
+                            '[Starboard] ❌ Reaction fetch 失敗:',
+                            err.message
+                        );
+
+                        return null;
+                    });
+
+            if (!fetchedReaction) {
+                return;
+            }
+
+            reaction = fetchedReaction;
+        }
+
+        // ─────────────────────────────────────
         // 只處理 ⭐
-        if (reaction.emoji?.name !== '⭐') {
+        // ─────────────────────────────────────
+
+        const emojiName =
+            reaction.emoji?.name;
+
+        if (emojiName !== '⭐') {
+            console.log(
+                `[Starboard] 不是 ⭐，而是 ${emojiName || '未知 Emoji'}`
+            );
             return;
         }
 
-        // Message 是 partial 時抓完整資料
-        let message = reaction.message;
+        console.log(
+            '[Starboard] ⭐ 收到星星反應'
+        );
 
-        if (message?.partial) {
-            message = await message.fetch().catch(() => null);
+        // ─────────────────────────────────────
+        // 忽略 Bot
+        // ─────────────────────────────────────
+
+        if (user?.bot) {
+            console.log(
+                '[Starboard] 反應來自 Bot，跳過'
+            );
+            return;
         }
+
+        // ─────────────────────────────────────
+        // Message
+        // ─────────────────────────────────────
+
+        let message =
+            reaction.message;
 
         if (!message) {
+            console.log(
+                '[Starboard] 找不到 reaction.message'
+            );
             return;
         }
 
-        // Bot 的反應不處理
-        if (user?.bot) {
-            return;
+        if (message.partial) {
+            console.log(
+                '[Starboard] Message 是 partial，正在 fetch...'
+            );
+
+            const fetchedMessage =
+                await message
+                    .fetch()
+                    .catch(err => {
+                        console.error(
+                            '[Starboard] ❌ Message fetch 失敗:',
+                            err.message
+                        );
+
+                        return null;
+                    });
+
+            if (!fetchedMessage) {
+                return;
+            }
+
+            message = fetchedMessage;
         }
+
+        // ─────────────────────────────────────
+        // Guild ID
+        // 論壇貼文實際上是在 Thread 裡
+        // ─────────────────────────────────────
 
         const guildId =
             message.guildId ||
             message.guild?.id;
 
         if (!guildId) {
+            console.log(
+                '[Starboard] 找不到 Guild ID'
+            );
             return;
         }
 
-        // 取得星星榜頻道
+        // ─────────────────────────────────────
+        // Channel / Thread
+        // ─────────────────────────────────────
+
+        const messageChannelId =
+            message.channelId ||
+            message.channel?.id;
+
+        if (!messageChannelId) {
+            console.log(
+                '[Starboard] 找不到 Message Channel ID'
+            );
+            return;
+        }
+
+        console.log(
+            `[Starboard] Message ID: ${message.id}`
+        );
+
+        console.log(
+            `[Starboard] Channel / Thread ID: ${messageChannelId}`
+        );
+
+        console.log(
+            `[Starboard] Channel Type: ${message.channel?.type ?? 'unknown'}`
+        );
+
+        // ─────────────────────────────────────
+        // Starboard 頻道
+        // ─────────────────────────────────────
+
         const starboardChannelId =
             getStarboardChannel(guildId);
 
         if (!starboardChannelId) {
             console.log(
-                `[Starboard] Guild ${guildId} 尚未設定星星榜頻道`
+                `[Starboard] ⚠️ Guild ${guildId} 尚未設定星星榜頻道`
             );
             return;
         }
 
-        // 如果本身就是星星榜頻道，不處理
+        // 不處理星星榜本身
         if (
-            message.channelId ===
+            messageChannelId ===
             starboardChannelId
         ) {
             return;
         }
 
-        const count = Number(
-            reaction.count || 0
-        );
+        // ─────────────────────────────────────
+        // 星星數量
+        // ─────────────────────────────────────
+
+        const count =
+            Number(
+                reaction.count || 0
+            );
 
         console.log(
-            `[Starboard] ${message.id} ⭐ ${count}/${STAR_THRESHOLD}`
+            `[Starboard] ⭐ ${count}/${STAR_THRESHOLD}`
         );
 
-        const posts = getPosts();
+        // ─────────────────────────────────────
+        // 找星星榜頻道
+        // ─────────────────────────────────────
 
-        const existingId =
-            posts[message.id];
-
-        // 取得星星榜頻道
-        const channel =
+        const starboardChannel =
             await client.channels
                 .fetch(starboardChannelId)
                 .catch(err => {
                     console.error(
-                        '[Starboard] 取得星星榜頻道失敗:',
+                        '[Starboard] ❌ 無法取得星星榜頻道:',
                         err.message
                     );
 
                     return null;
                 });
 
-        if (!channel?.isTextBased?.()) {
+        if (
+            !starboardChannel ||
+            !starboardChannel.isTextBased?.()
+        ) {
             console.error(
-                '[Starboard] 星星榜頻道不是文字頻道:',
-                starboardChannelId
+                '[Starboard] ❌ 星星榜頻道不是文字頻道'
             );
-
             return;
         }
 
         // ─────────────────────────────────────
-        // 尚未達到 3 顆
+        // 原訊息 → 星星榜訊息
         // ─────────────────────────────────────
 
-        if (count < STAR_THRESHOLD) {
-            // 沒有上榜過，什麼都不用做
+        const posts =
+            getPosts();
+
+        const existingId =
+            posts[message.id];
+
+        // ─────────────────────────────────────
+        // 未達 3 顆
+        // ─────────────────────────────────────
+
+        if (
+            count <
+            STAR_THRESHOLD
+        ) {
             if (!existingId) {
                 return;
             }
 
-            // 已經上榜但現在掉到 2 顆以下 → 刪除
+            console.log(
+                `[Starboard] ${message.id} 已掉出門檻`
+            );
+
             const oldPost =
-                await channel.messages
+                await starboardChannel.messages
                     .fetch(existingId)
                     .catch(() => null);
 
             if (oldPost) {
                 await oldPost
                     .delete()
-                    .catch(() => {});
+                    .catch(err => {
+                        console.error(
+                            '[Starboard] 刪除舊貼文失敗:',
+                            err.message
+                        );
+                    });
             }
 
-            removePost(message.id);
+            removePost(
+                message.id
+            );
 
             console.log(
-                `[Starboard] ${message.id} 星星下降到 ${count}，已從星星榜移除`
+                '[Starboard] 🗑️ 已從星星榜移除'
             );
 
             return;
         }
 
         // ─────────────────────────────────────
-        // 建立附件資料
+        // 附件
         // ─────────────────────────────────────
 
         const attachments =
             getAttachments(message);
 
         const image =
-            attachments.find(isImage);
+            attachments.find(
+                attachment =>
+                    isImage(attachment)
+            );
 
         const video =
             attachments.find(
                 attachment =>
-                    !image ||
-                    attachment.id !== image.id
+                    isVideo(attachment) &&
+                    (
+                        !image ||
+                        attachment.id !== image.id
+                    )
             );
 
+        // 其他附件
         const otherAttachments =
             attachments
                 .filter(attachment => {
-                    if (image && attachment.id === image.id) {
+                    if (
+                        image &&
+                        attachment.id === image.id
+                    ) {
                         return false;
                     }
 
-                    if (video && attachment.id === video.id) {
+                    if (
+                        video &&
+                        attachment.id === video.id
+                    ) {
                         return false;
                     }
 
@@ -326,34 +534,44 @@ async function handleStarboardReaction(
                 .join('\n');
 
         // ─────────────────────────────────────
-        // 內容
+        // 描述
         // ─────────────────────────────────────
 
-        let description = '';
+        let description;
 
-        if (message.content?.trim()) {
+        if (
+            message.content &&
+            message.content.trim()
+        ) {
             description =
                 message.content.trim();
         } else if (image) {
-            description = '🖼️ 圖片貼文';
+            description =
+                '🖼️ 圖片貼文';
         } else if (video) {
-            description = '🎬 影片貼文';
-        } else if (attachments.length) {
-            description = '📎 附件貼文';
+            description =
+                '🎬 影片貼文';
+        } else if (attachments.length > 0) {
+            description =
+                '📎 附件貼文';
         } else {
-            description = '（無文字內容）';
+            description =
+                '（無文字內容）';
         }
 
         // ─────────────────────────────────────
-        // 作者資料
+        // 作者
         // ─────────────────────────────────────
+
+        const authorId =
+            message.author?.id;
 
         const authorName =
             message.author?.globalName ||
             message.author?.username ||
             '未知使用者';
 
-        const avatarURL =
+        const authorAvatar =
             message.author?.displayAvatarURL?.() ||
             undefined;
 
@@ -366,10 +584,17 @@ async function handleStarboardReaction(
                 .setColor(0xffd700)
                 .setAuthor({
                     name: authorName,
-                    iconURL: avatarURL
+                    ...(authorAvatar
+                        ? {
+                            iconURL: authorAvatar
+                        }
+                        : {})
                 })
                 .setDescription(
-                    description.slice(0, 4096)
+                    description.slice(
+                        0,
+                        4096
+                    )
                 )
                 .addFields(
                     {
@@ -381,7 +606,7 @@ async function handleStarboardReaction(
                     {
                         name: '頻道',
                         value:
-                            `<#${message.channelId}>`,
+                            `<#${messageChannelId}>`,
                         inline: true
                     },
                     {
@@ -396,12 +621,20 @@ async function handleStarboardReaction(
                     new Date()
                 );
 
-        // 第一張圖片
+        // ─────────────────────────────────────
+        // 圖片
+        // ─────────────────────────────────────
+
         if (image) {
-            embed.setImage(image.url);
+            embed.setImage(
+                image.url
+            );
         }
 
+        // ─────────────────────────────────────
         // 其他附件
+        // ─────────────────────────────────────
+
         if (otherAttachments) {
             embed.addFields({
                 name: '其他附件',
@@ -416,12 +649,16 @@ async function handleStarboardReaction(
         // ─────────────────────────────────────
         // 已經上榜
         // 只更新數量
-        // 不再 Tag
+        // 不 Tag
         // ─────────────────────────────────────
 
         if (existingId) {
+            console.log(
+                `[Starboard] 找到舊星星榜訊息: ${existingId}`
+            );
+
             const starboardMessage =
-                await channel.messages
+                await starboardChannel.messages
                     .fetch(existingId)
                     .catch(() => null);
 
@@ -429,67 +666,100 @@ async function handleStarboardReaction(
                 await starboardMessage
                     .edit({
                         content:
-                            `⭐ ${count} ｜ <#${message.channelId}>`,
-                        embeds: [embed]
+                            `⭐ ${count} ｜ <#${messageChannelId}>`,
+                        embeds: [
+                            embed
+                        ]
                     })
                     .catch(err => {
                         console.error(
-                            '[Starboard] 更新貼文失敗:',
+                            '[Starboard] ❌ 更新星星榜訊息失敗:',
                             err.message
                         );
                     });
 
+                console.log(
+                    `[Starboard] ✅ 星星榜已更新為 ${count} 顆`
+                );
+
                 return;
             }
 
-            // 記錄還在，但 Discord 訊息已不存在
-            removePost(message.id);
+            // 資料庫有記錄
+            // 但是 Discord 訊息已經不存在
+            console.log(
+                '[Starboard] 舊星星榜訊息不存在，重新建立'
+            );
+
+            removePost(
+                message.id
+            );
         }
 
         // ─────────────────────────────────────
-        // 第一次達到 3 顆
-        // Tag 原作者一次
+        // 第一次達到門檻
+        // Tag 一次
         // ─────────────────────────────────────
 
+        let sendContent =
+            `⭐ ${count} ｜ <#${messageChannelId}>`;
+
+        if (authorId) {
+            sendContent +=
+                ` ｜ <@${authorId}>`;
+        }
+
+        console.log(
+            '[Starboard] 🌟 第一次達到門檻，正在建立星星榜訊息'
+        );
+
         const sent =
-            await channel.send({
-                content:
-                    `⭐ ${count} ｜ <#${message.channelId}> ｜ <@${message.author.id}>`,
+            await starboardChannel
+                .send({
+                    content:
+                        sendContent,
 
-                embeds: [embed],
+                    embeds: [
+                        embed
+                    ],
 
-                allowedMentions: {
-                    users: [
-                        message.author.id
-                    ]
-                }
-            })
-            .catch(err => {
-                console.error(
-                    '[Starboard] 發送星星榜貼文失敗:',
-                    err.message
-                );
+                    allowedMentions:
+                        authorId
+                            ? {
+                                users: [
+                                    authorId
+                                ]
+                            }
+                            : {
+                                users: []
+                            }
+                })
+                .catch(err => {
+                    console.error(
+                        '[Starboard] ❌ 發送星星榜訊息失敗:',
+                        err.message
+                    );
 
-                return null;
-            });
+                    return null;
+                });
 
         if (!sent) {
             return;
         }
 
-        // 儲存原訊息 → 星星榜訊息
+        // 儲存原訊息與星星榜訊息的對應
         setPost(
             message.id,
             sent.id
         );
 
         console.log(
-            `[Starboard] ${message.id} 已進入星星榜 → ${sent.id}`
+            `[Starboard] ✅ 已成功上榜: ${message.id} → ${sent.id}`
         );
 
     } catch (err) {
         console.error(
-            '[Starboard] 處理 Reaction 時發生錯誤:',
+            '[Starboard] ❌ handleStarboardReaction 發生錯誤:',
             err
         );
     }
