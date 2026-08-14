@@ -1,22 +1,31 @@
 // Functions/GameSystem/LevelSystem.js
-// 等級系統 — 打字/語音/戰鬥/鏡牢/關卡 都可獲得 XP
+// 等級系統：打字、語音、戰鬥、鏡牢、關卡 XP + 等級獎勵
 'use strict';
-
 const fs = require('fs');
 const path = require('path');
 const { EmbedBuilder } = require('discord.js');
 
 const LEVEL_CONFIG_PATH = path.join(process.cwd(), 'data', 'level-config.json');
+const PLAYERS_DIR = path.join(process.cwd(), 'data', 'players');
 
-// ─── XP 公式 ───────────────────────────────────────────────
-// 升到下一級所需 XP = 當前等級 × 150（最高 100 級）
-function xpNeededForLevel(level) {
-    return level * 150;
-}
+// 平衡原則：每級少量獎勵，重要里程碑再給一次小額 bonus，避免 XP 變成無限提款機。
+const LEVEL_REWARDS = {
+    perLevel: { starCoins: 25, lightSeeds: 5 },
+    milestones: {
+        5:  { starCoins: 50,  lightSeeds: 10 },
+        10: { starCoins: 100, lightSeeds: 20 },
+        15: { starCoins: 150, lightSeeds: 30 },
+        20: { starCoins: 250, lightSeeds: 50 },
+        25: { starCoins: 350, lightSeeds: 70 },
+        50: { starCoins: 750, lightSeeds: 150 },
+        100:{ starCoins: 1500, lightSeeds: 300 },
+    },
+};
 
+function xpNeededForLevel(level) { return level * 150; }
 function getLevelFromXp(totalXp) {
     let level = 0;
-    let remaining = totalXp;
+    let remaining = Math.max(0, Number(totalXp) || 0);
     while (level < 100) {
         const needed = xpNeededForLevel(level + 1);
         if (remaining < needed) break;
@@ -25,153 +34,125 @@ function getLevelFromXp(totalXp) {
     }
     return { level, xpIntoLevel: remaining, xpNeeded: xpNeededForLevel(level + 1) };
 }
-
-// ─── 設定檔 ──────────────────────────────────────────────────
-function getLevelConfig() {
-    try {
-        if (fs.existsSync(LEVEL_CONFIG_PATH)) {
-            return JSON.parse(fs.readFileSync(LEVEL_CONFIG_PATH, 'utf8'));
-        }
-    } catch {}
-    return {};
+function rewardForLevel(level) {
+    const milestone = LEVEL_REWARDS.milestones[level] || {};
+    return {
+        starCoins: LEVEL_REWARDS.perLevel.starCoins + (milestone.starCoins || 0),
+        lightSeeds: LEVEL_REWARDS.perLevel.lightSeeds + (milestone.lightSeeds || 0),
+    };
 }
-
-function saveLevelConfig(config) {
-    try {
-        fs.mkdirSync(path.dirname(LEVEL_CONFIG_PATH), { recursive: true });
-        fs.writeFileSync(LEVEL_CONFIG_PATH, JSON.stringify(config, null, 2), 'utf8');
-    } catch (err) {
-        console.error('[LevelSystem] 儲存設定失敗:', err.message);
+function grantLevelRewards(player, oldLevel, newLevel) {
+    const total = { starCoins: 0, lightSeeds: 0 };
+    for (let level = Math.max(1, oldLevel + 1); level <= newLevel; level++) {
+        const reward = rewardForLevel(level);
+        total.starCoins += reward.starCoins;
+        total.lightSeeds += reward.lightSeeds;
     }
+    if (total.starCoins || total.lightSeeds) {
+        player.starCoins = (player.starCoins || 0) + total.starCoins;
+        player.lightSeeds = (player.lightSeeds || 0) + total.lightSeeds;
+    }
+    return total;
 }
 
-function setLevelChannel(guildId, channelId) {
-    const config = getLevelConfig();
-    config[guildId] = channelId;
-    saveLevelConfig(config);
+function getLevelConfig() {
+    try { return fs.existsSync(LEVEL_CONFIG_PATH) ? JSON.parse(fs.readFileSync(LEVEL_CONFIG_PATH, 'utf8')) : {}; }
+    catch { return {}; }
 }
-
-function getLevelChannel(guildId) {
-    return getLevelConfig()[guildId] || null;
+function saveLevelConfig(config) {
+    try { fs.mkdirSync(path.dirname(LEVEL_CONFIG_PATH), { recursive: true }); fs.writeFileSync(LEVEL_CONFIG_PATH, JSON.stringify(config, null, 2), 'utf8'); }
+    catch (err) { console.error('[LevelSystem] 儲存設定失敗:', err.message); }
 }
+function setLevelChannel(guildId, channelId) { const c = getLevelConfig(); c[guildId] = channelId; saveLevelConfig(c); }
+function getLevelChannel(guildId) { return getLevelConfig()[guildId] || null; }
 
-// ─── 升級公告 ───────────────────────────────────────────────
-async function announceLevelUp(client, userId, username, newLevel, guildId) {
+async function announceLevelUp(client, userId, username, newLevel, guildId, rewards = {}) {
     try {
         const channelId = getLevelChannel(guildId);
         if (!channelId) return;
         const channel = await client.channels.fetch(channelId).catch(() => null);
         if (!channel) return;
-
-        const levelMilestones = {
-            10: '「精神脈衝穩定性顯著提升。繼續保持主管。」',
-            25: '「您正在突破系統預設的精神閾值。令人振奮。」',
-            50: '「達到 50 級……安潔菈預測您的路還很長。」',
-            75: '「75 級。普通罪人走不到這裡的。」',
-            100: '「100 級。您已超越了安潔菈的預期上限。」',
-        };
-        const msg = levelMilestones[newLevel] || '「繼續前進，主管。這條路沒有盡頭。」';
-
-        await channel.send({
-            embeds: [new EmbedBuilder()
-                .setTitle('⬆️ 等級提升！')
-                .setColor(0xf1c40f)
-                .setDescription(`🎉 <@${userId}> 升到了 **Lv.${newLevel}**！\n\n> ${msg}`)
-                .setFooter({ text: '使用 /rank 查看詳細等級資料' })
-                .setTimestamp()]
-        });
-    } catch (err) {
-        console.error('[LevelSystem] 升級公告失敗:', err.message);
-    }
+        const rewardText = `🌟 +${rewards.starCoins || 0} Starcoins ｜ 🌱 +${rewards.lightSeeds || 0} LightSeeds`;
+        await channel.send({ embeds: [new EmbedBuilder()
+            .setTitle('⬆️ 等級提升！')
+            .setColor(0xf1c40f)
+            .setDescription(`🎉 <@${userId}> 升到了 **Lv.${newLevel}**！\n\n獲得等級獎勵：${rewardText}\n\n> 「繼續前進，主管。這條路沒有盡頭。」`)
+            .setFooter({ text: '使用 /rank 查看詳細資料，/leaderboard 查看排行榜' })
+            .setTimestamp()] });
+    } catch (err) { console.error('[LevelSystem] 升級公告失敗:', err.message); }
 }
 
-// ─── 加 XP 核心函式 ──────────────────────────────────────────
 async function addXp(client, userId, username, amount, guildId = null) {
-    // 懶加載避免循環依賴
     const { getOrCreatePlayer, savePlayerData } = require('./PacksAndData.js');
     const player = getOrCreatePlayer(null, userId, username);
-
-    const oldXp = player.xp || 0;
-    const newXp = oldXp + amount;
-    player.xp = newXp;
-
+    const oldXp = Math.max(0, Number(player.xp) || 0);
     const oldData = getLevelFromXp(oldXp);
+    const newXp = oldXp + Math.max(0, Number(amount) || 0);
     const newData = getLevelFromXp(newXp);
-
+    const rewards = newData.level > oldData.level ? grantLevelRewards(player, oldData.level, newData.level) : { starCoins: 0, lightSeeds: 0 };
+    player.xp = newXp;
+    player.level = newData.level;
     savePlayerData(null, userId, player);
-
-    if (newData.level > oldData.level && client && guildId) {
-        await announceLevelUp(client, userId, username, newData.level, guildId);
-    }
-
-    return newData;
+    if (newData.level > oldData.level && client && guildId) await announceLevelUp(client, userId, username, newData.level, guildId, rewards);
+    return { ...newData, rewards };
 }
 
-// ─── 打字 XP（每 60 秒最多一次）─────────────────────────────
 const messageCooldowns = new Map();
-
 async function handleMessageXp(client, message) {
-    if (!message || message.author?.bot) return;
+    if (!message || message.author?.bot || !message.guild) return;
     const userId = message.author.id;
     const now = Date.now();
     if (now - (messageCooldowns.get(userId) || 0) < 60_000) return;
     messageCooldowns.set(userId, now);
-
-    await addXp(client, userId, message.author.username, 2, message.guild?.id).catch(() => {});
+    await addXp(client, userId, message.author.username, 2, message.guild.id).catch(() => {});
 }
 
-// ─── 語音 XP 追蹤 ────────────────────────────────────────────
-const voiceJoinTimes = new Map(); // userId -> { joinedAt, guildId, username }
-
+// 使用 guildId:userId 作 key，避免同一玩家在不同伺服器互相覆蓋。
+const voiceJoinTimes = new Map();
+function voiceKey(userId, guildId) { return `${guildId}:${userId}`; }
 function trackVoiceJoin(userId, username, guildId) {
-    voiceJoinTimes.set(userId, { joinedAt: Date.now(), guildId, username });
+    const key = voiceKey(userId, guildId);
+    if (!voiceJoinTimes.has(key)) voiceJoinTimes.set(key, { userId, joinedAt: Date.now(), guildId, username });
 }
-
-function trackVoiceLeave(userId) {
-    voiceJoinTimes.delete(userId);
-}
-
-// 🐛 VC Bug 修復：機器人上線時預載已在語音的成員
+function trackVoiceLeave(userId, guildId) { voiceJoinTimes.delete(voiceKey(userId, guildId)); }
 function bootstrapVoiceTracking(client) {
     let count = 0;
     for (const guild of client.guilds.cache.values()) {
-        const states = guild.voiceStates?.cache;
-        if (!states) continue;
-        for (const [userId, state] of states) {
-            if (!state.channelId) continue;
-            const member = state.member || guild.members.cache.get(userId);
-            if (!member || member.user?.bot) continue;
-            voiceJoinTimes.set(userId, {
-                joinedAt: Date.now(),
-                guildId: guild.id,
-                username: member.user.username,
-            });
+        for (const state of guild.voiceStates?.cache?.values?.() || []) {
+            const member = state.member || guild.members.cache.get(state.id);
+            if (!state.channelId || !member || member.user?.bot) continue;
+            trackVoiceJoin(member.id, member.user.username, guild.id);
             count++;
         }
     }
     console.log(`[LevelSystem] 預載 ${count} 位語音成員進入 XP 追蹤`);
     return count;
 }
-
-// 每分鐘呼叫一次，給在語音的玩家加 XP
 async function processVoiceXpTick(client) {
-    for (const [userId, data] of voiceJoinTimes) {
-        const minutesPassed = (Date.now() - data.joinedAt) / 60_000;
-        if (minutesPassed >= 1) {
-            const xp = Math.floor(minutesPassed) * 5;
-            voiceJoinTimes.set(userId, { ...data, joinedAt: Date.now() });
-            await addXp(client, userId, data.username, xp, data.guildId).catch(() => {});
+    const active = new Set();
+    for (const guild of client.guilds.cache.values()) {
+        for (const state of guild.voiceStates?.cache?.values?.() || []) {
+            const member = state.member || guild.members.cache.get(state.id);
+            if (!state.channelId || !member || member.user?.bot) continue;
+            const key = voiceKey(member.id, guild.id);
+            active.add(key);
+            trackVoiceJoin(member.id, member.user.username, guild.id);
         }
+    }
+    for (const key of voiceJoinTimes.keys()) if (!active.has(key)) voiceJoinTimes.delete(key);
+    for (const [key, data] of voiceJoinTimes) {
+        const minutes = Math.floor((Date.now() - data.joinedAt) / 60_000);
+        if (minutes < 1) continue;
+        voiceJoinTimes.set(key, { ...data, joinedAt: data.joinedAt + minutes * 60_000 });
+        await addXp(client, data.userId, data.username, minutes * 5, data.guildId).catch(err => console.error('[LevelSystem] 語音 XP 失敗:', err.message));
     }
 }
 
-// ─── /rank 指令 ───────────────────────────────────────────────
 function buildRankBar(xpInto, xpNeeded) {
     const pct = Math.min(1, xpInto / Math.max(1, xpNeeded));
     const filled = Math.round(pct * 10);
     return '█'.repeat(filled) + '░'.repeat(10 - filled);
 }
-
 async function handleRank(client, interaction) {
     const target = interaction.options?.getUser('target') || interaction.user;
     const { getOrCreatePlayer } = require('./PacksAndData.js');
@@ -179,77 +160,37 @@ async function handleRank(client, interaction) {
     const xp = player.xp || 0;
     const { level, xpIntoLevel, xpNeeded } = getLevelFromXp(xp);
     const pct = Math.floor((xpIntoLevel / Math.max(1, xpNeeded)) * 100);
-
-    const embed = new EmbedBuilder()
+    return interaction.reply({ embeds: [new EmbedBuilder()
         .setTitle(`📊 ${target.username} 的等級資料`)
         .setColor(0x00b4d8)
         .setThumbnail(target.displayAvatarURL({ dynamic: true }))
         .addFields(
             { name: '等級', value: `**Lv.${level}**`, inline: true },
             { name: '總 XP', value: `${xp.toLocaleString()} XP`, inline: true },
-            { name: '\u200b', value: '\u200b', inline: true },
-            {
-                name: `進度到下一級 (${xpIntoLevel} / ${xpNeeded} XP)`,
-                value: `\`[${buildRankBar(xpIntoLevel, xpNeeded)}]\` ${pct}%`,
-                inline: false,
-            },
+            { name: '貨幣', value: `🌟 ${(player.starCoins || 0).toLocaleString()} Starcoins\n🌱 ${(player.lightSeeds || 0).toLocaleString()} LightSeeds`, inline: true },
+            { name: `進度到下一級 (${xpIntoLevel} / ${xpNeeded} XP)`, value: `\`[${buildRankBar(xpIntoLevel, xpNeeded)}]\` ${pct}%`, inline: false },
         )
         .setFooter({ text: '打字 +2 XP｜語音每分鐘 +5 XP｜戰鬥/關卡/鏡牢也可獲得 XP' })
-        .setTimestamp();
-
-    return interaction.reply({ embeds: [embed] });
+        .setTimestamp()] });
 }
-
-// ─── /leaderboard 排行榜 ─────────────────────────────────────
 async function handleLeaderboard(client, interaction) {
-    const PLAYERS_DIR = path.join(process.cwd(), 'data', 'players');
-    if (!fs.existsSync(PLAYERS_DIR)) {
-        return interaction.reply({ content: '目前還沒有任何玩家資料。', ephemeral: true });
-    }
+    if (!fs.existsSync(PLAYERS_DIR)) return interaction.reply({ content: '目前還沒有任何玩家資料。', ephemeral: true });
     const entries = [];
-    for (const f of fs.readdirSync(PLAYERS_DIR)) {
-        if (!f.endsWith('.json')) continue;
-        try {
-            const p = JSON.parse(fs.readFileSync(path.join(PLAYERS_DIR, f), 'utf8'));
-            entries.push({ id: f.slice(0, -5), username: p.username || 'Player', xp: p.xp || 0 });
-        } catch {}
+    for (const file of fs.readdirSync(PLAYERS_DIR)) {
+        if (!file.endsWith('.json')) continue;
+        try { const p = JSON.parse(fs.readFileSync(path.join(PLAYERS_DIR, file), 'utf8')); entries.push({ id: file.slice(0, -5), username: p.username || 'Player', xp: Number(p.xp) || 0 }); } catch {}
     }
     entries.sort((a, b) => b.xp - a.xp);
+    if (!entries.length) return interaction.reply({ content: '目前還沒有玩家資料。', ephemeral: true });
     const top = entries.slice(0, 10);
-    if (!top.length) return interaction.reply({ content: '目前還沒有玩家資料。', ephemeral: true });
-
     const medals = ['🥇', '🥈', '🥉'];
-    const lines = top.map((e, i) =>
-        `${medals[i] || `**#${i + 1}**`} <@${e.id}> — **${e.xp.toLocaleString()} XP** • Lv.${getLevelFromXp(e.xp).level}`
-    ).join('\n');
-
+    const lines = top.map((e, i) => `${medals[i] || `**#${i + 1}**`} <@${e.id}> — **${e.xp.toLocaleString()} XP** • Lv.${getLevelFromXp(e.xp).level}`).join('\n');
     const myIdx = entries.findIndex(e => e.id === interaction.user.id);
-    const footer = myIdx >= 0 ? `你的排名：第 ${myIdx + 1} / ${entries.length} 名` : '未在資料中找到你';
-
-    const embed = new EmbedBuilder()
-        .setTitle('🏆 等級排行榜 — XP TOP 10')
-        .setColor(0xf1c40f)
-        .setDescription(lines)
-        .setFooter({ text: footer })
-        .setTimestamp();
-
-    return interaction.reply({ embeds: [embed] });
+    const footer = myIdx >= 0 ? `你的排名：第 ${myIdx + 1} / ${entries.length} 名 • ${new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit' })}` : '未在資料中找到你';
+    return interaction.reply({ embeds: [new EmbedBuilder().setTitle('🏆 等級排行榜 — XP TOP 10').setColor(0xf1c40f).setDescription(lines).setFooter({ text: footer }).setTimestamp()] });
 }
-
-// 啟動語音 XP 定時器（每 60 秒）
 function startVoiceXpTimer(client) {
-    setInterval(() => processVoiceXpTick(client).catch(console.error), 60_000);
+    processVoiceXpTick(client).catch(err => console.error('[LevelSystem] 初次語音 XP 失敗:', err.message));
+    return setInterval(() => processVoiceXpTick(client).catch(err => console.error('[LevelSystem] 語音 XP 失敗:', err.message)), 60_000);
 }
-
-module.exports = {
-    addXp,
-    handleMessageXp,
-    handleRank,
-    handleLeaderboard,
-    setLevelChannel,
-    getLevelChannel,
-    trackVoiceJoin,
-    trackVoiceLeave,
-    bootstrapVoiceTracking,
-    startVoiceXpTimer,
-};
+module.exports = { addXp, handleMessageXp, handleRank, handleLeaderboard, setLevelChannel, getLevelChannel, trackVoiceJoin, trackVoiceLeave, bootstrapVoiceTracking, processVoiceXpTick, startVoiceXpTimer, getLevelFromXp, LEVEL_REWARDS };
