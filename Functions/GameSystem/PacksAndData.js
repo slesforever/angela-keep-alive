@@ -16,7 +16,7 @@ const {
 
 // ─── 資料目錄 ─────────────────────────────────────────────────
 const DATA_DIR = path.join(process.cwd(), 'data', 'players');
-
+const { getLanguage } = require('./LanguageSystem.js');
 // ─── SinnersData（供 getIdentitySinnerKey 使用）─────────────────
 const { SINNERS } = require('./Data/SinnersData.js');
 try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch {}
@@ -752,21 +752,25 @@ const RATE_UP_MULT = 5;
 
 
 // ─── /list 顯示名稱（保留完整角色識別符）────────────────────────
-function getListDisplayName(name) {
+function getListDisplayName(name, lang) {
     const s = String(name || '');
-    // 格式：［內容］罪人名 / English → 顯示 ［內容］罪人名
-    const m = s.match(/[[［【](.+?)[]］】]s*([^/]+)/);
+    // 英文偏好：取斜線後的英文名
+    if (lang === 'en') {
+        const slash = s.lastIndexOf(' / ');
+        if (slash >= 0) return s.slice(slash + 3).trim().slice(0, 40);
+    }
+    // 中文：原本邏輯
+    const m = s.match(/[［【\[](.+?)[］】\]]\s*([^/]+)/);
     if (m) {
         const bracket = m[1].trim();
         const sinner  = m[2].trim();
         return `［${bracket}］${sinner}`.slice(0, 40);
     }
-    // LCB 格式：LCB 罪人 李箱 → 顯示全名
-    const lcb = s.match(/^(LCBs+S+s+S+)/);
+    const lcb = s.match(/^LCB\s+\S+\s+(.+)/);
     if (lcb) return lcb[1];
-    // 斜線前
     return s.split('/')[0].trim().slice(0, 40);
 }
+
 function buildListPages() {
     const pages = [];
     const pool = getIdData().pool || {};
