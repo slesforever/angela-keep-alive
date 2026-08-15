@@ -2538,22 +2538,20 @@ module.exports = {
 // Login
 // ─────────────────────────────────────────────
 
-const TOKEN =
-    process.env.DISCORD_TOKEN;
+const TOKEN = process.env.DISCORD_TOKEN;
 
-if (
-    !TOKEN ||
-    TOKEN ===
-        'DISCORD_TOKEN'
-) {
-
-    console.error(
-        '❌ 請設定環境變數 DISCORD_TOKEN'
-    );
-
+if (!TOKEN || TOKEN === 'DISCORD_TOKEN') {
+    console.error('❌ 請設定環境變數 DISCORD_TOKEN');
     process.exit(1);
 }
 
-client.login(
-    TOKEN
-);
+// ✅ 修正：確保非同步登入不會被跳過
+(async () => {
+    try {
+        console.log('🔑 正在嘗試登入 Discord...');
+        await client.login(TOKEN);
+        console.log('✅ 機器人已成功上線！');
+    } catch (error) {
+        console.error('❌ 登入失敗：', error.message);
+    }
+})();
