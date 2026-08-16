@@ -2557,3 +2557,59 @@ if (
 client.login(
     TOKEN
 );
+// ─────────────────────────────────────────────
+// Discord Gateway Diagnostics
+// ─────────────────────────────────────────────
+
+client.on('debug', info => {
+    console.log(`[Discord Debug] ${info}`);
+});
+
+client.on('warn', info => {
+    console.warn(`[Discord Warn] ${info}`);
+});
+
+client.on('error', error => {
+    console.error('[Discord Client Error]', error);
+});
+
+client.on('shardError', (error, shardId) => {
+    console.error(`[Discord Shard ${shardId} Error]`, error);
+});
+
+client.on('shardReady', (id, unavailableGuilds) => {
+    console.log(
+        `[Discord] ✅ Shard ${id} READY | unavailable=${unavailableGuilds?.size ?? 0}`
+    );
+});
+
+client.once('ready', () => {
+    console.log(
+        `[Discord] ✅ READY: ${client.user.tag} | Guilds: ${client.guilds.cache.size}`
+    );
+});
+
+const TOKEN = process.env.DISCORD_TOKEN;
+
+console.log(
+    `[Startup] DISCORD_TOKEN 狀態: ${
+        TOKEN
+            ? `已設定 (${TOKEN.length} chars)`
+            : '❌ 未設定'
+    }`
+);
+
+if (!TOKEN) {
+    console.error('❌ Render 沒有讀到 DISCORD_TOKEN');
+    process.exit(1);
+}
+
+client.login(TOKEN)
+    .then(() => {
+        console.log('[Startup] ✅ client.login() 已成功建立登入流程');
+    })
+    .catch(error => {
+        console.error('[Startup] ❌ client.login() 失敗');
+        console.error(error);
+        process.exit(1);
+    });
