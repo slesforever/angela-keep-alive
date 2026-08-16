@@ -1,6 +1,30 @@
 // Functions/Startup.js
 'use strict';
 
+// ─────────────────────────────────────────────
+// 全域錯誤保護
+// 必須放在所有 require() 前面
+// ─────────────────────────────────────────────
+
+process.on('unhandledRejection', err => {
+    console.error('[Startup] ❌ 未捕捉的 Promise 拒絕:');
+    console.error(err?.stack || err?.message || err);
+});
+
+process.on('uncaughtException', err => {
+    console.error('[Startup] ❌ 未捕捉的例外錯誤:');
+    console.error(err?.stack || err?.message || err);
+});
+
+process.on('warning', warning => {
+    console.warn('[Startup] ⚠️ Node.js Warning:');
+    console.warn(warning?.stack || warning?.message || warning);
+});
+
+// ─────────────────────────────────────────────
+// Discord
+// ─────────────────────────────────────────────
+
 const {
     Client,
     GatewayIntentBits,
@@ -22,7 +46,9 @@ const express = require('express');
 const fs      = require('fs');
 const path    = require('path');
 
-// ─── 確保資料目錄與設定檔存在 ─────────────────────────────────
+// ─────────────────────────────────────────────
+// 確保資料目錄與設定檔存在
+// ─────────────────────────────────────────────
 
 const BASE_DATA_DIR = path.join(
     process.cwd(),
@@ -46,7 +72,12 @@ try {
             recursive: true
         }
     );
-} catch {}
+} catch (err) {
+    console.error(
+        '[Startup] ⚠️ 建立玩家資料目錄失敗:',
+        err?.message || err
+    );
+}
 
 // ─────────────────────────────────────────────
 // 預設設定
@@ -65,6 +96,10 @@ const defaultConfig = {
     backupChannelId:
         process.env.PLAYER_BACKUP_CHANNEL_ID || '',
 };
+
+// ─────────────────────────────────────────────
+// Config 讀取
+// ─────────────────────────────────────────────
 
 function getConfig() {
     try {
@@ -95,6 +130,10 @@ function getConfig() {
         ...defaultConfig
     };
 }
+
+// ─────────────────────────────────────────────
+// Config 儲存
+// ─────────────────────────────────────────────
 
 function saveConfig(newConfig) {
     try {
@@ -216,10 +255,13 @@ const SUPER_ADMIN_ID =
     '1330463890122735642';
 
 const PORT =
-    process.env.PORT || 3000;
+    Number.parseInt(
+        process.env.PORT,
+        10
+    ) || 10000;
 
 // ─────────────────────────────────────────────
-// Keep-alive HTTP server
+// Render / Keep-alive HTTP server
 // ─────────────────────────────────────────────
 
 const app =
@@ -242,12 +284,29 @@ app.get(
         })
 );
 
-app.listen(
-    PORT,
-    () =>
-        console.log(
-            `🌐 HTTP server 已啟動 port ${PORT}`
-        )
+const httpServer =
+    app.listen(
+        PORT,
+        '0.0.0.0',
+        () =>
+            console.log(
+                `🌐 HTTP server 已啟動 port ${PORT} on 0.0.0.0`
+            )
+    );
+
+httpServer.on(
+    'error',
+    err => {
+        console.error(
+            '[Startup] ❌ HTTP server 啟動失敗:'
+        );
+
+        console.error(
+            err?.stack ||
+            err?.message ||
+            err
+        );
+    }
 );
 
 // ─────────────────────────────────────────────
@@ -262,9 +321,70 @@ const client =
             GatewayIntentBits.MessageContent,
             GatewayIntentBits.GuildMembers,
             GatewayIntentBits.GuildVoiceStates,
-            GatewayIntentBits.GuildMessageReactions,
-        ],
+            GatewayIntentBits.GuildMessageReactions
+        ]
     });
+
+// ─────────────────────────────────────────────
+// Client 基本錯誤監聽
+// ─────────────────────────────────────────────
+
+client.on(
+    'error',
+    err => {
+        console.error(
+            '[Discord Client Error]'
+        );
+
+        console.error(
+            err?.stack ||
+            err?.message ||
+            err
+        );
+    }
+);
+
+client.on(
+    'warn',
+    info => {
+        console.warn(
+            `[Discord Warn] ${info}`
+        );
+    }
+);
+
+client.on(
+    'debug',
+    info => {
+        console.log(
+            `[Discord Debug] ${info}`
+        );
+    }
+);
+
+client.on(
+    'shardError',
+    (error, shardId) => {
+        console.error(
+            `[Discord Shard ${shardId} Error]`
+        );
+
+        console.error(
+            error?.stack ||
+            error?.message ||
+            error
+        );
+    }
+);
+
+client.on(
+    'shardReady',
+    (shardId, unavailableGuilds) => {
+        console.log(
+            `[Discord] ✅ Shard ${shardId} READY | unavailableGuilds=${unavailableGuilds?.size ?? 0}`
+        );
+    }
+);
 
 // ─────────────────────────────────────────────
 // 載入指令模組
@@ -297,7 +417,9 @@ try {
 } catch (err) {
     console.error(
         '[Startup] pullmenu.js 載入失敗:',
-        err.message
+        err?.stack ||
+        err?.message ||
+        err
     );
 }
 
@@ -1064,13 +1186,15 @@ async function announceCurrentRateUps(
                             : '目前沒有設定任何 Rate Up 對象。'
                     )
                     .setTimestamp()
-            ],
+            ]
         });
 
     } catch (err) {
         console.error(
             '❌ Rate Up 公告發送失敗:',
-            err.message
+            err?.stack ||
+            err?.message ||
+            err
         );
     }
 }
@@ -1845,13 +1969,14 @@ client.on(
 
             console.error(
                 '❌ 斜線指令執行錯誤:',
-                err.stack ||
-                err.message
+                err?.stack ||
+                err?.message ||
+                err
             );
 
             const errorMsg = {
                 content:
-                    `「系統錯誤：${err.message}」`,
+                    `「系統錯誤：${err?.message || err}」`,
                 flags:
                     MessageFlags.Ephemeral
             };
@@ -1901,14 +2026,28 @@ client.on(
             client,
             message
         ).catch(
-            () => {}
+            err => {
+                if (err) {
+                    console.error(
+                        '[XP] handleMessageXp:',
+                        err?.message || err
+                    );
+                }
+            }
         );
 
         handleTranslationMessage(
             client,
             message
         ).catch(
-            () => {}
+            err => {
+                if (err) {
+                    console.error(
+                        '[Translation] handleTranslationMessage:',
+                        err?.message || err
+                    );
+                }
+            }
         );
     }
 );
@@ -1924,7 +2063,9 @@ client.on(
         user
     ) => {
 
-        if (user.bot) {
+        if (
+            user.bot
+        ) {
             return;
         }
 
@@ -1933,7 +2074,14 @@ client.on(
             reaction,
             user
         ).catch(
-            () => {}
+            err => {
+                if (err) {
+                    console.error(
+                        '[Starboard Add]',
+                        err?.message || err
+                    );
+                }
+            }
         );
     }
 );
@@ -1945,7 +2093,9 @@ client.on(
         user
     ) => {
 
-        if (user.bot) {
+        if (
+            user.bot
+        ) {
             return;
         }
 
@@ -1954,7 +2104,14 @@ client.on(
             reaction,
             user
         ).catch(
-            () => {}
+            err => {
+                if (err) {
+                    console.error(
+                        '[Starboard Remove]',
+                        err?.message || err
+                    );
+                }
+            }
         );
     }
 );
@@ -1970,7 +2127,14 @@ client.on(
             client,
             message
         ).catch(
-            () => {}
+            err => {
+                if (err) {
+                    console.error(
+                        '[Audit MessageDelete]',
+                        err?.message || err
+                    );
+                }
+            }
         )
 );
 
@@ -1982,7 +2146,14 @@ client.on(
             member,
             true
         ).catch(
-            () => {}
+            err => {
+                if (err) {
+                    console.error(
+                        '[Audit GuildMemberAdd]',
+                        err?.message || err
+                    );
+                }
+            }
         )
 );
 
@@ -1994,7 +2165,14 @@ client.on(
             member,
             false
         ).catch(
-            () => {}
+            err => {
+                if (err) {
+                    console.error(
+                        '[Audit GuildMemberRemove]',
+                        err?.message || err
+                    );
+                }
+            }
         )
 );
 
@@ -2007,7 +2185,14 @@ client.on(
             channel,
             '頻道建立'
         ).catch(
-            () => {}
+            err => {
+                if (err) {
+                    console.error(
+                        '[Audit ChannelCreate]',
+                        err?.message || err
+                    );
+                }
+            }
         )
 );
 
@@ -2020,7 +2205,14 @@ client.on(
             null,
             '頻道刪除'
         ).catch(
-            () => {}
+            err => {
+                if (err) {
+                    console.error(
+                        '[Audit ChannelDelete]',
+                        err?.message || err
+                    );
+                }
+            }
         )
 );
 
@@ -2036,7 +2228,14 @@ client.on(
             newChannel,
             '頻道'
         ).catch(
-            () => {}
+            err => {
+                if (err) {
+                    console.error(
+                        '[Audit ChannelUpdate]',
+                        err?.message || err
+                    );
+                }
+            }
         )
 );
 
@@ -2049,7 +2248,14 @@ client.on(
             role,
             '身分組建立'
         ).catch(
-            () => {}
+            err => {
+                if (err) {
+                    console.error(
+                        '[Audit RoleCreate]',
+                        err?.message || err
+                    );
+                }
+            }
         )
 );
 
@@ -2062,7 +2268,14 @@ client.on(
             null,
             '身分組刪除'
         ).catch(
-            () => {}
+            err => {
+                if (err) {
+                    console.error(
+                        '[Audit RoleDelete]',
+                        err?.message || err
+                    );
+                }
+            }
         )
 );
 
@@ -2078,7 +2291,14 @@ client.on(
             newRole,
             '身分組'
         ).catch(
-            () => {}
+            err => {
+                if (err) {
+                    console.error(
+                        '[Audit RoleUpdate]',
+                        err?.message || err
+                    );
+                }
+            }
         )
 );
 
@@ -2117,7 +2337,14 @@ client.on(
             oldState,
             newState
         ).catch(
-            () => {}
+            err => {
+                if (err) {
+                    console.error(
+                        '[Audit VoiceState]',
+                        err?.message || err
+                    );
+                }
+            }
         );
 
         const joinedChannel =
@@ -2178,6 +2405,10 @@ client.once(
             `🤖 Angela 系統脈衝對齊。已激活：${client.user.tag}`
         );
 
+        console.log(
+            `[Discord] Guild 數量: ${client.guilds.cache.size}`
+        );
+
         // ─────────────────────────────────────
         // 重新註冊 Slash Commands
         // ─────────────────────────────────────
@@ -2211,7 +2442,9 @@ client.once(
 
             console.error(
                 '❌ 註冊斜線指令失敗:',
-                err.message
+                err?.stack ||
+                err?.message ||
+                err
             );
         }
 
@@ -2219,22 +2452,29 @@ client.once(
         // Presence
         // ─────────────────────────────────────
 
-        client.user.setPresence({
-            status: 'idle',
+        try {
+            client.user.setPresence({
+                status: 'idle',
 
-            activities: [
-                {
-                    name:
-                        'customstatus',
+                activities: [
+                    {
+                        name:
+                            'customstatus',
 
-                    type:
-                        ActivityType.Custom,
+                        type:
+                            ActivityType.Custom,
 
-                    state:
-                        '羅蘭。我不能在這裡停下。哪怕這是一條沒有盡頭的荊棘之路，哪怕最後只能迎來毫無意義的毀滅……我也要親手為這長達百年的悲劇畫上句號'
-                }
-            ]
-        });
+                        state:
+                            '羅蘭。我不能在這裡停下。哪怕這是一條沒有盡頭的荊棘之路，哪怕最後只能迎來毫無意義的毀滅……我也要親手為這長達百年的悲劇畫上句號'
+                    }
+                ]
+            });
+        } catch (err) {
+            console.error(
+                '[Startup] Presence 設定失敗:',
+                err?.message || err
+            );
+        }
 
         // ─────────────────────────────────────
         // Discord 伺服器設定還原
@@ -2286,6 +2526,7 @@ client.once(
                 if (
                     stored.rateUpChannelId
                 ) {
+
                     localPatch
                         .rateUpChannelId =
                             stored.rateUpChannelId;
@@ -2294,6 +2535,7 @@ client.once(
                 if (
                     stored.newsChannelId
                 ) {
+
                     localPatch
                         .newsChannelId =
                             stored.newsChannelId;
@@ -2372,7 +2614,9 @@ client.once(
 
             console.error(
                 '[Startup] Discord 伺服器設定還原失敗:',
-                err.message
+                err?.stack ||
+                err?.message ||
+                err
             );
         }
 
@@ -2427,7 +2671,9 @@ client.once(
 
                 console.error(
                     '❌ 上線報告發送失敗:',
-                    err.message
+                    err?.stack ||
+                    err?.message ||
+                    err
                 );
             }
         }
@@ -2456,7 +2702,9 @@ client.once(
 
             console.error(
                 '[Startup] 備份還原失敗（忽略）:',
-                e.message
+                e?.stack ||
+                e?.message ||
+                e
             );
         }
 
@@ -2464,66 +2712,126 @@ client.once(
         // Rate Up
         // ─────────────────────────────────────
 
-        await announceCurrentRateUps(
-            client
-        );
+        try {
+            await announceCurrentRateUps(
+                client
+            );
+        } catch (err) {
+            console.error(
+                '[Startup] Rate Up 啟動公告失敗:',
+                err?.stack ||
+                err?.message ||
+                err
+            );
+        }
 
         // ─────────────────────────────────────
         // Newscheck
         // ─────────────────────────────────────
 
-        startNewsCheckLoop(
-            client
-        );
+        try {
+            startNewsCheckLoop(
+                client
+            );
+        } catch (err) {
+            console.error(
+                '[Startup] Newscheck 啟動失敗:',
+                err?.stack ||
+                err?.message ||
+                err
+            );
+        }
 
         // ─────────────────────────────────────
         // Voice
         // ─────────────────────────────────────
 
-        bootstrapVoiceTracking(
-            client
-        );
+        try {
+            bootstrapVoiceTracking(
+                client
+            );
 
-        startVoiceXpTimer(
-            client
-        );
+            startVoiceXpTimer(
+                client
+            );
 
-        console.log(
-            '📡 [排程] Newscheck / 語音 XP 計時器已啟動'
-        );
+            console.log(
+                '📡 [排程] Newscheck / 語音 XP 計時器已啟動'
+            );
+
+        } catch (err) {
+            console.error(
+                '[Startup] 語音 XP 系統啟動失敗:',
+                err?.stack ||
+                err?.message ||
+                err
+            );
+        }
     }
 );
 
 // ─────────────────────────────────────────────
-// 錯誤保護
+// Discord Gateway Login
 // ─────────────────────────────────────────────
 
-client.on(
-    'error',
-    err =>
-        console.error(
-            'Discord 客戶端錯誤:',
-            err.message
-        )
+const TOKEN =
+    process.env.DISCORD_TOKEN;
+
+console.log(
+    `[Startup] 🔐 DISCORD_TOKEN 狀態: ${
+        TOKEN
+            ? `已讀取 (${TOKEN.length} chars)`
+            : '❌ 未設定'
+    }`
 );
 
-process.on(
-    'unhandledRejection',
-    err =>
-        console.error(
-            '未捕捉的 Promise 拒絕:',
-            err?.message || err
-        )
+if (
+    !TOKEN ||
+    TOKEN ===
+        'DISCORD_TOKEN'
+) {
+
+    console.error(
+        '❌ Render 沒有正確設定 DISCORD_TOKEN。'
+    );
+
+    process.exit(
+        1
+    );
+}
+
+console.log(
+    '[Startup] 🔌 準備連線 Discord Gateway...'
 );
 
-process.on(
-    'uncaughtException',
-    err =>
-        console.error(
-            '未捕捉的例外錯誤:',
-            err?.message || err
-        )
-);
+client.login(
+    TOKEN
+)
+    .then(
+        () => {
+            console.log(
+                '[Startup] ✅ client.login() 已成功送出 Gateway 登入請求。'
+            );
+        }
+    )
+    .catch(
+        err => {
+
+            console.error(
+                '[Startup] ❌ client.login() 失敗:'
+            );
+
+            console.error(
+                err?.stack ||
+                err?.message ||
+                err
+            );
+
+            process.exit(
+                1
+            );
+        }
+    );
 
 // ─────────────────────────────────────────────
 // Export
@@ -2533,83 +2841,3 @@ module.exports = {
     getConfig,
     saveConfig
 };
-
-// ─────────────────────────────────────────────
-// Login
-// ─────────────────────────────────────────────
-
-const TOKEN =
-    process.env.DISCORD_TOKEN;
-
-if (
-    !TOKEN ||
-    TOKEN ===
-        'DISCORD_TOKEN'
-) {
-
-    console.error(
-        '❌ 請設定環境變數 DISCORD_TOKEN'
-    );
-
-    process.exit(1);
-}
-
-client.login(
-    TOKEN
-);
-// ─────────────────────────────────────────────
-// Discord Gateway Diagnostics
-// ─────────────────────────────────────────────
-
-client.on('debug', info => {
-    console.log(`[Discord Debug] ${info}`);
-});
-
-client.on('warn', info => {
-    console.warn(`[Discord Warn] ${info}`);
-});
-
-client.on('error', error => {
-    console.error('[Discord Client Error]', error);
-});
-
-client.on('shardError', (error, shardId) => {
-    console.error(`[Discord Shard ${shardId} Error]`, error);
-});
-
-client.on('shardReady', (id, unavailableGuilds) => {
-    console.log(
-        `[Discord] ✅ Shard ${id} READY | unavailable=${unavailableGuilds?.size ?? 0}`
-    );
-});
-
-client.once('ready', () => {
-    console.log(
-        `[Discord] ✅ READY: ${client.user.tag} | Guilds: ${client.guilds.cache.size}`
-    );
-});
-
-const TOKEN = process.env.DISCORD_TOKEN;
-
-console.log(
-    `[Startup] DISCORD_TOKEN 狀態: ${
-        TOKEN
-            ? `已設定 (${TOKEN.length} chars)`
-            : '❌ 未設定'
-    }`
-);
-
-if (!TOKEN) {
-    console.error('❌ Render 沒有讀到 DISCORD_TOKEN');
-    process.exit(1);
-}
-
-client.login(TOKEN)
-    .then(() => {
-        console.log('[Startup] ✅ client.login() 已成功建立登入流程');
-    })
-    .catch(error => {
-        console.error('[Startup] ❌ client.login() 失敗');
-        console.error(error);
-        process.exit(1);
-    });
