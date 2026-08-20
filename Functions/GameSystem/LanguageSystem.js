@@ -12,20 +12,34 @@ function setLanguage(userId, language) { const data = read(); data[userId] = lan
 function languageName(language) { return language === 'en' ? 'English' : '繁體中文'; }
 function pick(language, zh, en) { return language === 'en' ? en : zh; }
 
-async function translateText(text) {
-    const value = String(text ?? '');
-    if (!value.trim() || value.length > 1500) return value;
-    try {
-        const gRes = await fetch(
-            `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=en&dt=t&q=${encodeURIComponent(value)}`,
-            { headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' } }
-        );
-        const gData = await gRes.json();
-        const segments = Array.isArray(gData?.[0]) ? gData[0] : [];
-        const out = segments.map(s => (Array.isArray(s) ? s[0] : '')).join('');
-        return out.trim() ? out : value;
-    } catch { return value; }
-}
+const TRANSLATION_TIMEOUT_MS = 1200;
+    const TRANSLATION_COOLDOWN_MS = 30_000;
+    const translationCache = new Map();
+    let translationDisabledUntil = 0;
+    function rememberTranslation(key, value) {
+      translationCache.set(key, value);
+      if (translationCache.size > 300) translationCache.delete(translationCache.keys().next().value);
+    }
+    async function translateText(text) {
+      const value = String(text ?? '');
+      if (!value.trim() || value.length > 1500) return value;
+      const key = value;
+      if (translationCache.has(key) || Date.now() < translationDisabledUntil) return translationCache.get(key) || value;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), TRANSLATION_TIMEOUT_MS);
+      try {
+          const gRes = await fetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=en&dt=t&q=${encodeURIComponent(value)}`, { signal: controller.signal, headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' } });
+          if (!gRes.ok) throw new Error(`HTTP ${gRes.status}`);
+          const gData = await gRes.json();
+          const segments = Array.isArray(gData?.[0]) ? gData[0] : [];
+          const out = segments.map(s => (Array.isArray(s) ? s[0] : '')).join('').trim();
+          if (!out) return value;
+          rememberTranslation(key, out);
+          translationDisabledUntil = 0;
+          return out;
+      } catch { translationDisabledUntil = Date.now() + TRANSLATION_COOLDOWN_MS; return value; }
+      finally { clearTimeout(timer); }
+    }
 
 async function localizeEmbed(embed) {
     const data = typeof embed?.toJSON === 'function' ? embed.toJSON() : { ...embed };
@@ -52,7 +66,13 @@ function localizeInteraction(interaction) {
     for (const method of ['reply', 'editReply', 'followUp']) {
         if (typeof interaction[method] !== 'function') continue;
         const original = interaction[method].bind(interaction);
-        interaction[method] = async payload => original(await localizePayload(interaction.user.id, payload));
+          interaction[method] = async payload => {
+              const translated = await Promise.race([
+                  localizePayload(interaction.user.id, payload),
+                  new Promise(resolve => setTimeout(() => resolve(payload), TRANSLATION_TIMEOUT_MS))
+              ]);
+              return original(translated);
+          };
     }
     return interaction;
 }
