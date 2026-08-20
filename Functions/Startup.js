@@ -2498,7 +2498,12 @@ client.once(
 // 錯誤保護
 // ─────────────────────────────────────────────
 
-client.on(
+client.on('shardReconnecting', () => console.warn('[Discord] 正在重新連線…'));
+    client.on('shardResume', () => console.log('[Discord] 連線已恢復'));
+    client.on('shardDisconnect', () => console.error('[Discord] 連線中斷'));
+    client.on('invalidated', () => { console.error('[Discord] Session 已失效，交給 Render 重啟'); process.exit(1); });
+
+    client.on(
     'error',
     err =>
         console.error(
@@ -2516,14 +2521,11 @@ process.on(
         )
 );
 
-process.on(
-    'uncaughtException',
-    err =>
-        console.error(
-            '未捕捉的例外錯誤:',
-            err?.message || err
-        )
-);
+process.on('uncaughtException', err => {
+      console.error('未捕捉的例外錯誤，將由 Render 重新啟動:', err?.stack || err);
+      process.exitCode = 1;
+      setTimeout(() => process.exit(1), 100);
+    });
 
 // ─────────────────────────────────────────────
 // Export
