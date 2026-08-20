@@ -35,23 +35,35 @@ function getTranslationConfig(guildId) {
 }
 function getTranslationChannel(guildId) { return getTranslationConfig(guildId).output || null; }
 
-async function translate(text, target) {
-    const clean = String(text || '').trim().slice(0, 1500);
-    if (!clean) return '（無文字內容）';
-    try {
-        const gRes = await fetch(
-            `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${encodeURIComponent(target)}&dt=t&q=${encodeURIComponent(clean)}`,
-            { headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' } }
-        );
-        const gData = await gRes.json();
-        const segments = Array.isArray(gData?.[0]) ? gData[0] : [];
-        const out = segments.map(s => (Array.isArray(s) ? s[0] : '')).join('');
-        return out.trim() ? out : clean;
-    } catch (err) {
-        console.error('[Translation] Google 翻譯失敗:', err.message);
-        return clean;
+const TRANSLATION_TIMEOUT_MS = 2000;
+    const TRANSLATION_COOLDOWN_MS = 60_000;
+    const TRANSLATION_MAX_CONCURRENT = 4;
+    const translationCache = new Map();
+    let activeTranslations = 0;
+    let translationDisabledUntil = 0;
+    function rememberTranslation(key, value) {
+      translationCache.set(key, value);
+      if (translationCache.size > 500) translationCache.delete(translationCache.keys().next().value);
     }
-}
+    async function translate(text, target) {
+      const clean = String(text || '').trim().slice(0, 1500);
+      if (!clean) return '（無文字內容）';
+      const key = target + ':' + clean;
+      if (translationCache.has(key) || Date.now() < translationDisabledUntil || activeTranslations >= TRANSLATION_MAX_CONCURRENT) return translationCache.get(key) || clean;
+      activeTranslations += 1;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), TRANSLATION_TIMEOUT_MS);
+      try {
+          const gRes = await fetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${encodeURIComponent(target)}&dt=t&q=${encodeURIComponent(clean)}`, { signal: controller.signal, headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' } });
+          if (!gRes.ok) throw new Error(`HTTP ${gRes.status}`);
+          const gData = await gRes.json();
+          const segments = Array.isArray(gData?.[0]) ? gData[0] : [];
+          const out = segments.map(s => (Array.isArray(s) ? s[0] : '')).join('').trim();
+          if (!out) return clean;
+          rememberTranslation(key, out); translationDisabledUntil = 0; return out;
+      } catch { translationDisabledUntil = Date.now() + TRANSLATION_COOLDOWN_MS; return clean; }
+      finally { clearTimeout(timer); activeTranslations -= 1; }
+    }
 
 
 async function handleTranslationMessage(client, message) {
