@@ -38,9 +38,6 @@ const RARITY_LABEL  = { '0':'★','S1':'★','00':'★★','S2':'★★','000':'
 const RARITY_COLOR  = { '0':0x57606f,'S1':0x57606f,'00':0x74b9ff,'S2':0x74b9ff,'000':0xffd166,'S3':0xffd166,'0000':0xff6b6b,'S4':0xff6b6b,'Color Fixer':0xffffff,'Egos':0xa55eea,'EGOS':0xa55eea,'Special':0x2ed573,'ABN_ZAYIN':0xbdc3c7,'ABN_TETH':0xf1c40f,'ABN_HE':0x2ecc71,'ABN_WAW':0x3498db,'ABN_ALEPH':0x9b59b6,'ABN_ANGELA':0xffffff };
 
 // ─── 等級費用表 ───────────────────────────────────────────────
-// Lv 1-20: 碎片 lv×5
-// Lv 21-40: 碎片 lv×8 + 經驗卷 ×1
-// Lv 41-60: 碎片 lv×12 + 經驗卷 ×3
 function calcLevelCost(curLv, steps = 1) {
     let frags = 0, scrolls = 0;
     for (let l = curLv; l < Math.min(curLv + steps, 60); l++) {
@@ -66,24 +63,17 @@ function findRarity(name) {
     return '0';
 }
 
-// \uFF3D = ） fullwidth right square bracket (used in ［…）names)
-// \uFF09 = ） fullwidth right parenthesis (used in （…）names)
-// \u005D = ] ASCII right square bracket
 function getShortName(name) {
     const s = String(name || '');
-    // 提取括號「內容」作為人格識別名（如「食指-父輩」「巴士底工廠」）
     const inner = s.match(/[［（（([](.+?)[］））)]]/);
     if (inner) {
         let content = inner[1].trim();
-        // 取冒號後部分（如「蜘蛛巢：食指-父輩」→「食指-父輩」）
         const afterColon = content.match(/[：:]\s*(.+)/);
         if (afterColon) content = afterColon[1].trim();
         return content.slice(0, 12);
     }
-    // LCB 格式取最後詞（如「LCB 罪人 李箱」→「李箱」）
     const lcb = s.match(/^LCB\s+\S+\s+(.+?)(?:\s*\/|$)/);
     if (lcb) return lcb[1].trim().slice(0, 12);
-    // fallback：斜線前的部分
     const slash = s.indexOf('/');
     return (slash > 0 ? s.slice(0, slash) : s).trim().slice(0, 12);
 }
@@ -234,7 +224,6 @@ function splitTextIntoChunks(text, maxBytes = MAX_TXT_BYTES) {
             return;
         }
 
-        // 單行太大就硬切
         let remaining = line;
         while (remaining.length > 0) {
             let lo = 1;
@@ -390,7 +379,6 @@ function getOrCreatePlayer(client, userId, username) {
     p.party          ??= [];
     p.totalPulls     ??= 0;
     p.identities     ??= [];
-    // 舊資料遷移：lunacy -> lightSeeds
     if (p.lunacy !== undefined) {
         p.lightSeeds = (p.lightSeeds || 0) + p.lunacy;
         delete p.lunacy;
@@ -410,7 +398,6 @@ function getOrCreatePlayer(client, userId, username) {
     return p;
 }
 
-// 向下相容（PullSystem / GiveAwaySystem 使用）
 function loadUserInventory(_client, userId) {
     return (loadPlayerData(null, userId) || {}).identities || [];
 }
@@ -487,13 +474,11 @@ async function showPack(client, message) {
     col.on('collect', async ix => {
         const id = ix.customId;
 
-        // ═══ 主頁 ════════════════════════════════════════════
         if (id === 'pk_home') {
             const p = refresh();
             return ix.update({ embeds: [lobbyEmbed(p)], components: lobbyRows() });
         }
 
-        // ═══ 人格庫 ══════════════════════════════════════════
         if (id === 'pk_lib') {
             const pool = getIdData().pool || {};
             const rarityOpts = RARITY_ORDER
@@ -613,13 +598,11 @@ async function showPack(client, message) {
             return;
         }
 
-        // ═══ 出擊編成（先選罪人，再選人格）══════════════════
         if (id === 'pk_form') {
             const { showPartyUI } = require('./PartySystem.js');
             return showPartyUI(client, ix, message.author.id, message.author.username);
         }
 
-        // ═══ 人格培育 ════════════════════════════════════════
         if (id === 'pk_cult') {
             const p   = refresh();
             const all = p.identities.slice(0, 25);
@@ -682,9 +665,8 @@ async function showPack(client, message) {
             return showCultivation(ix, name, refresh, save);
         }
 
-        // ═══ E.G.O ═══════════════════════════════════════════
         if (id === 'pk_ego') {
-            const p   = refresh();
+            const p    = refresh();
             const desc = p.egos.length
                 ? p.egos.map((e, i) => `${i + 1}. 🔮 ${e}`).join('\n')
                 : '您尚未持有任何 E.G.O。';
@@ -704,8 +686,8 @@ async function showPack(client, message) {
 }
 
 async function showCultivation(ix, name, refresh, save) {
-    const p    = refresh();
-    const lv   = p.identityLevels[name] || 1;
+    const p     = refresh();
+    const lv    = p.identityLevels[name] || 1;
     const cost1  = calcLevelCost(lv, 1);
     const cost10 = calcLevelCost(lv, 10);
     const maxCost = calcLevelCost(lv, 60 - lv);
@@ -750,16 +732,12 @@ const BASE_RATES = {
 };
 const RATE_UP_MULT = 5;
 
-
-// ─── /list 顯示名稱（保留完整角色識別符）────────────────────────
 function getListDisplayName(name, lang) {
     const s = String(name || '');
-    // 英文偏好：取斜線後的英文名
     if (lang === 'en') {
         const slash = s.lastIndexOf(' / ');
         if (slash >= 0) return s.slice(slash + 3).trim().slice(0, 40);
     }
-    // 中文：原本邏輯
     const m = s.match(/[［【\[](.+?)[］】\]]\s*([^/]+)/);
     if (m) {
         const bracket = m[1].trim();
@@ -808,6 +786,7 @@ function buildListPages() {
     }
     return pages;
 }
+
 function renderPage(pages, idx, userId) {
     const p = pages[idx];
     const lang = userId ? getLanguage(userId) : 'zh';
@@ -835,6 +814,7 @@ function renderPage(pages, idx, userId) {
         .setDescription(`### ${RARITY_LABEL[p.r]} (${p.ci + 1}/${p.ct})\n共 ${p.total} 件 ｜ 總機率 \`${(base * 100).toFixed(4)}%\`\n\n${lines.join('\n')}`)
         .setFooter({ text: foot });
 }
+
 async function showList(message) {
     const pages = buildListPages();
     let idx = 0;
@@ -844,13 +824,13 @@ async function showList(message) {
         new ButtonBuilder().setCustomId('ls_next').setLabel('▶').setStyle(ButtonStyle.Primary).setDisabled(i >= pages.length - 1),
     )];
 
-    const rep = await message.reply({ embeds: [renderPage(pages, idx)], components: navRow(idx) });
+    const rep = await message.reply({ embeds: [renderPage(pages, idx, message.author.id)], components: navRow(idx) });
     const col = rep.createMessageComponentCollector({ filter: i => i.user.id === message.author.id, time: 120_000 });
 
     col.on('collect', async i => {
         if (i.customId === 'ls_prev') idx = Math.max(0, idx - 1);
         if (i.customId === 'ls_next') idx = Math.min(pages.length - 1, idx + 1);
-        await i.update({ embeds: [renderPage(pages, idx)], components: navRow(idx) });
+        await i.update({ embeds: [renderPage(pages, idx, message.author.id)], components: navRow(idx) });
     });
     col.on('end', () => rep.edit({ components: [] }).catch(() => {}));
 }
@@ -858,145 +838,25 @@ async function showList(message) {
 // ─── 主路由 ───────────────────────────────────────────────────
 async function handleInventory(client, message) {
     const raw = message.content.trim();
-    if (raw === '!list' || raw === '!清單') return showList(message);
-    return showPack(client, message);
-}
-
-
-// ─── 從 Discord 備份頻道還原玩家資料 ─────────────────────────
-// 啟動時如果本地玩家資料不存在/為空，自動從備份頻道拉取最新快照還原
-async function restoreFromBackupChannel(client) {
-    if (!client) return 0;
-
-    // 確認本地資料是否已存在（有玩家就不需要還原）
-    if (fs.existsSync(DATA_DIR)) {
-        const existing = fs.readdirSync(DATA_DIR).filter(f => f.endsWith('.json'));
-        if (existing.length > 0) {
-            console.log(`[Pack] 本地已有 ${existing.length} 位玩家資料，跳過從備份頻道還原。`);
-            return 0;
-        }
+    if (raw === '!list' || raw === '!rate' || raw === '!rates') {
+        return showList(message);
     }
-
-    console.log('[Pack] 本地玩家資料為空，嘗試從備份頻道還原...');
-
-    const channelId = BACKUP_CHANNEL_ID;
-    const channel = await client.channels.fetch(channelId).catch(() => null);
-    if (!channel) {
-        console.warn('[Pack] 找不到備份頻道，略過還原。');
-        return 0;
+    if (raw === '!pack' || raw === '!p' || raw === '!inv' || raw === '!inventory') {
+        return showPack(client, message);
     }
-
-    // 抓最近 50 則訊息，找最新的備份附件
-    const messages = await channel.messages.fetch({ limit: 50 }).catch(() => null);
-    if (!messages?.size) return 0;
-
-    // 按時間排序，最新的在前
-    const sorted = [...messages.values()].sort((a, b) => b.createdTimestamp - a.createdTimestamp);
-
-    // 找最新一批備份（同一時間戳的所有 part）
-    let backupFiles = [];
-    let targetStamp = null;
-
-    for (const msg of sorted) {
-        if (!msg.attachments?.size) continue;
-        const attachments = [...msg.attachments.values()].filter(a => a.name?.endsWith('.txt') && a.name?.includes('players_backup'));
-        if (!attachments.length) continue;
-
-        // 取得時間戳（從檔名提取）
-        const stampMatch = attachments[0].name.match(/players_backup_([^_]+_[^_]+_[^_]+)/);
-        const stamp = stampMatch?.[1] || msg.createdTimestamp.toString();
-
-        if (!targetStamp) targetStamp = stamp;
-        if (stamp !== targetStamp) break; // 只取同一批次
-
-        backupFiles.push(...attachments);
-    }
-
-    if (!backupFiles.length) {
-        console.warn('[Pack] 備份頻道中找不到有效備份檔案。');
-        return 0;
-    }
-
-    console.log(`[Pack] 找到備份檔案 ${backupFiles.length} 個，開始還原...`);
-
-    // 下載並解析每個備份檔
-    let restoredCount = 0;
-    const nodeFetch = (() => { try { return require('node-fetch'); } catch { return null; } })();
-    const fetchFn = nodeFetch || ((...args) => import('node-fetch').then(m => m.default(...args)));
-
-    for (const attachment of backupFiles) {
-        try {
-            const res = await fetchFn(attachment.url);
-            if (!res.ok) continue;
-            const text = await res.text();
-
-            // 解析格式：每個玩家以 === USER ID: xxx === 分隔
-            const blocks = text.split('==================================================');
-            let currentUserId = null;
-            let jsonBuffer = [];
-            let inJson = false;
-
-            for (const line of text.split('\n')) {
-                const trimmed = line.trim();
-                if (trimmed.startsWith('USER ID: ')) {
-                    currentUserId = trimmed.slice('USER ID: '.length).trim();
-                    jsonBuffer = [];
-                    inJson = false;
-                } else if (currentUserId && trimmed === '{') {
-                    inJson = true;
-                    jsonBuffer = ['{'];
-                } else if (inJson && trimmed === '') {
-                    // 嘗試解析已收集的 JSON
-                    if (jsonBuffer.length > 1) {
-                        try {
-                            const data = JSON.parse(jsonBuffer.join('\n'));
-                            const file = path.join(DATA_DIR, `${currentUserId}.json`);
-                            if (!fs.existsSync(file)) {
-                                fs.mkdirSync(path.dirname(file), { recursive: true });
-                                fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf8');
-                                restoredCount++;
-                            }
-                        } catch {}
-                        jsonBuffer = [];
-                        inJson = false;
-                        currentUserId = null;
-                    }
-                } else if (inJson) {
-                    jsonBuffer.push(line);
-                }
-            }
-
-            // 處理最後一個 block
-            if (inJson && currentUserId && jsonBuffer.length > 1) {
-                try {
-                    const data = JSON.parse(jsonBuffer.join('\n'));
-                    const file = path.join(DATA_DIR, `${currentUserId}.json`);
-                    if (!fs.existsSync(file)) {
-                        fs.mkdirSync(path.dirname(file), { recursive: true });
-                        fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf8');
-                        restoredCount++;
-                    }
-                } catch {}
-            }
-        } catch (err) {
-            console.error('[Pack] 下載備份檔案失敗:', err.message);
-        }
-    }
-
-    console.log(`[Pack] 還原完成，成功還原 ${restoredCount} 位玩家。`);
-    return restoredCount;
 }
 
 module.exports = {
     handleInventory,
+    showPack,
+    showList,
+    getOrCreatePlayer,
     loadPlayerData,
     savePlayerData,
-    getOrCreatePlayer,
     loadUserInventory,
     saveUserInventory,
-    findRarity,
+    getShortName,
     calcLevelCost,
-    // 需要手動強制同步時可以從外部呼叫
-    sendBackupTxtToChannel,
-    restoreFromBackupChannel,
+    getIdentitySinnerKey,
+    getOwnedSinners,
 };
