@@ -12,13 +12,13 @@ const PLAYERS_DIR = path.join(process.cwd(), 'data', 'players');
 const LEVEL_REWARDS = {
     perLevel: { starCoins: 25, lightSeeds: 5 },
     milestones: {
-        5:  { starCoins: 50,  lightSeeds: 10 },
-        10: { starCoins: 100, lightSeeds: 20 },
-        15: { starCoins: 150, lightSeeds: 30 },
-        20: { starCoins: 250, lightSeeds: 50 },
-        25: { starCoins: 350, lightSeeds: 70 },
-        50: { starCoins: 750, lightSeeds: 150 },
-        100:{ starCoins: 1500, lightSeeds: 300 },
+        5:   { starCoins: 50,   lightSeeds: 10 },
+        10:  { starCoins: 100,  lightSeeds: 20 },
+        15:  { starCoins: 150,  lightSeeds: 30 },
+        20:  { starCoins: 250,  lightSeeds: 50 },
+        25:  { starCoins: 350,  lightSeeds: 70 },
+        50:  { starCoins: 750,  lightSeeds: 150 },
+        100: { starCoins: 1500, lightSeeds: 300 },
     },
 };
 
@@ -34,6 +34,7 @@ function getLevelFromXp(totalXp) {
     }
     return { level, xpIntoLevel: remaining, xpNeeded: xpNeededForLevel(level + 1) };
 }
+
 function rewardForLevel(level) {
     const milestone = LEVEL_REWARDS.milestones[level] || {};
     return {
@@ -41,6 +42,7 @@ function rewardForLevel(level) {
         lightSeeds: LEVEL_REWARDS.perLevel.lightSeeds + (milestone.lightSeeds || 0),
     };
 }
+
 function grantLevelRewards(player, oldLevel, newLevel) {
     const total = { starCoins: 0, lightSeeds: 0 };
     for (let level = Math.max(1, oldLevel + 1); level <= newLevel; level++) {
@@ -97,14 +99,25 @@ async function addXp(client, userId, username, amount, guildId = null) {
     return { ...newData, rewards };
 }
 
+// ⏱️ 50 秒冷卻，固定 +2 XP 防止刷頻
 const messageCooldowns = new Map();
+
 async function handleMessageXp(client, message) {
     if (!message || message.author?.bot || !message.guild) return;
+    
     const userId = message.author.id;
     const now = Date.now();
-    if (now - (messageCooldowns.get(userId) || 0) < 60_000) return;
+    
+    // 50 秒冷卻機制
+    if (now - (messageCooldowns.get(userId) || 0) < 50_000) return;
+    
     messageCooldowns.set(userId, now);
-    await addXp(client, userId, message.author.username, 2, message.guild.id).catch(() => {});
+
+    // 除錯日誌：可在 Console 確認是否有抓到玩家打字
+    console.log(`[LevelSystem] 玩家 ${message.author.username} (${userId}) 打字獲得 2 XP`);
+
+    await addXp(client, userId, message.author.username, 2, message.guild.id)
+        .catch(err => console.error('[LevelSystem] 打字加 XP 失敗:', err.message));
 }
 
 // 使用 guildId:userId 作 key，避免同一玩家在不同伺服器互相覆蓋。
