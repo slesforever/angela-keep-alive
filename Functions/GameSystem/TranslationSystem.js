@@ -1,10 +1,13 @@
 // Functions/GameSystem/TranslationSystem.js
-// 指定頻道自動翻譯：MyMemory + Google 雙備援、跳轉連結、多媒體支援與 UI 優化
+// 指定頻道自動翻譯：使用 Google Gemini API（免費、極穩定、不限流、高優質翻譯）
 'use strict';
 
 const fs = require('fs');
 const path = require('path');
 const { EmbedBuilder } = require('discord.js');
+
+// 🔑 請在此處填入你的 Gemini API Key (或設定在 .env 檔中)
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "YOUR_GEMINI_API_KEY_HERE";
 
 const CONFIG_PATH = path.join(process.cwd(), 'data', 'translation-config.json');
 
@@ -62,7 +65,7 @@ function getTranslationChannel(guildId) {
     return getTranslationConfig(guildId).output || null;
 }
 
-// --- 快取與流控 ---
+// --- 快取機制 ---
 const translationCache = new Map();
 
 function rememberTranslation(key, value) {
@@ -70,78 +73,71 @@ function rememberTranslation(key, value) {
     if (translationCache.size > 1000) translationCache.delete(translationCache.keys().next().value);
 }
 
-// 核心翻譯 1：MyMemory Translation API (極度穩定且準確)
-async function translateMyMemory(text, target) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 4000);
-    try {
-        // target 格式調整：zh-TW 轉成 zh-TW, en 轉成 en
-        const langPair = `autodetect|${target === 'zh-TW' ? 'zh-TW' : 'en'}`;
-        const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${encodeURIComponent(langPair)}`;
-        
-        const res = await fetch(url, { signal: controller.signal });
-        if (!res.ok) throw new Error(`MyMemory HTTP ${res.status}`);
-        
-        const data = await res.json();
-        const translatedText = data?.responseData?.translatedText?.trim();
-
-        // 檢查 MyMemory 是否回傳無效訊息或超過限額警告
-        if (!translatedText || translatedText.includes('MYMEMORY WARNING')) return null;
-        return translatedText;
-    } catch {
-        return null;
-    } finally {
-        clearTimeout(timer);
+// 核心翻譯：使用 Google Gemini API（一次生成繁中與英文，節省請求次數）
+async function translateWithGemini(text) {
+    if (!GEMINI_API_KEY || GEMINI_API_KEY === "YOUR_GEMINI_API_KEY_HERE") {
+        console.error('[Translation] 未設定 GEMINI_API_KEY！');
+        return { zh: text, en: text };
     }
-}
 
-// 核心翻譯 2：Google GTX API (備援機制)
-async function translateGoogle(text, target) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 4000);
+    const timer = setTimeout(() => controller.abort(), 8000);
+
     try {
-        const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${encodeURIComponent(target)}&dt=t&q=${encodeURIComponent(text)}`;
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+        
+        const prompt = `You are a translator for a Discord bot. Translate the following user message into Traditional Chinese (zh-TW) and English (en).
+Return ONLY a raw JSON object with keys "zh" and "en". Do not add Markdown code blocks, backticks, or any extra text.
+
+Message to translate:
+"${text}"`;
+
         const res = await fetch(url, {
-            signal: controller.signal,
-            headers: { 
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-                'Accept': 'application/json'
-            }
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                contents: [{ parts: [{ text: prompt }] }]
+            }),
+            signal: controller.signal
         });
-        if (!res.ok) throw new Error(`Google HTTP ${res.status}`);
+
+        if (!res.ok) {
+            const errBody = await res.text();
+            throw new Error(`HTTP ${res.status}: ${errBody}`);
+        }
+
         const data = await res.json();
-        const segments = Array.isArray(data?.[0]) ? data[0] : [];
-        const result = segments.map(s => (Array.isArray(s) ? s[0] : '')).join('').trim();
-        return result || null;
-    } catch {
-        return null;
+        const rawResponse = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
+        
+        // 清理 AI 可能包裹的 markdown json 標籤
+        const cleanJson = rawResponse.replace(/```json/g, '').replace(/```/g, '').trim();
+        const parsed = JSON.parse(cleanJson);
+
+        return {
+            zh: parsed.zh || text,
+            en: parsed.en || text
+        };
+    } catch (err) {
+        console.error('[Translation Error]', err.message);
+        return { zh: `${text} *(翻譯連線失敗)*`, en: `${text} *(Translation Failed)*` };
     } finally {
         clearTimeout(timer);
     }
 }
 
-// 雙備援翻譯主入口
-async function translate(text, target) {
+// 雙語翻譯入口
+async function translateBoth(text) {
     const clean = String(text || '').trim().slice(0, 1500);
-    if (!clean) return '';
+    if (!clean) return { zh: '', en: '' };
 
-    const cacheKey = `${target}:${clean}`;
+    const cacheKey = `both:${clean}`;
     if (translationCache.has(cacheKey)) {
         return translationCache.get(cacheKey);
     }
 
-    // 1. 優先使用 MyMemory 翻譯
-    let result = await translateMyMemory(clean, target);
-    
-    // 2. 失敗時切換至 Google GTX
-    if (!result) {
-        result = await translateGoogle(clean, target);
-    }
-
-    // 3. 若兩者都失敗，回傳提示，方便排查是否 API 被封鎖
-    const finalResult = result || `${clean} *(翻譯連線失敗)*`;
-    rememberTranslation(cacheKey, finalResult);
-    return finalResult;
+    const result = await translateWithGemini(clean);
+    rememberTranslation(cacheKey, result);
+    return result;
 }
 
 // --- 訊息處理核心 logic ---
@@ -163,13 +159,12 @@ async function handleTranslationMessage(client, message) {
     const targetChannel = await client.channels.fetch(targetId).catch(() => null);
     if (!targetChannel?.isTextBased?.()) return;
 
-    // 並發執行繁中與英文翻譯
-    const [zhText, enText] = await Promise.all([
-        rawText.trim() ? translate(rawText, 'zh-TW') : Promise.resolve(''),
-        rawText.trim() ? translate(rawText, 'en') : Promise.resolve('')
-    ]);
-
     const cleanRaw = rawText.trim();
+    
+    // 一次呼叫 Gemini 取得繁中與英文翻譯
+    const translations = cleanRaw 
+        ? await translateBoth(cleanRaw) 
+        : { zh: '', en: '' };
 
     // Embed UI 打造
     const embed = new EmbedBuilder()
@@ -200,7 +195,7 @@ async function handleTranslationMessage(client, message) {
     if (cleanRaw) {
         embed.addFields({
             name: '🇹🇼 繁體中文',
-            value: (zhText || cleanRaw).slice(0, 1024),
+            value: translations.zh.slice(0, 1024),
             inline: false
         });
     }
@@ -209,7 +204,7 @@ async function handleTranslationMessage(client, message) {
     if (cleanRaw) {
         embed.addFields({
             name: '🇺🇸 English',
-            value: (enText || cleanRaw).slice(0, 1024),
+            value: translations.en.slice(0, 1024),
             inline: false
         });
     }
