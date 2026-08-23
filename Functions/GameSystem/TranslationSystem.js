@@ -1,5 +1,5 @@
 // Functions/GameSystem/TranslationSystem.js
-// 指定頻道自動翻譯：雙備援翻譯機制（Lingva + Google）、跳轉連結、多媒體支援與 UI 優化
+// 指定頻道自動翻譯：MyMemory + Google 雙備援、跳轉連結、多媒體支援與 UI 優化
 'use strict';
 
 const fs = require('fs');
@@ -70,19 +70,24 @@ function rememberTranslation(key, value) {
     if (translationCache.size > 1000) translationCache.delete(translationCache.keys().next().value);
 }
 
-// 核心翻譯 1：Lingva API (Google 免費開源替代代理，不易被 Ban)
-async function translateLingva(text, target) {
+// 核心翻譯 1：MyMemory Translation API (極度穩定且準確)
+async function translateMyMemory(text, target) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 3000);
+    const timer = setTimeout(() => controller.abort(), 4000);
     try {
-        const url = `https://lingva.ml/api/v1/auto/${target}/${encodeURIComponent(text)}`;
-        const res = await fetch(url, {
-            signal: controller.signal,
-            headers: { 'User-Agent': 'Mozilla/5.0' }
-        });
-        if (!res.ok) throw new Error(`Lingva HTTP ${res.status}`);
+        // target 格式調整：zh-TW 轉成 zh-TW, en 轉成 en
+        const langPair = `autodetect|${target === 'zh-TW' ? 'zh-TW' : 'en'}`;
+        const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${encodeURIComponent(langPair)}`;
+        
+        const res = await fetch(url, { signal: controller.signal });
+        if (!res.ok) throw new Error(`MyMemory HTTP ${res.status}`);
+        
         const data = await res.json();
-        return data.translation?.trim() || null;
+        const translatedText = data?.responseData?.translatedText?.trim();
+
+        // 檢查 MyMemory 是否回傳無效訊息或超過限額警告
+        if (!translatedText || translatedText.includes('MYMEMORY WARNING')) return null;
+        return translatedText;
     } catch {
         return null;
     } finally {
@@ -93,12 +98,15 @@ async function translateLingva(text, target) {
 // 核心翻譯 2：Google GTX API (備援機制)
 async function translateGoogle(text, target) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 3000);
+    const timer = setTimeout(() => controller.abort(), 4000);
     try {
         const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${encodeURIComponent(target)}&dt=t&q=${encodeURIComponent(text)}`;
         const res = await fetch(url, {
             signal: controller.signal,
-            headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' }
+            headers: { 
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+                'Accept': 'application/json'
+            }
         });
         if (!res.ok) throw new Error(`Google HTTP ${res.status}`);
         const data = await res.json();
@@ -122,14 +130,16 @@ async function translate(text, target) {
         return translationCache.get(cacheKey);
     }
 
-    // 先用 Lingva，失敗自動降級到 Google GTX
-    let result = await translateLingva(clean, target);
+    // 1. 優先使用 MyMemory 翻譯
+    let result = await translateMyMemory(clean, target);
+    
+    // 2. 失敗時切換至 Google GTX
     if (!result) {
         result = await translateGoogle(clean, target);
     }
 
-    // 若都失敗，回傳原文
-    const finalResult = result || clean;
+    // 3. 若兩者都失敗，回傳提示，方便排查是否 API 被封鎖
+    const finalResult = result || `${clean} *(翻譯連線失敗)*`;
     rememberTranslation(cacheKey, finalResult);
     return finalResult;
 }
@@ -160,8 +170,6 @@ async function handleTranslationMessage(client, message) {
     ]);
 
     const cleanRaw = rawText.trim();
-    const cleanZh = zhText.trim() || cleanRaw;
-    const cleanEn = enText.trim() || cleanRaw;
 
     // Embed UI 打造
     const embed = new EmbedBuilder()
@@ -169,7 +177,7 @@ async function handleTranslationMessage(client, message) {
         .setAuthor({
             name: `${message.author.displayName || message.author.username} (@${message.author.username})`,
             iconURL: message.author.displayAvatarURL({ dynamic: true }),
-            url: message.url // 點擊發言者可跳轉
+            url: message.url // 點擊發言者頭像/名字可跳轉
         })
         .setTitle('💬 點此前往原始訊息 / Jump to Message')
         .setURL(message.url) // 提供明確跳轉連結
@@ -188,19 +196,23 @@ async function handleTranslationMessage(client, message) {
         });
     }
 
-    // 2. 繁體中文欄位（固定呈現）
-    embed.addFields({
-        name: '🇹🇼 繁體中文',
-        value: cleanZh.slice(0, 1024),
-        inline: false
-    });
+    // 2. 繁體中文欄位
+    if (cleanRaw) {
+        embed.addFields({
+            name: '🇹🇼 繁體中文',
+            value: (zhText || cleanRaw).slice(0, 1024),
+            inline: false
+        });
+    }
 
-    // 3. English 欄位（固定呈現）
-    embed.addFields({
-        name: '🇺🇸 English',
-        value: cleanEn.slice(0, 1024),
-        inline: false
-    });
+    // 3. English 欄位
+    if (cleanRaw) {
+        embed.addFields({
+            name: '🇺🇸 English',
+            value: (enText || cleanRaw).slice(0, 1024),
+            inline: false
+        });
+    }
 
     // 4. 附件與圖片處理
     if (attachmentUrls.length > 0) {
