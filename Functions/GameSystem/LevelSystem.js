@@ -91,17 +91,31 @@ async function announceLevelUp(client, userId, username, newLevel, guildId, rewa
     } catch (err) { console.error('[LevelSystem] 升級公告失敗:', err.message); }
 }
 
+// 取得玩家當前總 XP (雙重相容 exp 與 xp 欄位，防止舊資料歸零)
+function getPlayerTotalXp(player) {
+    if (!player) return 0;
+    return Math.max(Number(player.xp) || 0, Number(player.exp) || 0);
+}
+
 async function addXp(client, userId, username, amount, guildId = null) {
     const { getOrCreatePlayer, savePlayerData } = require('./PacksAndData.js');
-    const player = getOrCreatePlayer(null, userId, username);
-    const oldXp = Math.max(0, Number(player.xp) || 0);
+    const player = getOrCreatePlayer(client, userId, username);
+    
+    // 讀取既有經驗 (抓取 xp 與 exp 中的最大值)
+    const oldXp = getPlayerTotalXp(player);
     const oldData = getLevelFromXp(oldXp);
+    
     const newXp = oldXp + Math.max(0, Number(amount) || 0);
     const newData = getLevelFromXp(newXp);
+    
     const rewards = newData.level > oldData.level ? grantLevelRewards(player, oldData.level, newData.level) : { starCoins: 0, lightSeeds: 0 };
+    
+    // 同步更新 xp 與 exp，雙重保險
     player.xp = newXp;
+    player.exp = newXp;
     player.level = newData.level;
-    savePlayerData(null, userId, player);
+    
+    savePlayerData(client, userId, player);
     if (newData.level > oldData.level && client && guildId) await announceLevelUp(client, userId, username, newData.level, guildId, rewards);
     return { ...newData, rewards };
 }
@@ -170,8 +184,8 @@ function buildRankBar(xpInto, xpNeeded) {
 async function handleRank(client, interaction) {
     const target = interaction.options?.getUser('target') || interaction.user;
     const { getOrCreatePlayer } = require('./PacksAndData.js');
-    const player = getOrCreatePlayer(null, target.id, target.username);
-    const xp = player.xp || 0;
+    const player = getOrCreatePlayer(client, target.id, target.username);
+    const xp = getPlayerTotalXp(player);
     const { level, xpIntoLevel, xpNeeded } = getLevelFromXp(xp);
     const pct = Math.floor((xpIntoLevel / Math.max(1, xpNeeded)) * 100);
     return interaction.reply({ embeds: [new EmbedBuilder()
@@ -195,7 +209,8 @@ async function handleLeaderboard(client, interaction) {
         if (!file.endsWith('.json')) continue;
         try { 
             const p = JSON.parse(fs.readFileSync(path.join(PLAYERS_DIR, file), 'utf8')); 
-            entries.push({ id: file.slice(0, -5), username: p.username || 'Player', xp: Number(p.xp) || 0 }); 
+            const totalXp = Math.max(Number(p.xp) || 0, Number(p.exp) || 0);
+            entries.push({ id: file.slice(0, -5), username: p.username || 'Player', xp: totalXp }); 
         } catch {}
     }
     entries.sort((a, b) => b.xp - a.xp);
