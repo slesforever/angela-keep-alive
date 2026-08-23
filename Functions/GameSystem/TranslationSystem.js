@@ -160,8 +160,8 @@ async function handleTranslationMessage(client, message) {
     ]);
 
     const cleanRaw = rawText.trim();
-    const cleanZh = zhText.trim();
-    const cleanEn = enText.trim();
+    const cleanZh = zhText.trim() || cleanRaw;
+    const cleanEn = enText.trim() || cleanRaw;
 
     // Embed UI 打造
     const embed = new EmbedBuilder()
@@ -188,23 +188,19 @@ async function handleTranslationMessage(client, message) {
         });
     }
 
-    // 2. 繁體中文：只有當翻譯結果與原文不同時才顯示（避免單字重複列出）
-    if (cleanZh && cleanZh.toLowerCase() !== cleanRaw.toLowerCase()) {
-        embed.addFields({
-            name: '🇹🇼 繁體中文',
-            value: cleanZh.slice(0, 1024),
-            inline: false
-        });
-    }
+    // 2. 繁體中文欄位（固定呈現）
+    embed.addFields({
+        name: '🇹🇼 繁體中文',
+        value: cleanZh.slice(0, 1024),
+        inline: false
+    });
 
-    // 3. English：只有當翻譯結果與原文不同時才顯示
-    if (cleanEn && cleanEn.toLowerCase() !== cleanRaw.toLowerCase()) {
-        embed.addFields({
-            name: '🇺🇸 English',
-            value: cleanEn.slice(0, 1024),
-            inline: false
-        });
-    }
+    // 3. English 欄位（固定呈現）
+    embed.addFields({
+        name: '🇺🇸 English',
+        value: cleanEn.slice(0, 1024),
+        inline: false
+    });
 
     // 4. 附件與圖片處理
     if (attachmentUrls.length > 0) {
