@@ -15,6 +15,8 @@ const { getLanguage, setLanguage, languageName } = require('./GameSystem/Languag
 const { broadcastAnnouncement, setAnnounceChannel } = require('./GameSystem/AnnounceSystem.js');
 const { handleGiveAllPlayers, handleGiveSinglePlayer } = require('./GameSystem/GiveAwaySystem.js');
 const { checkSteamUpdates, checkTwitterUpdates, checkYouTubeUpdates } = require('./Newscheck.js');
+const ShopSystem = require('./GameSystem/ShopSystem.js');
+const GiveawaySystem = require('./GameSystem/GiveawayEventSystem.js');
 
 const SUPER_ADMIN_ID = '1330463890122735642';
 
@@ -89,8 +91,8 @@ async function handleSlashCommands(client, interaction) {
         }
 
         // ─── 背包 / 機率表 ───────────────────────────────────────
-        if (commandName === 'pack' || commandName === 'list') {
-            fakeMessage.content = `!${commandName}`;
+        if (commandName === 'pack' || commandName === 'list' || commandName === 'limbusids') {
+            fakeMessage.content = commandName === 'limbusids' ? '!limbusids' : `!${commandName}`;
             if (isOnCooldown(uid, 'pack')) {
                 return interaction.reply({ content: '⏳ 指令冷卻中，請稍後再試。', flags: MessageFlags.Ephemeral });
             }
@@ -325,6 +327,36 @@ async function handleSlashCommands(client, interaction) {
             return handleGiveSinglePlayer(client, commandName, amount, actualTarget, interaction);
         }
 
+        // ─── 商城 ────────────────────────────────────────────────
+        if (commandName === 'shop') {
+            return ShopSystem.handleShop(client, interaction);
+        }
+        if (['shop-add', 'shop-remove', 'shop-confirm'].includes(commandName)) {
+            return ShopSystem.handleShopAdmin(interaction, commandName.slice('shop-'.length));
+        }
+
+        // ─── 抽獎 ────────────────────────────────────────────────
+        if (commandName === 'giveaway-create') {
+            if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+                return interaction.reply({ content: '❌ 此指令僅限伺服器管理員使用。', flags: MessageFlags.Ephemeral });
+            }
+            return GiveawaySystem.createGiveaway(client, interaction, {
+                prizeName: interaction.options.getString('prize_name'),
+                prizeInfo: interaction.options.getString('prize_info'),
+                winnersCount: interaction.options.getInteger('winners'),
+                maxParticipants: interaction.options.getInteger('max_participants'),
+                minLevel: interaction.options.getInteger('min_level'),
+                entryLightSeeds: interaction.options.getInteger('entry_lightseeds'),
+                entryStarCoins: interaction.options.getInteger('entry_starcoins'),
+                prizeLightSeeds: interaction.options.getInteger('prize_lightseeds'),
+                prizeStarCoins: interaction.options.getInteger('prize_starcoins'),
+                duration: interaction.options.getInteger('duration'),
+            });
+        }
+        if (commandName === 'giveaway-end') {
+            return GiveawaySystem.handleGiveawayEnd(client, interaction, interaction.options.getString('id'));
+        }
+
         // ─── 等級排行榜 ────────────────────────────────────────
         if (commandName === 'leaderboard') {
             return handleLeaderboard(client, interaction);
@@ -351,16 +383,17 @@ async function sendHelp(interaction) {
         .setTitle('📋 Angela 指令清單')
         .setColor(0x00b4d8)
         .addFields(
-            { name: '🎰 抽卡與背包',        value: '`/pull` — 抽卡 ｜ `/pack` — 背包 ｜ `/list` — 機率表' },
+            { name: '🎰 抽卡與背包',        value: '`/pull` — 抽卡 ｜ `/pack` — 背包 ｜ `/limbusids` — 角色名單' },
             { name: '⚔️ 戰鬥與隊伍',        value: '`/battle` — 出戰關卡 ｜ `/party` — 隊伍管理' },
             { name: '👤 罪人與資源',          value: '`/sinner` — 罪人全覽 ｜ `/uptie` — 提升連結\n`/equip` — 裝備人格 ｜ `/threads` — 絲線查詢' },
             { name: '🪞 鏡光迷宮',           value: '`/md` — 鏡光迷宮系統' },
-            { name: '📊 等級系統',           value: '`/rank` — 查看等級與 XP 進度' },
+            { name: '📊 等級系統',           value: '`/rank` — 查看等級與 XP 進度 ｜ `/leaderboard` — 等級排行榜' },
             { name: '🎰 賭博',              value: '`/gamble <金額>` — 下注 🌱 LightSeeds，50/50 勝負' },
             { name: '🎲 娛樂功能',           value: '`/gayrate` — 男同指數 ｜ `/lesbianrate` — 姬圈指數' },
             { name: '🔊 語音控制',           value: '`/join` ｜ `/leave` ｜ `/status`' },
             { name: '📊 排行榜', value: '`/leaderboard` — 等級 XP 排行榜 TOP 10' },
             { name: '📰 社群檢測 (伺服器管理員)', value: '`/steam` ｜ `/tweet` ｜ `/youtube`\n`/setchannel` — 統一設定所有通知/功能頻道' },
+            { name: '🛒 商城與抽獎', value: '`/shop` ｜ `/giveaway-create` ｜ `/giveaway-end`' },
             { name: '👑 最高主管特權 (Sles 專屬)', value: '`/givelightseeds` ｜ `/givefragments` ｜ `/givescrolls`\n`/givethreads` ｜ `/updaterewards` ｜ `/updatebuff`\n`/announce` — 全伺服器公告' }
         )
         .setFooter({ text: '輸入 / 即可喚出選單 ｜ 所有特權指令已鎖定為 Sles 專屬' });
