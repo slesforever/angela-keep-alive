@@ -42,7 +42,7 @@ const commands = [
     new SlashCommandBuilder().setName('givefragments').setDescription('Sles專屬：發放碎片').setDefaultMemberPermissions(admin),
     new SlashCommandBuilder().setName('givescrolls').setDescription('Sles專屬：發放抽卡券').setDefaultMemberPermissions(admin),
     new SlashCommandBuilder().setName('givethreads').setDescription('Sles專屬：發放絲線').setDefaultMemberPermissions(admin),
-    new SlashCommandBuilder().setName('announce').setDescription('Sles專屬：全伺服器公告').setDefaultMemberPermissions(admin).addStringOption(o => o.setName('message').setDescription('內容').setRequired(true)).addRoleOption(o => o.setName('role').setDescription('要通知的身分組（選填）')),
+    new SlashCommandBuilder().setName('announce').setDescription('Sles專屬：全伺服器公告').setDefaultMemberPermissions(admin).addStringOption(o => o.setName('message').setDescription('內容').setRequired(true)),
     new SlashCommandBuilder().setName('shop').setDescription('開啟商城 UI'),
     new SlashCommandBuilder().setName('shop-add').setDescription('Sles專屬：上架商城商品').setDefaultMemberPermissions(admin).addStringOption(o => o.setName('name').setDescription('商品名稱').setRequired(true)).addStringOption(o => o.setName('info').setDescription('商品資訊')).addIntegerOption(o => o.setName('lightseeds').setDescription('LightSeeds 價格').setMinValue(0)).addIntegerOption(o => o.setName('starcoins').setDescription('StarCoins 價格').setMinValue(0)).addIntegerOption(o => o.setName('minlevel').setDescription('最低等級').setMinValue(0)).addIntegerOption(o => o.setName('stock').setDescription('庫存').setMinValue(1)),
     new SlashCommandBuilder().setName('shop-remove').setDescription('Sles專屬：下架商城商品').setDefaultMemberPermissions(admin).addStringOption(o => o.setName('item_id').setDescription('商品 ID').setRequired(true)),
