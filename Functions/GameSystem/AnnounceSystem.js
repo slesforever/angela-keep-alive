@@ -195,13 +195,11 @@ async function broadcastAnnouncement(
                 continue;
             }
 
+            const roleIds = [...finalMessage.matchAll(/<@&(\d+)>/g)].map(match => match[1]);
             await channel.send({
-                embeds: [
-                    embed
-                ],
-                allowedMentions: {
-                    parse: []
-                }
+                content: roleIds.length ? [...new Set(roleIds)].map(id => `<@&${id}>`).join(' ') : undefined,
+                embeds: [embed],
+                allowedMentions: { roles: [...new Set(roleIds)] },
             });
 
             successCount++;
