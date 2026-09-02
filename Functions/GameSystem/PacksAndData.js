@@ -838,7 +838,7 @@ async function showList(message) {
 // ─── 主路由 ───────────────────────────────────────────────────
 async function handleInventory(client, message) {
     const raw = message.content.trim();
-    if (raw === '!list' || raw === '!rate' || raw === '!rates') {
+    if (raw === '!list' || raw === '!limbusids' || raw === '!rate' || raw === '!rates') {
         return showList(message);
     }
     if (raw === '!pack' || raw === '!p' || raw === '!inv' || raw === '!inventory') {
