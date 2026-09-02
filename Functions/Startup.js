@@ -150,6 +150,9 @@ const {
     './Commanders.js'
 );
 
+const ShopSystem = require('./GameSystem/ShopSystem.js');
+const GiveawaySystem = require('./GameSystem/GiveawayEventSystem.js');
+
 const {
     handleMessageXp,
     startVoiceXpTimer,
@@ -973,6 +976,38 @@ const allSlashCommands = [
                     )
                     .setRequired(true)
         ),
+
+    new SlashCommandBuilder().setName('limbusids').setDescription('查看 Limbus Company 角色 ID 與中英文名稱'),
+    new SlashCommandBuilder().setName('shop').setDescription('開啟商城 UI'),
+    new SlashCommandBuilder().setName('shop-add').setDescription('Sles 專屬：上架商城商品')
+        .addStringOption(o => o.setName('name').setDescription('商品名稱').setRequired(true))
+        .addStringOption(o => o.setName('info').setDescription('商品資訊'))
+        .addIntegerOption(o => o.setName('lightseeds').setDescription('LightSeeds 價格').setMinValue(0))
+        .addIntegerOption(o => o.setName('starcoins').setDescription('StarCoins 價格').setMinValue(0))
+        .addIntegerOption(o => o.setName('minlevel').setDescription('最低等級').setMinValue(0))
+        .addIntegerOption(o => o.setName('stock').setDescription('庫存，不填代表無限').setMinValue(1))
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+    new SlashCommandBuilder().setName('shop-remove').setDescription('Sles 專屬：下架商城商品')
+        .addStringOption(o => o.setName('item_id').setDescription('商品 ID').setRequired(true))
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+    new SlashCommandBuilder().setName('shop-confirm').setDescription('Sles 專屬：確認商城序號已交付')
+        .addStringOption(o => o.setName('code').setDescription('購買序號').setRequired(true))
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+    new SlashCommandBuilder().setName('giveaway-create').setDescription('建立抽獎活動')
+        .addStringOption(o => o.setName('prize_name').setDescription('獎品名稱').setRequired(true))
+        .addIntegerOption(o => o.setName('winners').setDescription('抽出人數').setRequired(true).setMinValue(1).setMaxValue(20))
+        .addStringOption(o => o.setName('prize_info').setDescription('獎品資訊'))
+        .addIntegerOption(o => o.setName('max_participants').setDescription('最多參加人數').setMinValue(1).setMaxValue(10000))
+        .addIntegerOption(o => o.setName('min_level').setDescription('最低等級').setMinValue(0).setMaxValue(100))
+        .addIntegerOption(o => o.setName('entry_lightseeds').setDescription('參加扣除 LightSeeds').setMinValue(0))
+        .addIntegerOption(o => o.setName('entry_starcoins').setDescription('參加扣除 StarCoins').setMinValue(0))
+        .addIntegerOption(o => o.setName('prize_lightseeds').setDescription('得獎發放 LightSeeds').setMinValue(0))
+        .addIntegerOption(o => o.setName('prize_starcoins').setDescription('得獎發放 StarCoins').setMinValue(0))
+        .addIntegerOption(o => o.setName('duration').setDescription('持續分鐘').setMinValue(1).setMaxValue(10080))
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+    new SlashCommandBuilder().setName('giveaway-end').setDescription('提前結束抽獎')
+        .addStringOption(o => o.setName('id').setDescription('抽獎 ID').setRequired(true))
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 ];
 
 // ─────────────────────────────────────────────
@@ -1175,6 +1210,10 @@ client.on(
         // ═════════════════════════════════════
         // 其他非 Slash Command interaction
         // ═════════════════════════════════════
+
+        if (interaction.isButton() && interaction.customId.startsWith('giveaway_join:')) {
+            return GiveawaySystem.joinGiveaway(client, interaction, interaction.customId.slice('giveaway_join:'.length));
+        }
 
         if (
             !interaction.isChatInputCommand()
@@ -2487,6 +2526,8 @@ client.once(
         startVoiceXpTimer(
             client
         );
+
+        GiveawaySystem.resumeGiveaways(client);
 
         console.log(
             '📡 [排程] Newscheck / 語音 XP 計時器已啟動'
