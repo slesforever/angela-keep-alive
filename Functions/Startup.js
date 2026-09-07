@@ -141,7 +141,7 @@ const {
     startNewsCheckLoop,
     setNotifyChannel
 } = require(
-    './Newscheck.js'
+    './LimbusNewscheck.js'
 );
 
 const {
