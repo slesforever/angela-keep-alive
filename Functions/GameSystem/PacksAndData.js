@@ -1,5 +1,5 @@
 // Functions/GameSystem/PacksAndData.js
-// 玩家資料存取（JSON 檔案 + Discord 頻道 txt 備份）+ LC 主頁風格 !pack UI
+// 玩家資料存取（JSON 檔案 + Discord 頻道 txt 備份 + 重啟自動還原）+ LC 主頁風格 !pack UI
 'use strict';
 
 const fs = require('fs');
@@ -309,6 +309,105 @@ function queueAllPlayersBackup(client, reason = 'save') {
             backupInFlight = false;
         }
     }, 2500);
+}
+
+// ─── 從 Discord 備份頻道還原玩家資料（重啟自動恢復）────────────
+async function restoreFromBackupChannel(client) {
+    if (!client) return false;
+    const channel = await client.channels.fetch(BACKUP_CHANNEL_ID).catch(() => null);
+    if (!channel) {
+        console.error(`[Pack] 還原失敗：找不到備份頻道 ${BACKUP_CHANNEL_ID}`);
+        return false;
+    }
+
+    const messages = await channel.messages.fetch({ limit: 100 }).catch(() => null);
+    if (!messages || !messages.size) {
+        console.warn('[Pack] 備份頻道沒有任何訊息，略過還原');
+        return false;
+    }
+
+    const txtMessages = messages
+        .filter(m => m.attachments && m.attachments.size > 0)
+        .filter(m => [...m.attachments.values()].some(a => a.name && a.name.endsWith('.txt')))
+        .sort((a, b) => b.createdTimestamp - a.createdTimestamp);
+
+    if (!txtMessages.size) {
+        console.warn('[Pack] 備份頻道沒有 txt 附件，略過還原');
+        return false;
+    }
+
+    // 找最新一批：同一次備份的檔名有相同時間戳
+    const newest = txtMessages.first();
+    const stampMatch = [...newest.attachments.values()][0]?.name?.match(/players_backup_(.+?)_part/);
+    if (!stampMatch) {
+        console.warn('[Pack] 無法解析備份檔名時間戳，略過還原');
+        return false;
+    }
+    const targetStamp = stampMatch[1];
+
+    const parts = [];
+    for (const msg of txtMessages.values()) {
+        for (const att of msg.attachments.values()) {
+            if (att.name && att.name.includes(`players_backup_${targetStamp}_part`)) {
+                const partMatch = att.name.match(/part(\d+)_of_(\d+)/);
+                const partNo = partMatch ? parseInt(partMatch[1]) : 0;
+                parts.push({ partNo, url: att.url, name: att.name });
+            }
+        }
+    }
+
+    if (!parts.length) {
+        console.warn('[Pack] 沒有找到任何備份檔案，略過還原');
+        return false;
+    }
+
+    parts.sort((a, b) => a.partNo - b.partNo);
+    const fetch = require('node-fetch');
+    let fullText = '';
+    for (const part of parts) {
+        try {
+            const r = await fetch(part.url);
+            if (r.ok) {
+                fullText += await r.text();
+                console.log(`[Pack] 下載備份 ${part.name} OK`);
+            } else {
+                console.error(`[Pack] 下載 ${part.name} 失敗: HTTP ${r.status}`);
+            }
+        } catch (err) {
+            console.error(`[Pack] 下載 ${part.name} 例外:`, err.message);
+        }
+    }
+
+    if (!fullText.length) {
+        console.error('[Pack] 所有備份檔案下載失敗');
+        return false;
+    }
+
+    // 解析 txt：每個玩家區塊以 ====== 分隔，含 USER ID 和 JSON
+    const blocks = fullText.split(/(?=^==================================================)/m);
+    let restored = 0;
+
+    for (const block of blocks) {
+        const idMatch = block.match(/^USER ID: (\S+)/m);
+        if (!idMatch) continue;
+        const userId = idMatch[1].trim();
+
+        const jsonStart = block.indexOf('{');
+        const jsonEnd = block.lastIndexOf('}');
+        if (jsonStart < 0 || jsonEnd < 0) continue;
+
+        try {
+            const data = JSON.parse(block.slice(jsonStart, jsonEnd + 1));
+            const file = path.join(DATA_DIR, `${userId}.json`);
+            fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf8');
+            restored++;
+        } catch (err) {
+            console.error(`[Pack] 解析玩家 ${userId} 資料失敗:`, err.message);
+        }
+    }
+
+    console.log(`✅ [Pack] 從備份頻道還原了 ${restored} 位玩家資料`);
+    return restored > 0;
 }
 
 // ─── 玩家資料存取 ─────────────────────────────────────────────
@@ -737,7 +836,7 @@ function getListDisplayName(name, lang) {
         const slash = s.lastIndexOf(' / ');
         if (slash >= 0) return s.slice(slash + 3).trim().slice(0, 40);
     }
-    const m = s.match(/[［【\[](.+?)[］【\]]\s*([^/]+)/);
+    const m = s.match(/[［【\[](.+?)[］】\]]\s*([^/]+)/);
     if (m) {
         const bracket = m[1].trim();
         const sinner  = m[2].trim();
@@ -858,4 +957,5 @@ module.exports = {
     calcLevelCost,
     getIdentitySinnerKey,
     getOwnedSinners,
+    restoreFromBackupChannel,
 };
