@@ -326,7 +326,7 @@ function saveState() {
     }
 }
 
-function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
+function fetchWithTimeout(url, options = {}, timeoutMs = 4500) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -338,6 +338,14 @@ function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
             ...(options.headers || {})
         }
     }).finally(() => clearTimeout(timeout));
+}
+
+function withTimeout(promise, timeoutMs, label) {
+    let timer;
+    const timeout = new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timeout (${timeoutMs}ms)`)), timeoutMs);
+    });
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 function compareTweetFreshness(a, b) {
@@ -512,10 +520,8 @@ async function fetchTweetItemsFromNode(nodeUrl, userId) {
             '--show-error',
             '--location',
             '--compressed',
-            '--retry', '1',
-            '--retry-delay', '2',
-            '--retry-all-errors',
-            '--max-time', '25',
+            '--connect-timeout', '4',
+            '--max-time', '7',
             '--user-agent', 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131 Safari/537.36',
             '--header', 'Accept: text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
             url,
@@ -536,7 +542,7 @@ async function fetchTweetItemsFromNode(nodeUrl, userId) {
             headers: {
                 Accept: 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
             },
-        }, 12000);
+        }, 4500);
 
         if (!response.ok) {
             errors.push(`node-fetch HTTP ${response.status}`);
@@ -670,7 +676,11 @@ async function checkTwitterUpdates(client, isManual = false, messageContext = nu
             state.lastRequestAt = now;
 
             try {
-                feedItems = await fetchTweetItemsFromAllNodes(userId);
+                feedItems = await withTimeout(
+                    fetchTweetItemsFromAllNodes(userId),
+                    10000,
+                    `@${userId} X timeline`
+                );
                 feedCache.set(userId, { fetchedAt: Date.now(), items: feedItems });
             } catch (err) {
                 const cachedIsUsable = cached && now - cached.fetchedAt <= TWITTER_CACHE_TTL_MS && cached.items?.length;
