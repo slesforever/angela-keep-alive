@@ -3,6 +3,9 @@
 const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
+const { execFile } = require('child_process');
+const { promisify } = require('util');
+const execFileAsync = promisify(execFile);
 
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
@@ -484,25 +487,55 @@ function parseSyndicationTimeline(raw, fallbackUserId) {
 }
 
 async function fetchTweetItemsFromNode(nodeUrl, userId) {
-    const url = `${nodeUrl}/${encodeURIComponent(userId)}`;
-    const response = await fetchWithTimeout(url, {
-        headers: {
-            Accept: 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
-        },
-    }, 12000);
+    const url = `${nodeUrl}/${encodeURIComponent(userId)}?format=html&dnt=true`;
+    const errors = [];
 
-    if (!response.ok) {
-        throw new Error(`HTTP 錯誤! 狀態碼: ${response.status}`);
+    try {
+        const response = await fetchWithTimeout(url, {
+            headers: {
+                Accept: 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
+            },
+        }, 12000);
+
+        if (!response.ok) {
+            errors.push(`node-fetch HTTP ${response.status}`);
+        } else {
+            const text = await response.text();
+            const items = parseSyndicationTimeline(text, userId);
+            if (items.length) return items;
+            errors.push('node-fetch 回應沒有可解析的推文');
+        }
+    } catch (error) {
+        errors.push(`node-fetch ${error.message}`);
     }
 
-    const text = await response.text();
-    const items = parseSyndicationTimeline(text, userId);
-
-    if (!items.length) {
-        throw new Error('X syndication timeline 解析失敗');
+    // X syndication 對 Node HTTP client 可能回傳 429，但同一出口的 curl 可以成功。
+    // 使用 execFile 而不是 shell 字串，避免帳號名稱造成命令注入。
+    try {
+        const result = await execFileAsync('curl', [
+            '--silent',
+            '--show-error',
+            '--location',
+            '--compressed',
+            '--retry', '2',
+            '--retry-delay', '1',
+            '--retry-all-errors',
+            '--max-time', '20',
+            '--user-agent', 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131 Safari/537.36',
+            '--header', 'Accept: text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
+            url,
+        ], {
+            maxBuffer: 3 * 1024 * 1024,
+        });
+        const items = parseSyndicationTimeline(result.stdout, userId);
+        if (items.length) return items;
+        errors.push('curl 回應沒有可解析的推文');
+    } catch (error) {
+        const detail = error.stderr ? String(error.stderr).trim().slice(0, 180) : error.message;
+        errors.push(`curl ${detail}`);
     }
 
-    return items;
+    throw new Error(`${nodeUrl}：${errors.join('；')}`);
 }
 
 async function fetchTweetItemsFromAllNodes(userId) {
