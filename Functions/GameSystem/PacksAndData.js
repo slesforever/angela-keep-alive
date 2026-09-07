@@ -1,6 +1,5 @@
 // Functions/GameSystem/PacksAndData.js
 // 玩家資料存取（JSON 檔案 + Discord 頻道 txt 備份）+ LC 主頁風格 !pack UI
-//update
 'use strict';
 
 const fs = require('fs');
@@ -14,8 +13,8 @@ const {
     AttachmentBuilder,
 } = require('discord.js');
 
-// ─── 資料目錄 ─────────────────────────────────────────────────
-const DATA_DIR = path.join(process.cwd(), 'data', 'players');
+// ─── 資料目錄（支援環境變數持久化路徑，防止重啟歸零）─────────
+const DATA_DIR = path.resolve(process.env.PLAYER_DATA_DIR || path.join(process.cwd(), 'data', 'players'));
 const { getLanguage } = require('./LanguageSystem.js');
 // ─── SinnersData（供 getIdentitySinnerKey 使用）─────────────────
 const { SINNERS } = require('./Data/SinnersData.js');
@@ -30,7 +29,7 @@ let backupInFlight = false;
 let backupQueuedReason = 'save';
 
 // 以安全大小切分 txt，避免單檔過大
-const MAX_TXT_BYTES = 7_500_000; // 保守值，避免接近附件上限
+const MAX_TXT_BYTES = 7_500_000;
 
 // ─── 稀有度設定 ───────────────────────────────────────────────
 const RARITY_ORDER  = ['0','S1','00','S2','000','S3','0000','S4','Egos','EGOS','Special','Color Fixer','ABN_ZAYIN','ABN_TETH','ABN_HE','ABN_WAW','ABN_ALEPH','ABN_ANGELA'];
@@ -65,7 +64,7 @@ function findRarity(name) {
 
 function getShortName(name) {
     const s = String(name || '');
-    const inner = s.match(/[［（（([](.+?)[］））)]]/);
+    const inner = s.match(/[［（（[](.+?)[］））)]]/);
     if (inner) {
         let content = inner[1].trim();
         const afterColon = content.match(/[：:]\s*(.+)/);
@@ -738,7 +737,7 @@ function getListDisplayName(name, lang) {
         const slash = s.lastIndexOf(' / ');
         if (slash >= 0) return s.slice(slash + 3).trim().slice(0, 40);
     }
-    const m = s.match(/[［【\[](.+?)[］】\]]\s*([^/]+)/);
+    const m = s.match(/[［【\[](.+?)[］【\]]\s*([^/]+)/);
     if (m) {
         const bracket = m[1].trim();
         const sinner  = m[2].trim();
