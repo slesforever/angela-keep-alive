@@ -14,7 +14,7 @@ const { handleRank, handleLeaderboard, setLevelChannel } = require('./GameSystem
 const { getLanguage, setLanguage, languageName } = require('./GameSystem/LanguageSystem.js');
 const { broadcastAnnouncement, setAnnounceChannel } = require('./GameSystem/AnnounceSystem.js');
 const { handleGiveAllPlayers, handleGiveSinglePlayer } = require('./GameSystem/GiveAwaySystem.js');
-const { checkSteamUpdates, checkTwitterUpdates, checkYouTubeUpdates } = require('./Newscheck.js');
+const { checkSteamUpdates, checkTwitterUpdates, checkYouTubeUpdates } = require('./LimbusNewscheck.js');
 const ShopSystem = require('./GameSystem/ShopSystem.js');
 const GiveawaySystem = require('./GameSystem/GiveawayEventSystem.js');
 
