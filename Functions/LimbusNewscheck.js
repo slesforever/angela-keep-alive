@@ -508,6 +508,76 @@ function parseSyndicationTimeline(raw, fallbackUserId) {
         });
 }
 
+function decodeXEmbeddedString(value) {
+    try {
+        return JSON.parse(`"${value}"`);
+    } catch (_) {
+        return String(value || '')
+            .replace(/\\n/g, '\n')
+            .replace(/\\r/g, '\r')
+            .replace(/\\t/g, '\t')
+            .replace(/\\"/g, '"')
+            .replace(/\\u([0-9a-f]{4})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+    }
+}
+
+function parseXProfilePage(raw, fallbackUserId) {
+    const html = String(raw || '');
+    const detailStart = /"client:VHdlZXQ6([^\"]+):details"\s*:\$R\[\d+\]=\{/g;
+    const items = [];
+    let match;
+
+    while ((match = detailStart.exec(html))) {
+        const blockStart = detailStart.lastIndex;
+        const nextBlock = html.indexOf('},"client:', blockStart);
+        const block = html.slice(blockStart, nextBlock >= 0 ? nextBlock : html.length);
+        const textMatch = block.match(/full_text:"((?:\\.|[^"\\])*)"/);
+        const timeMatch = block.match(/created_at_ms:(\d+)/);
+        if (!textMatch) continue;
+
+        let id = '';
+        try {
+            id = Buffer.from(match[1], 'base64').toString('utf8');
+        } catch (_) {
+            continue;
+        }
+        if (!/^\d+$/.test(id)) continue;
+
+        items.push({
+            id,
+            link: `https://x.com/${fallbackUserId}/status/${id}`,
+            title: decodeXEmbeddedString(textMatch[1]).trim() || `@${fallbackUserId} 發布了新訊息`,
+            createdAt: timeMatch ? new Date(Number(timeMatch[1])).toUTCString() : null,
+        });
+    }
+
+    const unique = [...new Map(items.map(item => [item.id, item])).values()];
+    unique.sort(compareTweetFreshness);
+    return unique;
+}
+
+async function fetchTweetItemsFromXPage(userId) {
+    const url = `https://x.com/${encodeURIComponent(userId)}?f=live&fresh=${Date.now()}`;
+    const result = await execFileAsync('curl', [
+        '--silent',
+        '--show-error',
+        '--location',
+        '--compressed',
+        '--connect-timeout', '4',
+        '--max-time', '7',
+        '--user-agent', 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131 Safari/537.36',
+        '--header', 'Accept: text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
+        url,
+    ], {
+        maxBuffer: 4 * 1024 * 1024,
+        timeout: 8000,
+        killSignal: 'SIGKILL',
+    });
+    const items = parseXProfilePage(result.stdout, userId);
+    if (!items.length) throw new Error('x.com 頁面沒有可解析的最新推文');
+    return items;
+}
+
 async function fetchTweetItemsFromNode(nodeUrl, userId) {
     const url = `${nodeUrl}/${encodeURIComponent(userId)}?format=html&dnt=true&fresh=${Date.now()}`;
     const errors = [];
@@ -560,6 +630,21 @@ async function fetchTweetItemsFromNode(nodeUrl, userId) {
 }
 
 async function fetchTweetItemsFromAllNodes(userId) {
+    const sourceErrors = [];
+
+    // x.com 個人頁面是主來源：它包含最新的 4 則貼文，
+    // syndication endpoint 有時會停留在數月前的舊快取。
+    try {
+        const currentItems = await withTimeout(
+            fetchTweetItemsFromXPage(userId),
+            10000,
+            `@${userId} x.com page`
+        );
+        if (currentItems.length) return currentItems;
+    } catch (error) {
+        sourceErrors.push(`x.com：${error.message}`);
+    }
+
     const results = await Promise.allSettled(
         TIMELINE_ENDPOINTS.map(async (nodeUrl) => ({
             nodeUrl,
@@ -569,7 +654,7 @@ async function fetchTweetItemsFromAllNodes(userId) {
 
     const merged = [];
     const seen = new Set();
-    const failures = [];
+    const failures = [...sourceErrors];
 
     for (const result of results) {
         if (result.status !== 'fulfilled') {
