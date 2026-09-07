@@ -8,7 +8,6 @@ const { EmbedBuilder } = require('discord.js');
 const LEVEL_CONFIG_PATH = path.join(process.cwd(), 'data', 'level-config.json');
 const PLAYERS_DIR = path.join(process.cwd(), 'data', 'players');
 
-// 平衡原則：每級少量獎勵，重要里程碑再給一次小額 bonus，避免 XP 變成無限提款機。
 const LEVEL_REWARDS = {
     perLevel: { starCoins: 25, lightSeeds: 5 },
     milestones: {
@@ -25,15 +24,15 @@ const LEVEL_REWARDS = {
 function xpNeededForLevel(level) { return level * 150; }
 
 function getLevelFromXp(totalXp) {
-    let level = 0;
+    let level = 1;
     let remaining = Math.max(0, Number(totalXp) || 0);
     while (level < 100) {
-        const needed = xpNeededForLevel(level + 1);
+        const needed = xpNeededForLevel(level);
         if (remaining < needed) break;
         remaining -= needed;
         level++;
     }
-    return { level, xpIntoLevel: remaining, xpNeeded: xpNeededForLevel(level + 1) };
+    return { level, xpIntoLevel: remaining, xpNeeded: xpNeededForLevel(level) };
 }
 
 function rewardForLevel(level) {
@@ -91,17 +90,11 @@ async function announceLevelUp(client, userId, username, newLevel, guildId, rewa
     } catch (err) { console.error('[LevelSystem] 升級公告失敗:', err.message); }
 }
 
-/**
- * 安全獲取玩家當前總經驗值 (雙重相容 exp 與 xp 欄位)
- */
 function getPlayerTotalXp(player) {
     if (!player) return 0;
     return Math.max(Number(player.xp) || 0, Number(player.exp) || 0);
 }
 
-/**
- * 增加經驗值 (自動相容並同步 xp/exp 兩欄位)
- */
 async function addXp(client, userId, username, amount, guildId = null) {
     const { getOrCreatePlayer, savePlayerData } = require('./PacksAndData.js');
     const player = getOrCreatePlayer(client, userId, username);
@@ -116,7 +109,6 @@ async function addXp(client, userId, username, amount, guildId = null) {
         ? grantLevelRewards(player, oldData.level, newData.level) 
         : { starCoins: 0, lightSeeds: 0 };
     
-    // 雙向同步儲存，徹底消除不同模組欄位讀取落差
     player.xp = newXp;
     player.exp = newXp;
     player.level = newData.level;
@@ -128,9 +120,6 @@ async function addXp(client, userId, username, amount, guildId = null) {
     return { ...newData, rewards };
 }
 
-/**
- * 手動救援/設定玩家經驗值工具
- */
 function setPlayerXp(client, userId, username, targetXp) {
     const { getOrCreatePlayer, savePlayerData } = require('./PacksAndData.js');
     const player = getOrCreatePlayer(client, userId, username);
@@ -155,7 +144,6 @@ async function handleMessageXp(client, message) {
     await addXp(client, userId, message.author.username, 2, message.guild.id).catch(() => {});
 }
 
-// 使用 guildId:userId 作 key，避免同一玩家在不同伺服器互相覆蓋。
 const voiceJoinTimes = new Map();
 function voiceKey(userId, guildId) { return `${guildId}:${userId}`; }
 
