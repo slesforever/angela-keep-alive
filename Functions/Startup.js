@@ -1043,70 +1043,74 @@ function rarityLabel(rarity) {
 // Rate Up 啟動公告
 // ─────────────────────────────────────────────
 
-async function announceCurrentRateUps(
-    botClient
-) {
-    const config =
-        getConfig();
+async function announceCurrentRateUps(botClient) {
+    const config = getConfig();
+    if (!config.rateUpChannelId) return;
 
-    if (
-        !config.rateUpChannelId
-    ) {
-        return;
-    }
+    const aliases = {
+        'Color Fixer': ['Color Fixer', 'COLOR_FIXER', 'ColorFixer'],
+        'Special': ['Special', 'SPECIAL'],
+        '0000': ['0000', 'S4'],
+        'Egos': ['Egos', 'EGOS'],
+        '000': ['000', 'S3'],
+        '00': ['00', 'S2'],
+        '0': ['0', 'S1'],
+    };
+    const labels = {
+        'Color Fixer': '👑 Color Fixer',
+        'Special': '🌀 Special',
+        '0000': '✨ ★★★★',
+        'Egos': '🔮 E.G.O',
+        '000': '✨ ★★★',
+        '00': '⭐ ★★',
+        '0': '★',
+    };
+
+    const readRateUp = rateUp => Object.entries(aliases)
+        .map(([canonical, keys]) => ({
+            canonical,
+            values: [...new Set(keys.flatMap(key =>
+                Array.isArray(rateUp?.[key]) ? rateUp[key].filter(Boolean) : []
+            ))],
+        }))
+        .filter(group => group.values.length);
 
     try {
-        const channel =
-            await botClient.channels
-                .fetch(
-                    config.rateUpChannelId
-                );
+        const channel = await botClient.channels.fetch(config.rateUpChannelId);
+        if (!channel) return;
 
-        if (!channel) {
-            return;
+        const banners = Object.entries(identitiesData.BANNERS || {})
+            .map(([key, banner]) => ({ key, banner, groups: readRateUp(banner?.rateUp) }))
+            .filter(({ groups }) => groups.length);
+
+        if (!banners.length) {
+            const legacyGroups = readRateUp(identitiesData.upTargets || {});
+            if (legacyGroups.length) {
+                banners.push({ key: 'legacy', banner: { name: '目前設定' }, groups: legacyGroups });
+            }
         }
 
-        const up =
-            identitiesData.upTargets ||
-            {};
+        const fields = banners.slice(0, 25).map(({ key, banner, groups }) => ({
+            name: `🎯 ${banner.name || key}`.slice(0, 256),
+            value: groups.map(({ canonical, values }) =>
+                `**${labels[canonical] || canonical} UP**\n${values.map(value => `• ${value}`).join('\n')}`
+            ).join('\n\n').slice(0, 1024),
+            inline: false,
+        }));
 
-        const sections =
-            Object.entries(up)
-                .filter(
-                    ([, v]) =>
-                        Array.isArray(v) &&
-                        v.length
-                )
-                .map(
-                    ([r, items]) =>
-                        `### ${rarityLabel(r)}\n${items.map(i => `• ${i}`).join('\n')}`
-                );
+        const embed = new EmbedBuilder()
+            .setColor(0xffd166)
+            .setTitle('📢 Rate Up 人格與 E.G.O 機率資料已成功載入')
+            .setDescription(fields.length
+                ? '以下內容直接來自目前 BANNERS 卡池設定，會同時列出人格與 E.G.O。'
+                : '目前沒有任何卡池設定 Rate Up 對象。')
+            .setFooter({ text: '資料來源：Functions/GameSystem/Pulls/identitiesData.js' })
+            .setTimestamp();
 
-        await channel.send({
-            embeds: [
-                new EmbedBuilder()
-                    .setColor(
-                        0xffd166
-                    )
-                    .setTitle(
-                        '📢 Rate Up 人格與物資資料已成功載入'
-                    )
-                    .setDescription(
-                        sections.length
-                            ? sections.join(
-                                '\n\n'
-                            )
-                            : '目前沒有設定任何 Rate Up 對象。'
-                    )
-                    .setTimestamp()
-            ],
-        });
-
+        if (fields.length) embed.addFields(fields);
+        await channel.send({ embeds: [embed] });
     } catch (err) {
-        console.error(
-            '❌ Rate Up 公告發送失敗:',
-            err.message
-        );
+        console.error('❌ Rate Up 公告發送失敗:', err.message);
     }
 }
 
