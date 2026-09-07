@@ -17,7 +17,9 @@ const MONITORED_USERS = (process.env.TARGET_USERS || 'LimbusCompany_B,ProjMoonSt
 let notifyChannelId = process.env.NOTIFY_CHANNEL_ID || '1402282604165730348';
 const PING_ROLE = process.env.PING_ROLE_MENTION || '<@&1406984068725211177>';
 const STEAM_APP_ID = '1973530';
-const CHECK_INTERVAL = Number(process.env.CHECK_INTERVAL_MS || 20 * 1000);
+const CHECK_INTERVAL = Number(process.env.CHECK_INTERVAL_MS || 5 * 60 * 1000);
+const TWITTER_MIN_FETCH_GAP_MS = Number(process.env.TWITTER_MIN_FETCH_GAP_MS || 4 * 60 * 1000);
+const TWITTER_CACHE_TTL_MS = Number(process.env.TWITTER_CACHE_TTL_MS || 15 * 60 * 1000);
 
 // 自動監測預設抓少一點，速度更快；手動測試可多抓
 const STEAM_NEWS_COUNT_AUTO = Number(process.env.STEAM_NEWS_COUNT_AUTO || 3);
@@ -48,6 +50,7 @@ let steamLock = false;
 let youtubeLock = false;
 
 const userStates = new Map(); // userId -> { lastFetchedId, recentIds: Map<id, ts> }
+const feedCache = new Map(); // userId -> { fetchedAt, items }
 const steamState = {
     lastSteamNewsId: null,
     recentIds: new Map()
@@ -490,6 +493,33 @@ async function fetchTweetItemsFromNode(nodeUrl, userId) {
     const url = `${nodeUrl}/${encodeURIComponent(userId)}?format=html&dnt=true`;
     const errors = [];
 
+    // 先使用 curl。X syndication 對 Node HTTP client 較容易回 429，
+    // 但同一個公開端點透過 curl 可以正常取得內容。
+    try {
+        const result = await execFileAsync('curl', [
+            '--silent',
+            '--show-error',
+            '--location',
+            '--compressed',
+            '--retry', '1',
+            '--retry-delay', '2',
+            '--retry-all-errors',
+            '--max-time', '25',
+            '--user-agent', 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131 Safari/537.36',
+            '--header', 'Accept: text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
+            url,
+        ], {
+            maxBuffer: 3 * 1024 * 1024,
+        });
+        const items = parseSyndicationTimeline(result.stdout, userId);
+        if (items.length) return items;
+        errors.push('curl 回應沒有可解析的推文');
+    } catch (error) {
+        const detail = error.stderr ? String(error.stderr).trim().slice(0, 180) : error.message;
+        errors.push(`curl ${detail}`);
+    }
+
+    // curl 不可用時保留 Node fetch fallback。
     try {
         const response = await fetchWithTimeout(url, {
             headers: {
@@ -509,32 +539,6 @@ async function fetchTweetItemsFromNode(nodeUrl, userId) {
         errors.push(`node-fetch ${error.message}`);
     }
 
-    // X syndication 對 Node HTTP client 可能回傳 429，但同一出口的 curl 可以成功。
-    // 使用 execFile 而不是 shell 字串，避免帳號名稱造成命令注入。
-    try {
-        const result = await execFileAsync('curl', [
-            '--silent',
-            '--show-error',
-            '--location',
-            '--compressed',
-            '--retry', '2',
-            '--retry-delay', '1',
-            '--retry-all-errors',
-            '--max-time', '20',
-            '--user-agent', 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131 Safari/537.36',
-            '--header', 'Accept: text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
-            url,
-        ], {
-            maxBuffer: 3 * 1024 * 1024,
-        });
-        const items = parseSyndicationTimeline(result.stdout, userId);
-        if (items.length) return items;
-        errors.push('curl 回應沒有可解析的推文');
-    } catch (error) {
-        const detail = error.stderr ? String(error.stderr).trim().slice(0, 180) : error.message;
-        errors.push(`curl ${detail}`);
-    }
-
     throw new Error(`${nodeUrl}：${errors.join('；')}`);
 }
 
@@ -548,9 +552,13 @@ async function fetchTweetItemsFromAllNodes(userId) {
 
     const merged = [];
     const seen = new Set();
+    const failures = [];
 
     for (const result of results) {
-        if (result.status !== 'fulfilled') continue;
+        if (result.status !== 'fulfilled') {
+            failures.push(result.reason?.message || '未知來源錯誤');
+            continue;
+        }
 
         for (const item of result.value.items || []) {
             if (!item?.id || !item?.link) continue;
@@ -561,7 +569,7 @@ async function fetchTweetItemsFromAllNodes(userId) {
     }
 
     if (!merged.length) {
-        throw new Error('所有 X timeline 來源都失敗');
+        throw new Error(`所有 X timeline 來源都失敗：${failures.join(' | ') || '沒有有效回應'}`);
     }
 
     merged.sort((a, b) => compareSnowflakeIds(b.id, a.id));
@@ -642,13 +650,28 @@ async function checkTwitterUpdates(client, isManual = false, messageContext = nu
             const state = getUserState(userId);
 
             let feedItems;
+            const now = Date.now();
+            const cached = feedCache.get(userId);
+
+            if (!isManual && state.lastRequestAt && now - state.lastRequestAt < TWITTER_MIN_FETCH_GAP_MS) {
+                continue;
+            }
+            state.lastRequestAt = now;
+
             try {
                 feedItems = await fetchTweetItemsFromAllNodes(userId);
+                feedCache.set(userId, { fetchedAt: Date.now(), items: feedItems });
             } catch (err) {
-                const msg = `@${userId}：${err.message}`;
-                console.warn(`⚠️ [Twitter] ${msg}`);
-                if (isManual) manualErrors.push(msg);
-                continue;
+                const cachedIsUsable = cached && now - cached.fetchedAt <= TWITTER_CACHE_TTL_MS && cached.items?.length;
+                if (cachedIsUsable) {
+                    feedItems = cached.items;
+                    console.warn(`⚠️ [Twitter] @${userId} 最新來源失敗，使用最近成功快取：${err.message}`);
+                } else {
+                    const msg = `@${userId}：${err.message}`;
+                    console.warn(`⚠️ [Twitter] ${msg}`);
+                    if (isManual) manualErrors.push(msg);
+                    continue;
+                }
             }
 
             if (!feedItems?.length) {
