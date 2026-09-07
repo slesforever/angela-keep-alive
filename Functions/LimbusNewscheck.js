@@ -3,6 +3,7 @@
 const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
 const execFileAsync = promisify(execFile);
@@ -551,9 +552,78 @@ function parseXProfilePage(raw, fallbackUserId) {
         });
     }
 
+    const videoVariantsByTweet = new Map();
+    const variantPattern = /"client:VHdlZXQ6([^"]+):media_entities2:(\d+):video_info:variants:\d+":\$R\[\d+\]=\{([^}]*)\}/g;
+    let variantMatch;
+    while ((variantMatch = variantPattern.exec(html))) {
+        let tweetId = '';
+        try {
+            tweetId = Buffer.from(variantMatch[1], 'base64').toString('utf8');
+        } catch (_) {
+            continue;
+        }
+        if (!/^\d+$/.test(tweetId)) continue;
+        const block = variantMatch[3];
+        const contentType = block.match(/content_type:"([^"]+)"/)?.[1] || '';
+        const url = block.match(/url:"([^"]+)"/)?.[1] || '';
+        const bitrate = Number(block.match(/bitrate:(\d+)/)?.[1] || 0);
+        if (!url || !/^video\/mp4$/i.test(contentType)) continue;
+        if (!videoVariantsByTweet.has(tweetId)) videoVariantsByTweet.set(tweetId, []);
+        videoVariantsByTweet.get(tweetId).push({ url, bitrate });
+    }
+
+    for (const item of items) {
+        const variants = [...new Map((videoVariantsByTweet.get(item.id) || []).map(v => [v.url, v])).values()]
+            .sort((a, b) => b.bitrate - a.bitrate);
+        if (variants.length) {
+            item.videoVariants = variants;
+            item.videoUrl = variants[0].url;
+        }
+    }
+
     const unique = [...new Map(items.map(item => [item.id, item])).values()];
     unique.sort(compareTweetFreshness);
     return unique;
+}
+
+async function downloadTweetVideo(item) {
+    const variants = Array.isArray(item?.videoVariants) && item.videoVariants.length
+        ? item.videoVariants
+        : (item?.videoUrl ? [{ url: item.videoUrl, bitrate: 0 }] : []);
+    if (!variants.length) return null;
+
+    const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'angela-x-video-'));
+    try {
+        for (const [index, variant] of variants.entries()) {
+            const outputPath = path.join(tempDir, `tweet-${item.id}-${index}.mp4`);
+            try {
+                await execFileAsync('curl', [
+                    '--fail',
+                    '--silent',
+                    '--show-error',
+                    '--location',
+                    '--connect-timeout', '5',
+                    '--max-time', '45',
+                    '--max-filesize', '24000000',
+                    '--user-agent', 'Mozilla/5.0',
+                    '--output', outputPath,
+                    variant.url,
+                ], {
+                    timeout: 50000,
+                    killSignal: 'SIGKILL',
+                });
+                const stat = await fs.promises.stat(outputPath);
+                if (!stat.size || stat.size > 24 * 1024 * 1024) continue;
+                const buffer = await fs.promises.readFile(outputPath);
+                return new AttachmentBuilder(buffer, { name: `x-${item.id}.mp4` });
+            } catch (_) {
+                // 高畫質超過 Discord 附件上限或下載失敗時，嘗試下一個較低畫質。
+            }
+        }
+        return null;
+    } finally {
+        await fs.promises.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+    }
 }
 
 async function fetchTweetItemsFromXPage(userId) {
@@ -746,6 +816,7 @@ async function checkTwitterUpdates(client, isManual = false, messageContext = nu
         }
 
         const manualLines = [];
+        const manualFiles = [];
         const manualErrors = [];
 
         for (const userId of usersToCheck) {
@@ -795,11 +866,16 @@ async function checkTwitterUpdates(client, isManual = false, messageContext = nu
             }
 
             if (isManual) {
-                const preview = feedItems.slice(0, 3).map((item, idx) => {
+                const previewItems = feedItems.slice(0, 3);
+                const preview = previewItems.map((item, idx) => {
                     const titlePart = item.title ? `**${truncateText(item.title, 100)}**\n` : '';
                     const datePart = item.createdAt ? `\n🕒 ${item.createdAt}` : '';
                     return `${idx + 1}. ${titlePart}${item.link}${datePart}`;
                 });
+                for (const item of previewItems) {
+                    const file = await downloadTweetVideo(item);
+                    if (file) manualFiles.push(file);
+                }
                 manualLines.push(`**@${userId}**\n${preview.join('\n\n')}`);
                 continue;
             }
@@ -828,30 +904,17 @@ async function checkTwitterUpdates(client, isManual = false, messageContext = nu
             try {
                 const channel = await client.channels.fetch(notifyChannelId);
                 if (channel) {
-                    let currentMsg = `🔔 ${PING_ROLE} **偵測到 @${userId} 發布了 ${newItems.length} 則新訊息：**\n\n`;
                     let isFirst = true;
-
                     for (const item of newItems) {
+                        const videoFile = await downloadTweetVideo(item);
                         const titleLine = item.title ? `**${truncateText(item.title, 120)}**\n` : '';
-                        const itemBlock = `${titleLine}${item.link}\n\n`;
-
-                        if ((currentMsg + itemBlock).length > 1900) {
-                            await channel.send({
-                                content: currentMsg.trim(),
-                                allowedMentions: isFirst ? { parse: ['roles'] } : { parse: [] }
-                            });
-                            currentMsg = itemBlock;
-                            isFirst = false;
-                        } else {
-                            currentMsg += itemBlock;
-                        }
-                    }
-
-                    if (currentMsg.trim()) {
+                        const videoNote = videoFile ? '\n🎬 影片已附加，可在 Discord 直接完整播放。' : '';
                         await channel.send({
-                            content: currentMsg.trim(),
+                            content: `${isFirst ? `🔔 ${PING_ROLE} **偵測到 @${userId} 發布了新訊息：**\n\n` : ''}${titleLine}${item.link}${videoNote}`,
+                            files: videoFile ? [videoFile] : [],
                             allowedMentions: isFirst ? { parse: ['roles'] } : { parse: [] }
                         });
+                        isFirst = false;
                     }
                 }
             } catch (e) {
@@ -868,6 +931,7 @@ async function checkTwitterUpdates(client, isManual = false, messageContext = nu
 
                 await messageContext.reply({
                     content: fullText,
+                    files: manualFiles,
                     allowedMentions: { parse: ['roles'] }
                 });
             } else {
