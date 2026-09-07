@@ -528,7 +528,7 @@ const BANNERS = {
     'Season - 2': {
         id: 'Season',
         name: 'Season-7 賽季池 — 梅菲斯特號',
-        description: '第七賽季人格概率 UP！',
+        description: '第七賽季E.G.O 概率 UP！',
         cost: { single:  65, ten: 650 },
         rateUp: {
             S3: [],
@@ -539,7 +539,7 @@ const BANNERS = {
     'Season - 3': {
         id: 'Season',
         name: 'Season-7 賽季池 — 梅菲斯特號',
-        description: '第七賽季人格概率 UP！',
+        description: '第七賽季人E.G.O 概率 UP！',
         cost: { single:  65, ten: 650 },
         rateUp: {
             S3: [],
