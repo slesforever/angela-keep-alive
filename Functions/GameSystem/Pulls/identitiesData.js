@@ -473,6 +473,7 @@ module.exports = {
     registry: identityRegistry,
     pool,
     BANNERS,
+    upTargets,
     filterIdentities,
     getIdentityData
 };
