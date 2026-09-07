@@ -254,7 +254,7 @@ const identityRegistry = {
     { name: "[HE] 紅紙片 - 唐吉訶德 / [HE] Red Sheet - Don Quixote" },
     { name: "[WAW] 渴望-米爾卡拉 - 唐吉訶德 / [WAW] Yearning-Mircalla - Don Quixote" },
     { name: "[WAW] 愛與恨之名 - 唐吉訶德 / [WAW] In the Name of Love and Hate - Don Quixote" },
-    { name: "[ZAYIN] 我拿剪刀去，你呢？ - 唐吉訶德 / [ZAYIN] I'll Go fer Scissors. How 'Bout You? - Don Quixote" },
+    { name: "[ZAYIN] 我拿剪刀去，你呢？ - 唐吉訶德 / [ZAYIN] I ll Go fer Scissors. How Bout You? - Don Quixote" },
 
     { name: "[ZAYIN] 森林與火焰 - 良秀 / [ZAYIN] Forest for the Flames - Ryoshu" },
     { name: "[ZAYIN] 蘇打 - 良秀 / [ZAYIN] Soda - Ryoshu" },
@@ -532,7 +532,7 @@ const BANNERS = {
         cost: { single:  65, ten: 650 },
         rateUp: {
             S3: [],
-            EGOS: ['[ZAYIN] 我拿剪刀去，你呢？ - 唐吉訶德 / [ZAYIN] I'll Go fer Scissors. How 'Bout You? - Don Quixote'],
+            EGOS: ['[ZAYIN] 我拿剪刀去，你呢？ - 唐吉訶德 / [ZAYIN] I ll Go fer Scissors. How Bout You? - Don Quixote'],
             S2: []
         }
     },
@@ -550,7 +550,7 @@ const BANNERS = {
     'focus': {
         id: 'focus',
         name: '罪人特定提取 — Ryoshu Focus UP',
-        description: '所有良秀 (Rodion) 的人格與 E.G.O 出現機率大幅提升！',
+        description: '所有良秀 (Ryoshu) 的人格與 E.G.O 出現機率大幅提升！',
         cost: { single: 65, ten: 650 },
         rateUp: {
             S3: filterIdentities('000', '良秀'),
