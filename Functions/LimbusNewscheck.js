@@ -17,9 +17,9 @@ const MONITORED_USERS = (process.env.TARGET_USERS || 'LimbusCompany_B,ProjMoonSt
 let notifyChannelId = process.env.NOTIFY_CHANNEL_ID || '1402282604165730348';
 const PING_ROLE = process.env.PING_ROLE_MENTION || '<@&1406984068725211177>';
 const STEAM_APP_ID = '1973530';
-const CHECK_INTERVAL = Number(process.env.CHECK_INTERVAL_MS || 5 * 60 * 1000);
-const TWITTER_MIN_FETCH_GAP_MS = Number(process.env.TWITTER_MIN_FETCH_GAP_MS || 4 * 60 * 1000);
-const TWITTER_CACHE_TTL_MS = Number(process.env.TWITTER_CACHE_TTL_MS || 15 * 60 * 1000);
+const CHECK_INTERVAL = Number(process.env.CHECK_INTERVAL_MS || 2 * 60 * 1000);
+const TWITTER_MIN_FETCH_GAP_MS = Number(process.env.TWITTER_MIN_FETCH_GAP_MS || 90 * 1000);
+const TWITTER_CACHE_TTL_MS = Number(process.env.TWITTER_CACHE_TTL_MS || 10 * 60 * 1000);
 
 // 自動監測預設抓少一點，速度更快；手動測試可多抓
 const STEAM_NEWS_COUNT_AUTO = Number(process.env.STEAM_NEWS_COUNT_AUTO || 3);
@@ -340,6 +340,17 @@ function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
     }).finally(() => clearTimeout(timeout));
 }
 
+function compareTweetFreshness(a, b) {
+    const aTime = Date.parse(a?.createdAt || '');
+    const bTime = Date.parse(b?.createdAt || '');
+
+    if (Number.isFinite(aTime) && Number.isFinite(bTime) && aTime !== bTime) {
+        return bTime - aTime;
+    }
+
+    return compareSnowflakeIds(b?.id || '', a?.id || '');
+}
+
 function compareSnowflakeIds(a, b) {
     if (a === b) return 0;
 
@@ -490,7 +501,7 @@ function parseSyndicationTimeline(raw, fallbackUserId) {
 }
 
 async function fetchTweetItemsFromNode(nodeUrl, userId) {
-    const url = `${nodeUrl}/${encodeURIComponent(userId)}?format=html&dnt=true`;
+    const url = `${nodeUrl}/${encodeURIComponent(userId)}?format=html&dnt=true&fresh=${Date.now()}`;
     const errors = [];
 
     // 先使用 curl。X syndication 對 Node HTTP client 較容易回 429，
@@ -572,7 +583,7 @@ async function fetchTweetItemsFromAllNodes(userId) {
         throw new Error(`所有 X timeline 來源都失敗：${failures.join(' | ') || '沒有有效回應'}`);
     }
 
-    merged.sort((a, b) => compareSnowflakeIds(b.id, a.id));
+    merged.sort(compareTweetFreshness);
     return merged;
 }
 
@@ -691,7 +702,8 @@ async function checkTwitterUpdates(client, isManual = false, messageContext = nu
             if (isManual) {
                 const preview = feedItems.slice(0, 3).map((item, idx) => {
                     const titlePart = item.title ? `**${truncateText(item.title, 100)}**\n` : '';
-                    return `${idx + 1}. ${titlePart}${item.link}`;
+                    const datePart = item.createdAt ? `\n🕒 ${item.createdAt}` : '';
+                    return `${idx + 1}. ${titlePart}${item.link}${datePart}`;
                 });
                 manualLines.push(`**@${userId}**\n${preview.join('\n\n')}`);
                 continue;
