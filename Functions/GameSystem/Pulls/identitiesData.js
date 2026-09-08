@@ -517,7 +517,7 @@ const BANNERS = {
         id: 'Season',
         name: 'Season-7 賽季池 — 梅菲斯特號',
         description: '第七賽季人格概率 UP！',
-        cost: { single:  65, ten: 650 },
+        cost: { single:  0, ten: 0 },
         rateUp: {
             S3: ['［Cinq協會 南部5科］鴻璐 / Cinq Assoc. East Section 3 Hong Lu'],
             EGOS: [],
@@ -529,7 +529,7 @@ const BANNERS = {
         id: 'Season',
         name: 'Season-7 賽季池 — 梅菲斯特號',
         description: '第七賽季E.G.O 概率 UP！',
-        cost: { single:  65, ten: 650 },
+        cost: { single:  0, ten: 0 },
         rateUp: {
             S3: [],
             EGOS: ['[ZAYIN] 我拿剪刀去，你呢？ - 唐吉訶德 / [ZAYIN] I ll Go fer Scissors. How Bout You? - Don Quixote'],
@@ -540,7 +540,7 @@ const BANNERS = {
         id: 'Season',
         name: 'Season-7 賽季池 — 梅菲斯特號',
         description: '第七賽季人E.G.O 概率 UP！',
-        cost: { single:  65, ten: 650 },
+        cost: { single:  0, ten: 0 },
         rateUp: {
             S3: [],
             EGOS: ['[TETH] 租借申請 - 格里高爾 / [TETH] Move-in Reg - Gregor'],
@@ -551,7 +551,7 @@ const BANNERS = {
         id: 'focus',
         name: '罪人特定提取 — Ryoshu Focus UP',
         description: '所有良秀 (Ryoshu) 的人格與 E.G.O 出現機率大幅提升！',
-        cost: { single: 65, ten: 650 },
+        cost: { single: 0, ten: 0 },
         rateUp: {
             S3: filterIdentities('000', '良秀'),
             S2: filterIdentities('00', '良秀'),
