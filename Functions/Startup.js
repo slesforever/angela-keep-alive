@@ -29,9 +29,8 @@ const BASE_DATA_DIR = path.join(
     'data'
 );
 
-const PLAYERS_DIR = path.join(
-    BASE_DATA_DIR,
-    'players'
+const PLAYERS_DIR = path.resolve(
+    process.env.PLAYER_DATA_DIR || path.join(BASE_DATA_DIR, 'players')
 );
 
 const CONFIG_PATH = path.join(

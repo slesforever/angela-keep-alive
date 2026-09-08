@@ -6,7 +6,9 @@ const path = require('path');
 const { EmbedBuilder } = require('discord.js');
 
 const LEVEL_CONFIG_PATH = path.join(process.cwd(), 'data', 'level-config.json');
-const PLAYERS_DIR = path.join(process.cwd(), 'data', 'players');
+const PLAYERS_DIR = path.resolve(
+    process.env.PLAYER_DATA_DIR || path.join(process.cwd(), 'data', 'players')
+);
 
 const LEVEL_REWARDS = {
     perLevel: { starCoins: 25, lightSeeds: 5 },

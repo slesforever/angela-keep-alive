@@ -313,62 +313,67 @@ function queueAllPlayersBackup(client, reason = 'save') {
 
 // ─── 從 Discord 備份頻道還原玩家資料（重啟自動恢復）────────────
 async function restoreFromBackupChannel(client) {
-    if (!client) return false;
+    if (!client) return 0;
     const channel = await client.channels.fetch(BACKUP_CHANNEL_ID).catch(() => null);
     if (!channel) {
         console.error(`[Pack] 還原失敗：找不到備份頻道 ${BACKUP_CHANNEL_ID}`);
-        return false;
+        return 0;
     }
 
     const messages = await channel.messages.fetch({ limit: 100 }).catch(() => null);
     if (!messages || !messages.size) {
         console.warn('[Pack] 備份頻道沒有任何訊息，略過還原');
-        return false;
+        return 0;
     }
 
-    const txtMessages = messages
-        .filter(m => m.attachments && m.attachments.size > 0)
-        .filter(m => [...m.attachments.values()].some(a => a.name && a.name.endsWith('.txt')))
-        .sort((a, b) => b.createdTimestamp - a.createdTimestamp);
-
-    if (!txtMessages.size) {
-        console.warn('[Pack] 備份頻道沒有 txt 附件，略過還原');
-        return false;
-    }
-
-    // 找最新一批：同一次備份的檔名有相同時間戳
-    const newest = txtMessages.first();
-    const stampMatch = [...newest.attachments.values()][0]?.name?.match(/players_backup_(.+?)_part/);
-    if (!stampMatch) {
-        console.warn('[Pack] 無法解析備份檔名時間戳，略過還原');
-        return false;
-    }
-    const targetStamp = stampMatch[1];
-
-    const parts = [];
-    for (const msg of txtMessages.values()) {
-        for (const att of msg.attachments.values()) {
-            if (att.name && att.name.includes(`players_backup_${targetStamp}_part`)) {
-                const partMatch = att.name.match(/part(\d+)_of_(\d+)/);
-                const partNo = partMatch ? parseInt(partMatch[1]) : 0;
-                parts.push({ partNo, url: att.url, name: att.name });
+    const backupAttachments = [];
+    for (const message of messages.values()) {
+        for (const attachment of message.attachments.values()) {
+            const match = attachment.name?.match(/^players_backup_(.+?)_part(\d+)_of_(\d+)\.txt$/);
+            if (match) {
+                backupAttachments.push({
+                    stamp: match[1],
+                    partNo: Number(match[2]),
+                    totalParts: Number(match[3]),
+                    url: attachment.url,
+                    name: attachment.name,
+                    createdTimestamp: message.createdTimestamp,
+                });
             }
         }
     }
 
-    if (!parts.length) {
-        console.warn('[Pack] 沒有找到任何備份檔案，略過還原');
-        return false;
+    if (!backupAttachments.length) {
+        console.warn('[Pack] 備份頻道沒有 txt 附件，略過還原');
+        return 0;
     }
 
-    parts.sort((a, b) => a.partNo - b.partNo);
+    // 找最新一批：同一次備份的檔名會共用相同時間戳。
+    // 不依賴附件在訊息中的順序，避免最新訊息含有其他 txt 附件時誤判。
+    backupAttachments.sort((a, b) => b.createdTimestamp - a.createdTimestamp);
+    const targetStamp = backupAttachments[0].stamp;
+    const parts = backupAttachments
+        .filter(part => part.stamp === targetStamp)
+        .sort((a, b) => a.partNo - b.partNo);
+    const expectedParts = parts[0]?.totalParts || 0;
+
+    if (!parts.length) {
+        console.warn('[Pack] 沒有找到任何備份檔案，略過還原');
+        return 0;
+    }
+
+    if (expectedParts > 0 && parts.length < expectedParts) {
+        console.error(`[Pack] 最新備份不完整：找到 ${parts.length}/${expectedParts} 個檔案，略過還原以避免覆蓋成不完整資料`);
+        return 0;
+    }
+
     const fetch = require('node-fetch');
-    let fullText = '';
+    const textParts = [];
     for (const part of parts) {
         try {
             const r = await fetch(part.url);
             if (r.ok) {
-                fullText += await r.text();
+                textParts.push(await r.text());
                 console.log(`[Pack] 下載備份 ${part.name} OK`);
             } else {
                 console.error(`[Pack] 下載 ${part.name} 失敗: HTTP ${r.status}`);
@@ -378,26 +383,31 @@ async function restoreFromBackupChannel(client) {
         }
     }
 
+    // 每個 chunk 都可能剛好切在 JSON 的任意一行，補一個換行不會影響 JSON，
+    // 但能避免兩個 chunk 的最後/第一行黏在一起造成解析失敗。
+    const fullText = textParts.join('\n');
     if (!fullText.length) {
         console.error('[Pack] 所有備份檔案下載失敗');
-        return false;
+        return 0;
     }
 
-    // 解析 txt：每個玩家區塊以 ====== 分隔，含 USER ID 和 JSON
-    const blocks = fullText.split(/(?=^==================================================)/m);
+    // 解析完整玩家區塊：
+    // ==================================================
+    // USER ID: ...
+    // USERNAME / UPDATED
+    // ==================================================
+    // { 完整 JSON }
+    //
+    // 不能直接用分隔線 split，因為每位玩家的區塊本身就有兩條分隔線。
+    const playerBlockPattern =
+        /==================================================\r?\nUSER ID:\s*([^\r\n]+)\r?\n[\s\S]*?\r?\n==================================================\r?\n([\s\S]*?)(?=\r?\n==================================================\r?\nUSER ID:|\s*$)/g;
     let restored = 0;
-
-    for (const block of blocks) {
-        const idMatch = block.match(/^USER ID: (\S+)/m);
-        if (!idMatch) continue;
-        const userId = idMatch[1].trim();
-
-        const jsonStart = block.indexOf('{');
-        const jsonEnd = block.lastIndexOf('}');
-        if (jsonStart < 0 || jsonEnd < 0) continue;
-
+    let match;
+    while ((match = playerBlockPattern.exec(fullText)) !== null) {
+        const userId = match[1].trim();
+        const jsonText = match[2].trim();
         try {
-            const data = JSON.parse(block.slice(jsonStart, jsonEnd + 1));
+            const data = JSON.parse(jsonText);
             const file = path.join(DATA_DIR, `${userId}.json`);
             fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf8');
             restored++;
@@ -407,7 +417,7 @@ async function restoreFromBackupChannel(client) {
     }
 
     console.log(`✅ [Pack] 從備份頻道還原了 ${restored} 位玩家資料`);
-    return restored > 0;
+    return restored;
 }
 
 // ─── 玩家資料存取 ─────────────────────────────────────────────
