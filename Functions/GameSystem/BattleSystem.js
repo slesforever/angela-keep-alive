@@ -1,5 +1,5 @@
 // Functions/GameSystem/BattleSystem.js
-// 戰鬥引擎 — 5難度+狂氣獎勵+敵人選擇UI+StatusEffects整合
+// 戰鬥引擎 — 5難度+LightSeeds獎勵+敵人選擇UI+StatusEffects整合
 'use strict';
 
 const { EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder, StringSelectMenuBuilder } = require('discord.js');
@@ -20,8 +20,8 @@ const DIFFICULTY = {
     super_easy: { enemyHpMult: 0.55, enemyAtkMult: 0.70, lightSeedsReward: 20,  threadReward: 2,  label: '超簡單 🟢' },
     easy:       { enemyHpMult: 0.75, enemyAtkMult: 0.85, lightSeedsReward: 40,  threadReward: 5,  label: '簡單 🟡' },
     normal:     { enemyHpMult: 1.00, enemyAtkMult: 1.00, lightSeedsReward: 70,  threadReward: 10, label: '一般 🟠' },
-    hard:       { enemyHpMult: 1.40, enemyAtkMult: 1.20, lightSeedsReward: 130, threadReward: 20, label: '困難 🔴' },
-    insane:     { enemyHpMult: 2.00, enemyAtkMult: 1.50, lightSeedsReward: 200, threadReward: 35, label: '瘋狂 💀' },
+    hard:       { enemyHpMult: 1.60, enemyAtkMult: 1.35, lightSeedsReward: 160, threadReward: 24, label: '困難 🔴' },
+    insane:     { enemyHpMult: 2.40, enemyAtkMult: 1.70, lightSeedsReward: 250, threadReward: 45, label: '瘋狂 💀' },
     // 相容舊版 MirrorDungeon 呼叫
     normal_md:  { enemyHpMult: 1.00, enemyAtkMult: 1.00, lightSeedsReward: 0,   threadReward: 10, label: '一般' },
     elite:      { enemyHpMult: 1.30, enemyAtkMult: 1.15, lightSeedsReward: 0,   threadReward: 20, label: '精英' },

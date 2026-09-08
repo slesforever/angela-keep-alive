@@ -4,7 +4,7 @@ const { REST, Routes, SlashCommandBuilder, PermissionFlagsBits, ChannelType } = 
 
 const admin = PermissionFlagsBits.Administrator;
 const commands = [
-    new SlashCommandBuilder().setName('pull').setDescription('開啟狂氣提取介面'),
+    new SlashCommandBuilder().setName('pull').setDescription('開啟 LightSeeds 提取介面'),
     new SlashCommandBuilder().setName('pack').setDescription('查看背包與資源'),
     new SlashCommandBuilder().setName('list').setDescription('查看卡池機率與清單'),
     new SlashCommandBuilder().setName('limbusids').setDescription('查看角色 ID 與中英文名稱'),

@@ -15,6 +15,9 @@ const {
 
 // ─── 資料目錄（支援環境變數持久化路徑，防止重啟歸零）─────────
 const DATA_DIR = path.resolve(process.env.PLAYER_DATA_DIR || path.join(process.cwd(), 'data', 'players'));
+const PERSISTENT_DATA_DIR = path.join(process.cwd(), 'data');
+const SHOP_ITEMS_PATH = path.join(PERSISTENT_DATA_DIR, 'shop-items.json');
+const SHOP_SALES_PATH = path.join(PERSISTENT_DATA_DIR, 'shop-sales.json');
 const { getLanguage } = require('./LanguageSystem.js');
 // ─── SinnersData（供 getIdentitySinnerKey 使用）─────────────────
 const { SINNERS } = require('./Data/SinnersData.js');
@@ -45,6 +48,19 @@ function calcLevelCost(curLv, steps = 1) {
         else              { frags += l * 12; scrolls += 3; }
     }
     return { frags, scrolls };
+}
+
+// 與 LevelSystem 相同的全域玩家等級公式；載入舊存檔時同步修正顯示用 level。
+function getPlayerLevelFromXp(totalXp) {
+    let level = 1;
+    let remaining = Math.max(0, Number(totalXp) || 0);
+    while (level < 100) {
+        const needed = level * 150;
+        if (remaining < needed) break;
+        remaining -= needed;
+        level++;
+    }
+    return level;
 }
 
 // ─── 工具 ─────────────────────────────────────────────────────
@@ -196,7 +212,27 @@ function buildAllPlayersBackupText() {
         }
     });
 
-    return header + blocks.join('\n');
+    const sections = [header + blocks.join('\n')];
+
+    // 商城資料不在 data/players/，一併放進玩家快照，避免重啟或部署後商品消失。
+    for (const [label, file] of [
+        ['SHOP_ITEMS', SHOP_ITEMS_PATH],
+        ['SHOP_SALES', SHOP_SALES_PATH],
+    ]) {
+        if (!fs.existsSync(file)) continue;
+        try {
+            const value = JSON.parse(fs.readFileSync(file, 'utf8'));
+            sections.push([
+                `# ${label}_JSON_BEGIN`,
+                JSON.stringify(value, null, 2),
+                `# ${label}_JSON_END`,
+            ].join('\n'));
+        } catch (err) {
+            console.error(`[Pack] 讀取 ${label} 備份失敗:`, err.message);
+        }
+    }
+
+    return sections.join('\n');
 }
 
 function splitTextIntoChunks(text, maxBytes = MAX_TXT_BYTES) {
@@ -400,7 +436,7 @@ async function restoreFromBackupChannel(client) {
     //
     // 不能直接用分隔線 split，因為每位玩家的區塊本身就有兩條分隔線。
     const playerBlockPattern =
-        /==================================================\r?\nUSER ID:\s*([^\r\n]+)\r?\n[\s\S]*?\r?\n==================================================\r?\n([\s\S]*?)(?=\r?\n==================================================\r?\nUSER ID:|\s*$)/g;
+        /==================================================\r?\nUSER ID:\s*([^\r\n]+)\r?\n[\s\S]*?\r?\n==================================================\r?\n([\s\S]*?)(?=\r?\n==================================================\r?\nUSER ID:|\r?\n# SHOP_(?:ITEMS|SALES)_JSON_BEGIN|\s*$)/g;
     let restored = 0;
     let match;
     while ((match = playerBlockPattern.exec(fullText)) !== null) {
@@ -416,7 +452,33 @@ async function restoreFromBackupChannel(client) {
         }
     }
 
+    // 還原商城商品與訂單。這些檔案位於 data/，不是玩家資料目錄。
+    let restoredShopFiles = 0;
+    for (const [label, file] of [
+        ['SHOP_ITEMS', SHOP_ITEMS_PATH],
+        ['SHOP_SALES', SHOP_SALES_PATH],
+    ]) {
+        const sectionPattern = new RegExp(
+            `# ${label}_JSON_BEGIN\\s*([\\s\\S]*?)\\s*# ${label}_JSON_END`
+        );
+        const section = fullText.match(sectionPattern);
+        if (!section) continue;
+
+        try {
+            const value = JSON.parse(section[1].trim());
+            if (!Array.isArray(value)) throw new Error('備份內容不是陣列');
+            fs.mkdirSync(path.dirname(file), { recursive: true });
+            fs.writeFileSync(file, JSON.stringify(value, null, 2), 'utf8');
+            restoredShopFiles++;
+        } catch (err) {
+            console.error(`[Pack] 還原 ${label} 失敗:`, err.message);
+        }
+    }
+
     console.log(`✅ [Pack] 從備份頻道還原了 ${restored} 位玩家資料`);
+    if (restoredShopFiles > 0) {
+        console.log(`✅ [Pack] 同步還原了 ${restoredShopFiles} 份商城資料`);
+    }
     return restored;
 }
 
@@ -470,6 +532,7 @@ function savePlayerData(client, userId, data) {
 
 function getOrCreatePlayer(client, userId, username) {
     let p = loadPlayerData(client, userId);
+    let needsSave = false;
     if (!p) {
         p = defaultPlayer(username || 'Player');
         savePlayerData(client, userId, p);
@@ -488,21 +551,33 @@ function getOrCreatePlayer(client, userId, username) {
     p.totalPulls     ??= 0;
     p.identities     ??= [];
     if (p.lunacy !== undefined) {
-        p.lightSeeds = (p.lightSeeds || 0) + p.lunacy;
+        p.lightSeeds = (Number(p.lightSeeds) || 0) + (Number(p.lunacy) || 0);
         delete p.lunacy;
+        needsSave = true;
     }
     p.lightSeeds     ??= 1300;
     p.starCoins      ??= p.starcoins ?? 0;
     p.bankStarCoins  ??= 0;
     p.bankLastInterestAt ??= Date.now();
-    delete p.starcoins;
+    if (p.starcoins !== undefined) {
+        delete p.starcoins;
+        needsSave = true;
+    }
     p.xp             ??= 0;
+    const normalizedLevel = getPlayerLevelFromXp(
+        Math.max(Number(p.xp) || 0, Number(p.exp) || 0)
+    );
+    if (p.level !== normalizedLevel) {
+        p.level = normalizedLevel;
+        needsSave = true;
+    }
     if (!p.identities.length) {
         const pool = getIdData().pool || {};
         const base = (pool['0'] || pool['S1'] || []).slice(0, 12);
         if (base.length) { p.identities = [...base]; if (!p.team?.length) p.team = [...base].slice(0, 4); }
     }
 
+    if (needsSave) savePlayerData(client, userId, p);
     return p;
 }
 
@@ -967,5 +1042,6 @@ module.exports = {
     calcLevelCost,
     getIdentitySinnerKey,
     getOwnedSinners,
+    queueAllPlayersBackup,
     restoreFromBackupChannel,
 };

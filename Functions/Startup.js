@@ -316,7 +316,7 @@ const allSlashCommands = [
     new SlashCommandBuilder()
         .setName('pull')
         .setDescription(
-            '開啟狂氣提取介面'
+            '開啟 LightSeeds 提取介面'
         ),
 
     // ─────────────────────────────────────

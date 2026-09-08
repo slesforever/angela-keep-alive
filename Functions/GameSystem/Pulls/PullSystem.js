@@ -29,7 +29,7 @@ try {
     getOrCreatePlayer =
         typeof packsModule.getOrCreatePlayer === 'function'
             ? packsModule.getOrCreatePlayer
-            : (_c, _id) => ({ lunacy: 0, identities: [] });
+            : (_c, _id) => ({ lightSeeds: 0, identities: [] });
 
     savePlayerData =
         typeof packsModule.savePlayerData === 'function'
@@ -44,7 +44,7 @@ try {
 
     loadUserInventory = () => [];
     saveUserInventory = () => {};
-    getOrCreatePlayer = (_c, _id) => ({ lunacy: 0, identities: [] });
+    getOrCreatePlayer = (_c, _id) => ({ lightSeeds: 0, identities: [] });
     savePlayerData = () => {};
 }
 
@@ -605,20 +605,20 @@ async function executePull(
     }
 
     // ─────────────────────────────────
-    // 計算狂氣（從 player.lunacy 讀取，非 inventory 計數）
+    // 計算 LightSeeds（從 player.lightSeeds 讀取，非 inventory 計數）
     // ─────────────────────────────────
 
     const player = getOrCreatePlayer(client, user.id, user.username || 'Player');
-    const lunacyCount = player.lunacy || 0;
+    const lightSeedsCount = Number(player.lightSeeds) || 0;
 
     if (
-        lunacyCount < cost
+        lightSeedsCount < cost
     ) {
         const errorMessage =
-            `❌ **狂氣不足！**\n\n` +
-            `本次提取需要：**${cost} 狂氣**\n` +
-            `目前持有：**${lunacyCount} 狂氣**\n` +
-            `還需要：**${cost - lunacyCount} 狂氣**`;
+            `❌ **LightSeeds 不足！**\n\n` +
+            `本次提取需要：**${cost} LightSeeds**\n` +
+            `目前持有：**${lightSeedsCount} LightSeeds**\n` +
+            `還需要：**${cost - lightSeedsCount} LightSeeds**`;
 
         if (
             interaction?.deferred ||
@@ -638,10 +638,10 @@ async function executePull(
     }
 
     // ─────────────────────────────────
-    // 扣除狂氣（直接操作 player.lunacy）
+    // 扣除 LightSeeds
     // ─────────────────────────────────
 
-    player.lunacy = lunacyCount - cost;
+    player.lightSeeds = lightSeedsCount - cost;
 
     const remainingInventory = inventory;
 
@@ -693,18 +693,11 @@ async function executePull(
     // ─────────────────────────────────
 
     const itemsToAdd = [];
+    let duplicateFragments = 0;
 
     for (const draw of draws) {
         if (draw.isDuplicate) {
-            for (
-                let i = 0;
-                i < draw.shardValue;
-                i++
-            ) {
-                itemsToAdd.push(
-                    '自我碎片'
-                );
-            }
+            duplicateFragments += Number(draw.shardValue) || 0;
         } else {
             itemsToAdd.push(
                 draw.name
@@ -723,6 +716,8 @@ async function executePull(
 
     try {
         player.identities = finalInventory;
+        player.fragments = (player.fragments || 0) + duplicateFragments;
+        player.totalPulls = (player.totalPulls || 0) + pullCount;
         savePlayerData(
             client,
             user.id,
@@ -862,7 +857,7 @@ async function executePull(
             .setTitle(
                 `🚂 ${
                     banner.name ||
-                    '狂氣提取'
+                    'LightSeeds 提取'
                 } — ${
                     pullCount === 1
                         ? '單抽'
@@ -878,8 +873,8 @@ async function executePull(
             .setFooter({
                 text:
                     summaryParts.length
-                        ? `收穫：${summaryParts.join('、')} | 消耗 ${cost} 狂氣`
-                        : `消耗 ${cost} 狂氣 | 「每一次提取，都是向平行世界借調可能性。」`,
+                        ? `收穫：${summaryParts.join('、')} | 消耗 ${cost} LightSeeds`
+                        : `消耗 ${cost} LightSeeds | 「每一次提取，都是向平行世界借調可能性。」`,
             })
             .setTimestamp();
 

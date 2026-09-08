@@ -28,7 +28,7 @@ function getBanners() {
 function createBannerEmbed(banner) {
   if (!banner) {
     return new EmbedBuilder()
-      .setTitle('🚂 狂氣提取')
+      .setTitle('🚂 LightSeeds 提取')
       .setColor(0xff0000)
       .setDescription('❌ 目前沒有可用的提取卡池。');
   }
@@ -77,7 +77,7 @@ function createBannerEmbed(banner) {
       },
       {
         name: '💰 提取花費',
-        value: `單抽：**${singleCost} 狂氣**\n` + `十連：**${tenCost} 狂氣**`,
+        value: `單抽：**${singleCost} LightSeeds**\n` + `十連：**${tenCost} LightSeeds**`,
         inline: false,
       }
     )
@@ -126,12 +126,12 @@ function createPullButtons(banner, bannerKey) {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId(`pull_execute_${finalBannerKey}_1`)
-      .setLabel(`單抽 (${singleCost} 狂氣)`)
+      .setLabel(`單抽 (${singleCost} LightSeeds)`)
       .setStyle(ButtonStyle.Primary),
 
     new ButtonBuilder()
       .setCustomId(`pull_execute_${finalBannerKey}_10`)
-      .setLabel(`十連 (${tenCost} 狂氣)`)
+      .setLabel(`十連 (${tenCost} LightSeeds)`)
       .setStyle(ButtonStyle.Success)
   );
 }
@@ -174,7 +174,7 @@ function getDefaultBanner(banners) {
 // ─────────────────────────────────────────────
 
 module.exports = {
-  data: new SlashCommandBuilder().setName('pull').setDescription('開啟狂氣提取介面'),
+  data: new SlashCommandBuilder().setName('pull').setDescription('開啟 LightSeeds 提取介面'),
 
   async execute(interaction) {
     // ─────────────────────────────────

@@ -8,7 +8,7 @@ const {
     EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle
 } = require('discord.js');
 const {
-    getOrCreatePlayer, savePlayerData
+    getOrCreatePlayer, savePlayerData, queueAllPlayersBackup
 } = require('./PacksAndData.js');
 const { getLevelFromXp } = require('./LevelSystem.js');
 
@@ -129,7 +129,8 @@ async function handlePurchase(client, interaction, itemId) {
     if (!item) return interaction.reply({ content: '❌ 商品已下架或不存在。', ephemeral: true });
 
     const player = getOrCreatePlayer(client, interaction.user.id, interaction.user.username);
-    const level = getLevelFromXp(player.xp || 0).level;
+    const totalXp = Math.max(Number(player.xp) || 0, Number(player.exp) || 0);
+    const level = getLevelFromXp(totalXp).level;
     if (level < item.minLevel) {
         return interaction.reply({ content: `❌ 等級不足，需要 **Lv.${item.minLevel}**，你目前是 Lv.${level}。`, ephemeral: true });
     }
@@ -169,6 +170,7 @@ async function handlePurchase(client, interaction, itemId) {
     const sales = getSales();
     sales.push(sale);
     saveSales(sales);
+    queueAllPlayersBackup(client, 'shop:purchase');
 
     const after = { lightSeeds: player.lightSeeds, starCoins: player.starCoins };
     const details = purchaseDetails(sale, before, after);
@@ -201,7 +203,7 @@ async function handlePurchase(client, interaction, itemId) {
 
 function isSles(interaction) { return interaction.user?.id === SUPER_ADMIN_ID; }
 
-function addItem(options) {
+function addItem(options, client = null) {
     const items = getItems();
     const item = {
         id: `item-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`,
@@ -216,26 +218,29 @@ function addItem(options) {
     };
     items.push(item);
     saveItems(items);
+    if (client) queueAllPlayersBackup(client, 'shop:add');
     return item;
 }
 
-function removeItem(itemId) {
+function removeItem(itemId, client = null) {
     const items = getItems();
     const item = items.find(entry => entry.id === itemId && entry.active !== false);
     if (!item) return null;
     item.active = false;
     item.removedAt = new Date().toISOString();
     saveItems(items);
+    if (client) queueAllPlayersBackup(client, 'shop:remove');
     return item;
 }
 
-function confirmSale(code) {
+function confirmSale(code, client = null) {
     const sales = getSales();
     const sale = sales.find(entry => entry.code.toUpperCase() === String(code).toUpperCase());
     if (!sale) return null;
     sale.status = 'delivered';
     sale.deliveredAt = new Date().toISOString();
     saveSales(sales);
+    if (client) queueAllPlayersBackup(client, 'shop:confirm');
     return sale;
 }
 
@@ -250,15 +255,15 @@ async function handleShopAdmin(interaction, action) {
             starCoinsPrice: interaction.options.getInteger('starcoins'),
             minLevel: interaction.options.getInteger('minlevel'),
             stock: interaction.options.getInteger('stock'),
-        });
+        }, interaction.client);
         return interaction.reply({ content: `✅ 已上架 **${item.name}**。\n商品 ID：\`${item.id}\`\n價格：${formatCost(item)}`, ephemeral: true });
     }
     if (action === 'remove') {
-        const item = removeItem(interaction.options.getString('item_id'));
+        const item = removeItem(interaction.options.getString('item_id'), interaction.client);
         return interaction.reply({ content: item ? `✅ 已下架 **${item.name}**。` : '❌ 找不到上架中的商品。', ephemeral: true });
     }
     if (action === 'confirm') {
-        const sale = confirmSale(interaction.options.getString('code'));
+        const sale = confirmSale(interaction.options.getString('code'), interaction.client);
         if (!sale) return interaction.reply({ content: '❌ 找不到這個序號。', ephemeral: true });
         return interaction.reply({ content: `✅ 已標記序號 \`${sale.code}\` 為已交付，購買者：<@${sale.userId}>。`, allowedMentions: { users: [sale.userId] } });
     }
