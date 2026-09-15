@@ -26,30 +26,32 @@ const BUTTON_LABELS = { COLOR_FIXER:'色彩', ABN_ANGELA:'ANGELA', ABN_ALEPH:'AL
     }
     function formatRate(rate) { const percent = rate * 100; return percent < 0.01 ? percent.toFixed(4) + '%' : percent.toFixed(2) + '%'; }
     function buildRarityRows(active, language, disabled = false) { const rows = []; for (let i = 0; i < TIER_ORDER.length; i += 5) { const labels = language === 'en' ? BUTTON_LABELS_EN : BUTTON_LABELS; const buttons = TIER_ORDER.slice(i, i + 5).map(tier => new ButtonBuilder().setCustomId('list:filter:' + tier).setLabel(labels[tier]).setStyle(active === tier ? ButtonStyle.Success : ButtonStyle.Secondary).setDisabled(disabled)); rows.push(new ActionRowBuilder().addComponents(buttons)); } return rows; }
-    function render(entries, filter, query, page, timerUsed = false, disabled = false) {
+    function render(entries, filter, query, page, timerUsed = false, disabled = false, expiresAt = Date.now() + 60000, language = 'en') {
       const filtered = entries.filter(item => (filter === 'ALL' || item.tier === filter) && (!query || item.name.toLowerCase().includes(query.toLowerCase()) || TIER_LABELS[item.tier].toLowerCase().includes(query.toLowerCase())));
       const perPage = 12; const pages = Math.max(1, Math.ceil(filtered.length / perPage)); const safePage = Math.min(Math.max(0, page), pages - 1); const chunk = filtered.slice(safePage * perPage, (safePage + 1) * perPage);
       const text = chunk.length ? chunk.map(item => (item.isUp ? '> 🔺 **' : '• ') + displayName(item.name, language) + (item.isUp ? '**' : '') + ' (' + formatRate(item.rate) + ')' + (item.isUp ? ' **[UP!]**' : '')).join('\n') : '沒有符合的資料。';
-      const title = query ? '🔎 機率查詢：' + query : (filter === 'ALL' ? '📋 完整提取機率清單' : TIER_LABELS[filter] + ' 機率清單');
-      const embed = new EmbedBuilder().setTitle(title).setColor(0x00b4d8).setDescription(text).addFields({ name: '📊 機率說明', value: '包含基礎稀有度、異想體內部稀有度與當期 UP 修正。', inline: false }).setFooter({ text: '第 ' + (safePage + 1) + ' / ' + pages + ' 頁 ｜ 顯示 ' + filtered.length + ' 項' });
-      const controls = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('list:prev').setLabel('◀️ 上一頁').setStyle(ButtonStyle.Primary).setDisabled(disabled || safePage === 0), new ButtonBuilder().setCustomId('list:next').setLabel('下一頁 ▶️').setStyle(ButtonStyle.Primary).setDisabled(disabled || safePage >= pages - 1), new ButtonBuilder().setCustomId('list:all').setLabel('📋 全部').setStyle(ButtonStyle.Primary).setDisabled(disabled), new ButtonBuilder().setCustomId('list:search').setLabel('🔎 名稱查詢').setStyle(ButtonStyle.Success).setDisabled(disabled), new ButtonBuilder().setCustomId('list:extend').setLabel('⏱️ +1 分鐘').setStyle(ButtonStyle.Secondary).setDisabled(disabled || timerUsed));
-      return { embeds: [embed], components: [...buildRarityRows(filter, disabled), controls] };
+      const title = query ? (language === 'en' ? '🔎 Rate Search: ' : '🔎 機率查詢：') + query : (filter === 'ALL' ? (language === 'en' ? '📋 Full Extraction Rates' : '📋 完整提取機率清單') : (language === 'en' ? TIER_LABELS_EN[filter] + ' Rate List' : TIER_LABELS[filter] + ' 機率清單'));
+      const embed = new EmbedBuilder().setTitle(title).setColor(0x00b4d8).setDescription(text).addFields({ name: language === 'en' ? '📊 Rate Info' : '📊 機率說明', value: language === 'en' ? 'Includes base rarity, abnormality sub-rarity, and current rate-up adjustments.' : '包含基礎稀有度、異想體內部稀有度與當期 UP 修正。', inline: false }).setFooter({ text: (language === 'en' ? 'Page ' : '第 ') + (safePage + 1) + (language === 'en' ? ' / ' : ' / ') + pages + (language === 'en' ? ' ｜ ' + filtered.length + ' entries' : ' 頁 ｜ 顯示 ' + filtered.length + ' 項') + ' ｜ ' + (language === 'en' ? '⏱️ ' + Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000)) + 's remaining' : '⏱️ 剩餘 ' + Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000)) + ' 秒') });
+      const controls = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('list:prev').setLabel(language === 'en' ? '◀️ Previous' : '◀️ 上一頁').setStyle(ButtonStyle.Primary).setDisabled(disabled || safePage === 0), new ButtonBuilder().setCustomId('list:next').setLabel(language === 'en' ? 'Next ▶️' : '下一頁 ▶️').setStyle(ButtonStyle.Primary).setDisabled(disabled || safePage >= pages - 1), new ButtonBuilder().setCustomId('list:all').setLabel(language === 'en' ? '📋 All' : '📋 全部').setStyle(ButtonStyle.Primary).setDisabled(disabled), new ButtonBuilder().setCustomId('list:search').setLabel(language === 'en' ? '🔎 Search Name' : '🔎 名稱查詢').setStyle(ButtonStyle.Success).setDisabled(disabled), new ButtonBuilder().setCustomId('list:extend').setLabel(language === 'en' ? '⏱️ +1 minute' : '⏱️ +1 分鐘').setStyle(ButtonStyle.Secondary).setDisabled(disabled || timerUsed));
+      return { embeds: [embed], components: [...buildRarityRows(filter, language, disabled), controls] };
     }
     async function getReplyMessage(message, payload) { const sent = await message.reply(payload); if (sent?.createMessageComponentCollector) return sent; if (message.interaction?.fetchReply) return message.interaction.fetchReply(); return sent; }
     async function handleList(client, message) {
       try {
           const entries = buildEntries(); if (!entries.length) return message.reply('❌ 目前提取池沒有可顯示的資料。');
-          let filter = 'ALL'; let query = ''; let page = 0; let timerUsed = false; let startedAt = Date.now(); let view = render(entries, filter, query, page, timerUsed);
+          const language = getLanguage(message.author.id); let filter = 'ALL'; let query = ''; let timerUsed = false; let startedAt = Date.now(); let expiresAt = startedAt + 60000; let view = render(entries, filter, query, page, timerUsed, false, expiresAt, language);
           const reply = await getReplyMessage(message, view); if (!reply?.createMessageComponentCollector) return;
           const collector = reply.createMessageComponentCollector({ componentType: ComponentType.Button, time: 60000 });
+        const timerTicker = setInterval(() => { if (!collector.ended) { const live = render(entries, filter, query, page, timerUsed, false, expiresAt, language); reply.edit({ embeds: live.embeds, components: live.components }).catch(() => {}); } }, 5000);
           collector.on('collect', async interaction => {
               if (interaction.user.id !== message.author.id) return interaction.reply({ content: '❌ 這不是你的機率清單。', ephemeral: true });
               if (interaction.customId === 'list:extend') {
                 if (timerUsed) return interaction.reply({ content: '⏱️ 這個清單的延長按鈕只能使用一次。', ephemeral: true });
                 timerUsed = true;
-                const remaining = Math.max(1000, 120000 - (Date.now() - startedAt));
+                expiresAt = startedAt + 120000;
+                const remaining = Math.max(1000, expiresAt - Date.now());
                 collector.resetTimer({ time: remaining });
-                view = render(entries, filter, query, page, timerUsed);
+                view = render(entries, filter, query, page, timerUsed, false, expiresAt, language);
                 await interaction.update({ embeds: view.embeds, components: view.components });
                 return;
             }
@@ -60,9 +62,9 @@ const BUTTON_LABELS = { COLOR_FIXER:'色彩', ABN_ANGELA:'ANGELA', ABN_ALEPH:'AL
                   return;
               }
               if (interaction.customId === 'list:all') { filter = 'ALL'; query = ''; page = 0; } else if (interaction.customId === 'list:prev') page -= 1; else if (interaction.customId === 'list:next') page += 1; else if (interaction.customId.startsWith('list:filter:')) { filter = interaction.customId.slice('list:filter:'.length); query = ''; page = 0; }
-              view = render(entries, filter, query, page, timerUsed); await interaction.update({ embeds: view.embeds, components: view.components });
+              view = render(entries, filter, query, page, timerUsed, false, expiresAt, language); await interaction.update({ embeds: view.embeds, components: view.components });
           });
-          collector.on('end', () => { const ended = render(entries, filter, query, page, true, true); reply.edit({ components: ended.components }).catch(() => {}); });
+          collector.on('end', () => { clearInterval(timerTicker); const ended = render(entries, filter, query, page, true, true, expiresAt, language); reply.edit({ components: ended.components }).catch(() => {}); });
       } catch (error) { console.error('List Command Error:', error); if (!message.interaction?.replied) message.reply('❌ 讀取清單時發生錯誤，請稍後再試。').catch(() => {}); }
     }
     module.exports = { handleList, buildEntries };
