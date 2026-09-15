@@ -52,7 +52,7 @@
             if (interaction.customId === 'list:search') {
                   const modal = new ModalBuilder().setCustomId('list:search-modal').setTitle('查詢人格 / E.G.O 名稱').addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('list:query').setLabel('輸入名稱或關鍵字').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(80).setPlaceholder('例如：Don、E.G.O、ALEPH')));
                   await interaction.showModal(modal);
-                  try { const submitted = await interaction.awaitModalSubmit({ time: 30000, filter: i => i.user.id === message.author.id && i.customId === 'list:search-modal' }); query = submitted.fields.getTextInputValue('list:query').trim(); filter = 'ALL'; page = 0; view = render(entries, filter, query, page); await submitted.deferUpdate(); await reply.edit({ embeds: view.embeds, components: view.components }); } catch {}
+                  try { const submitted = await interaction.awaitModalSubmit({ time: 30000, filter: i => i.user.id === message.author.id && i.customId === 'list:search-modal' }); query = submitted.fields.getTextInputValue('list:query').trim(); filter = 'ALL'; page = 0; view = render(entries, filter, query, page, timerUsed); await submitted.deferUpdate(); await reply.edit({ embeds: view.embeds, components: view.components }); } catch {}
                   return;
               }
               if (interaction.customId === 'list:all') { filter = 'ALL'; query = ''; page = 0; } else if (interaction.customId === 'list:prev') page -= 1; else if (interaction.customId === 'list:next') page += 1; else if (interaction.customId.startsWith('list:filter:')) { filter = interaction.customId.slice('list:filter:'.length); query = ''; page = 0; }
