@@ -1939,6 +1939,11 @@ client.on(
             return;
         }
 
+        if (message.content?.trim().toLowerCase() === '!list') {
+            require('./GameSystem/Pulls/ListSystem.js').handleList(client, message).catch(err => console.error('[List] 執行失敗:', err.message));
+            return;
+        }
+
         handleMessageXp(
             client,
             message
