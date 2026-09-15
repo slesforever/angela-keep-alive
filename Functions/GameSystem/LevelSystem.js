@@ -9,6 +9,7 @@ const LEVEL_CONFIG_PATH = path.join(process.cwd(), 'data', 'level-config.json');
 const PLAYERS_DIR = path.resolve(
     process.env.PLAYER_DATA_DIR || path.join(process.cwd(), 'data', 'players')
 );
+const MONTHLY_STATE_PATH = path.join(process.cwd(), 'data', 'monthly-leaderboard-state.json');
 
 const LEVEL_REWARDS = {
     perLevel: { starCoins: 25, lightSeeds: 5 },
@@ -92,19 +93,25 @@ async function announceLevelUp(client, userId, username, newLevel, guildId, rewa
     } catch (err) { console.error('[LevelSystem] 升級公告失敗:', err.message); }
 }
 
+function monthKey(date = new Date()) { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit' }).format(date).slice(0, 7); }
+function previousMonthKey(key) { const [y, m] = String(key).split('-').map(Number); const date = new Date(Date.UTC(y, m - 2, 1)); return date.toISOString().slice(0, 7); }
+function normalizeXpSource(source) { return ['message', 'voice', 'battle', 'mirror', 'command'].includes(source) ? source : 'other'; }
+function addXpSource(player, amount, source) { const value = Math.max(0, Number(amount) || 0); const key = normalizeXpSource(source); player.xpSources = player.xpSources && typeof player.xpSources === 'object' ? player.xpSources : {}; player.xpSources[key] = Math.max(0, Number(player.xpSources[key]) || 0) + value; player.monthlyXp = player.monthlyXp && typeof player.monthlyXp === 'object' ? player.monthlyXp : {}; const month = monthKey(); player.monthlyXp[month] = Math.max(0, Number(player.monthlyXp[month]) || 0) + value; }
 function getPlayerTotalXp(player) {
     if (!player) return 0;
     return Math.max(Number(player.xp) || 0, Number(player.exp) || 0);
 }
 
-async function addXp(client, userId, username, amount, guildId = null) {
+async function addXp(client, userId, username, amount, guildId = null, source = 'other') {
     const { getOrCreatePlayer, savePlayerData } = require('./PacksAndData.js');
     const player = getOrCreatePlayer(client, userId, username);
     
     const oldXp = getPlayerTotalXp(player);
     const oldData = getLevelFromXp(oldXp);
     
-    const newXp = oldXp + Math.max(0, Number(amount) || 0);
+    const gained = Math.max(0, Number(amount) || 0);
+    const newXp = oldXp + gained;
+    addXpSource(player, gained, source);
     const newData = getLevelFromXp(newXp);
     
     const rewards = newData.level > oldData.level 
@@ -143,7 +150,7 @@ async function handleMessageXp(client, message) {
     const now = Date.now();
     if (now - (messageCooldowns.get(userId) || 0) < 60_000) return;
     messageCooldowns.set(userId, now);
-    await addXp(client, userId, message.author.username, 2, message.guild.id).catch(() => {});
+    await addXp(client, userId, message.author.username, 2, message.guild.id, 'message').catch(() => {});
 }
 
 const voiceJoinTimes = new Map();
@@ -186,7 +193,7 @@ async function processVoiceXpTick(client) {
         const minutes = Math.floor((Date.now() - data.joinedAt) / 60_000);
         if (minutes < 1) continue;
         voiceJoinTimes.set(key, { ...data, joinedAt: data.joinedAt + minutes * 60_000 });
-        await addXp(client, data.userId, data.username, minutes * 5, data.guildId).catch(err => console.error('[LevelSystem] 語音 XP 失敗:', err.message));
+        await addXp(client, data.userId, data.username, minutes * 5, data.guildId, 'voice').catch(err => console.error('[LevelSystem] 語音 XP 失敗:', err.message));
     }
 }
 
@@ -212,10 +219,15 @@ async function handleRank(client, interaction) {
             { name: '總 XP', value: `${xp.toLocaleString()} XP`, inline: true },
             { name: '貨幣', value: `🌟 ${(player.starCoins || 0).toLocaleString()} Starcoins\n🌱 ${(player.lightSeeds || 0).toLocaleString()} LightSeeds`, inline: true },
             { name: `進度到下一級 (${xpIntoLevel} / ${xpNeeded} XP)`, value: `\`[${buildRankBar(xpIntoLevel, xpNeeded)}]\` ${pct}%`, inline: false },
+            { name: 'XP 來源', value: Object.entries(player.xpSources || {}).filter(([, value]) => Number(value) > 0).map(([key, value]) => ({ message: '打字', voice: '語音', battle: '戰鬥', mirror: '鏡牢', command: '指令遊戲', other: '其他' }[key] || key) + ': ' + Number(value).toLocaleString() + ' XP').join('\n') || '尚無紀錄', inline: false },
         )
         .setFooter({ text: '打字 +2 XP｜語音每分鐘 +5 XP｜戰鬥/關卡/鏡牢也可獲得 XP' })
         .setTimestamp()] });
 }
+
+async function getMonthlyEntries(month = monthKey()) { const entries = []; if (!fs.existsSync(PLAYERS_DIR)) return entries; for (const file of fs.readdirSync(PLAYERS_DIR)) { if (!file.endsWith('.json')) continue; try { const p = JSON.parse(fs.readFileSync(path.join(PLAYERS_DIR, file), 'utf8')); const xp = Math.max(0, Number(p.monthlyXp?.[month]) || 0); if (xp > 0) entries.push({ id: file.slice(0, -5), username: p.username || 'Player', xp }); } catch {} } return entries.sort((a, b) => b.xp - a.xp); }
+async function handleMonthlyLeaderboard(client, interaction) { const entries = await getMonthlyEntries(); if (!entries.length) return interaction.reply({ content: '本月還沒有 XP 紀錄。', ephemeral: true }); const lines = entries.slice(0, 10).map((e, i) => (['🥇', '🥈', '🥉'][i] || '#' + (i + 1)) + ' <@' + e.id + '> — **' + e.xp.toLocaleString() + ' XP**'); return interaction.reply({ embeds: [new EmbedBuilder().setTitle('🏆 本月 XP 排行榜').setColor(0xf1c40f).setDescription(lines.join('\n')).setFooter({ text: '月份：' + monthKey() }).setTimestamp()] }); }
+async function announceMonthlyLeaderboard(client) { const now = new Date(); const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(now).reduce((a, p) => (a[p.type] = p.value, a), {}); if (parts.day !== '01' || parts.hour !== '00' || Number(parts.minute) > 5) return; const month = previousMonthKey(parts.year + '-' + parts.month); let state = {}; try { state = fs.existsSync(MONTHLY_STATE_PATH) ? JSON.parse(fs.readFileSync(MONTHLY_STATE_PATH, 'utf8')) : {}; } catch {} if (state.lastAnnounced === month) return; const entries = await getMonthlyEntries(month); if (!entries.length) return; const { getAnnounceConfig } = require('./AnnounceSystem.js'); const configs = getAnnounceConfig(); const embed = new EmbedBuilder().setTitle('🏆 上月 XP 排行榜').setColor(0xf1c40f).setDescription(entries.slice(0, 10).map((e, i) => (['🥇', '🥈', '🥉'][i] || '#' + (i + 1)) + ' <@' + e.id + '> — **' + e.xp.toLocaleString() + ' XP**').join('\n')).setFooter({ text: '月份：' + month }).setTimestamp(); for (const channelId of Object.values(configs || {})) { const channel = await client.channels.fetch(channelId).catch(() => null); if (channel?.isTextBased?.()) await channel.send({ embeds: [embed] }).catch(() => {}); } fs.mkdirSync(path.dirname(MONTHLY_STATE_PATH), { recursive: true }); fs.writeFileSync(MONTHLY_STATE_PATH, JSON.stringify({ lastAnnounced: month }, null, 2), 'utf8'); }
 
 async function handleLeaderboard(client, interaction) {
     if (!fs.existsSync(PLAYERS_DIR)) return interaction.reply({ content: '目前還沒有任何玩家資料。', ephemeral: true });
@@ -249,6 +261,9 @@ module.exports = {
     handleMessageXp,
     handleRank,
     handleLeaderboard,
+    handleMonthlyLeaderboard,
+    announceMonthlyLeaderboard,
+    monthKey,
     setLevelChannel,
     getLevelChannel,
     trackVoiceJoin,
