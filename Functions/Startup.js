@@ -583,6 +583,16 @@ const allSlashCommands = [
         ),
 
     new SlashCommandBuilder()
+        .setName('marry')
+        .setDescription('發送結婚請求，輸入 status 查看婚姻')
+        .addStringOption(o => o.setName('target').setDescription('輸入 @使用者、使用者 ID，或 status').setRequired(false)),
+
+    new SlashCommandBuilder()
+        .setName('divorce')
+        .setDescription('離婚；可選擇指定配偶')
+        .addStringOption(o => o.setName('target').setDescription('輸入 @使用者或使用者 ID').setRequired(false)),
+
+    new SlashCommandBuilder()
         .setName('status')
         .setDescription(
             '查看機器人目前的運行狀態'
@@ -1217,6 +1227,9 @@ client.on(
         if (interaction.isButton() && interaction.customId.startsWith('giveaway_join:')) {
             return GiveawaySystem.joinGiveaway(client, interaction, interaction.customId.slice('giveaway_join:'.length));
         }
+
+        if (interaction.isButton() && interaction.customId.startsWith('marry:')) return MarriageSystem.handleMarriageButton(client, interaction);
+        if (interaction.isButton() && interaction.customId.startsWith('divorce:')) return MarriageSystem.handleDivorceButton(client, interaction);
 
         if (
             !interaction.isChatInputCommand()
