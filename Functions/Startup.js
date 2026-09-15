@@ -155,6 +155,7 @@ const GiveawaySystem = require('./GameSystem/GiveawayEventSystem.js');
 const {
     handleMessageXp,
     startVoiceXpTimer,
+    announceMonthlyLeaderboard,
     trackVoiceJoin,
     trackVoiceLeave,
     bootstrapVoiceTracking
@@ -717,6 +718,8 @@ const allSlashCommands = [
         .setDescription(
             '查看等級排行榜 TOP 10'
         ),
+        // period=month 可查看本月 XP 排行
+        .addStringOption(o => o.setName('period').setDescription('排行榜期間').addChoices({ name: '全部', value: 'all' }, { name: '本月', value: 'month' })),
 
     new SlashCommandBuilder()
         .setName('steam')
@@ -2547,6 +2550,10 @@ client.once(
         startVoiceXpTimer(
             client
         );
+
+        // monthly leaderboard is idempotent and checks Asia/Taipei midnight
+        const monthlyLeaderboardTimer = setInterval(() => announceMonthlyLeaderboard(client).catch(err => console.error('[LevelSystem] 月榜公告失敗:', err.message)), 60_000);
+        announceMonthlyLeaderboard(client).catch(err => console.error('[LevelSystem] 月榜公告失敗:', err.message));
 
         GiveawaySystem.resumeGiveaways(client);
 
