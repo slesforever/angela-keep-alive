@@ -914,4 +914,5 @@ module.exports = {
     TIER_CONFIGS,
     drawOnce,
     getPool,
+    getRateUpList,
 };
