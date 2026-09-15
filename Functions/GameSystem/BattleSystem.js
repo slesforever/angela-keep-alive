@@ -275,12 +275,13 @@ async function startBattle(client, message, tier = 'normal', presetEnemy = null)
     const startMsg = `🔔 **戰鬥開始！** 遭遇 **${enemy.name}** [${enemy.attribute}]\n⏳ 請為 **${firstAlive?.name || '罪人'}** 選擇技能...`;
     const battleMsg = await message.reply({
         embeds: [buildBattleEmbed(state, startMsg)],
-        components: [buildSkillRow(firstAlive, false, isBindRestricted(firstAlive)), buildTimerRow()].filter(Boolean),
+        components: [buildSkillRow(firstAlive, false, isBindRestricted(firstAlive)), buildTimerRow(timerExtensionUsed)].filter(Boolean),
     });
 
     let turnTimer, finished = false;
     let turnDurationMs = SKILL_TIMEOUT;
     let turnStartedAt = Date.now();
+    let timerExtensionUsed = false;
     let resolvePromise;
     const battlePromise = new Promise(r => { resolvePromise = r; });
 
@@ -458,11 +459,12 @@ async function startBattle(client, message, tier = 'normal', presetEnemy = null)
 
     collector.on('collect', async interaction => {
         if (interaction.customId === 'bs_extend_timer') {
-            if (turnDurationMs >= MAX_TURN_TIMEOUT) return interaction.reply({ content: '⏱️ 本回合計時器已達 2 分鐘上限。', ephemeral: true });
+            if (timerExtensionUsed || turnDurationMs >= MAX_TURN_TIMEOUT) return interaction.reply({ content: '⏱️ 這場戰鬥的延長按鈕只能使用一次，且上限為 2 分鐘。', ephemeral: true });
+            timerExtensionUsed = true;
             turnDurationMs = Math.min(MAX_TURN_TIMEOUT, turnDurationMs + 60_000);
             scheduleTurnTimer();
             const active = state.ally.find(u => u.hp > 0);
-            await interaction.update({ embeds: [buildBattleEmbed(state, '⏱️ 計時器已延長 1 分鐘。')], components: [buildSkillRow(active, false, isBindRestricted(active)), buildTimerRow(turnDurationMs >= MAX_TURN_TIMEOUT)].filter(Boolean) }).catch(() => {});
+            await interaction.update({ embeds: [buildBattleEmbed(state, '⏱️ 計時器已延長 1 分鐘。')], components: [buildSkillRow(active, false, isBindRestricted(active)), buildTimerRow(timerExtensionUsed || turnDurationMs >= MAX_TURN_TIMEOUT)].filter(Boolean) }).catch(() => {});
             return;
         }
 
