@@ -10,7 +10,7 @@ const CharacterSystem = require('./GameSystem/CharacterSystem.js');
 const PartySystem     = require('./GameSystem/PartySystem.js');
 const BattleSystem    = require('./GameSystem/BattleSystem.js');
 const { handleGamble, handleSc, giveStarCoins } = require('./GameSystem/GamblingSystem.js');
-const { handleRank, handleLeaderboard, setLevelChannel } = require('./GameSystem/LevelSystem.js');
+const { handleRank, handleLeaderboard, handleMonthlyLeaderboard, addXp, setLevelChannel } = require('./GameSystem/LevelSystem.js');
 const { getLanguage, setLanguage, languageName } = require('./GameSystem/LanguageSystem.js');
 const { broadcastAnnouncement, setAnnounceChannel } = require('./GameSystem/AnnounceSystem.js');
 const { handleGiveAllPlayers, handleGiveSinglePlayer } = require('./GameSystem/GiveAwaySystem.js');
@@ -178,6 +178,7 @@ async function handleSlashCommands(client, interaction) {
             const comment = target.id === SUPER_ADMIN_ID
                 ? '「主管專屬認證：鋼鐵般的絕對 0% 直男，系統數據無法改寫。」'
                 : (rate < 20 ? '「數據顯示：鋼鐵般堅硬直男。」' : rate < 50 ? '「有些許隱藏屬性。」' : rate < 80 ? '「成分相當濃烈。」' : '「100% 純度純真男同！」');
+            addXp(client, uid, user.username, 1, interaction.guildId, 'command').catch(() => {});
             return interaction.reply({
                 embeds: [new EmbedBuilder()
                     .setTitle('男同指數測試 (Gay Rate)')
@@ -195,6 +196,7 @@ async function handleSlashCommands(client, interaction) {
             const comment = target.id === SUPER_ADMIN_ID
                 ? '「主管專屬認證：絕對 0% 直直到發光，姬圈屬性完全免疫。」'
                 : (rate < 20 ? '「姬圈指數較低，極度純粹直女。」' : rate < 50 ? '「有些許潛質。」' : rate < 80 ? '「能量爆棚！」' : '「100% 頂級女同霸主！」');
+            addXp(client, uid, user.username, 1, interaction.guildId, 'command').catch(() => {});
             return interaction.reply({
                 embeds: [new EmbedBuilder()
                     .setTitle('女同指數測試 (Lesbian Rate)')
@@ -370,7 +372,7 @@ async function handleSlashCommands(client, interaction) {
 
         // ─── 等級排行榜 ────────────────────────────────────────
         if (commandName === 'leaderboard') {
-            return handleLeaderboard(client, interaction);
+            return interaction.options?.getString('period') === 'month' ? handleMonthlyLeaderboard(client, interaction) : handleLeaderboard(client, interaction);
         }
 
         // ─── 說明 ────────────────────────────────────────────────
