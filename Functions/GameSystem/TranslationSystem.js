@@ -30,7 +30,7 @@
           if (!out) return clean; remember(key, out); disabledUntil = 0; return out;
       } catch { disabledUntil = Date.now() + COOLDOWN_MS; return clean; } finally { clearTimeout(timer); }
     }
-    async function translateBoth(text) { const clean = String(text || '').trim().slice(0, 1500); if (!clean) return { zh: '', en: '' }; return { zh: await translateOne(clean, 'zh-TW'), en: await translateOne(clean, 'en') }; }
+    async function translateBoth(text) { const clean = String(text || '').trim().slice(0, 1500); if (!clean) return { zh: '', en: '' }; const [zh, en] = await Promise.all([translateOne(clean, 'zh-TW'), translateOne(clean, 'en')]); return { zh, en }; }
     async function handleTranslationMessage(client, message) {
       if (!message?.guild || message.author?.bot || message.webhookId) return;
       const config = getTranslationConfig(message.guild.id); const targetId = config.output; const sources = Array.isArray(config.sources) ? config.sources : [];
