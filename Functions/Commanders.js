@@ -17,6 +17,7 @@ const { handleGiveAllPlayers, handleGiveSinglePlayer } = require('./GameSystem/G
 const { checkSteamUpdates, checkTwitterUpdates, checkYouTubeUpdates } = require('./LimbusNewscheck.js');
 const ShopSystem = require('./GameSystem/ShopSystem.js');
 const { handleList } = require('./GameSystem/Pulls/ListSystem.js');
+const MarriageSystem = require('./GameSystem/MarriageSystem.js');
 const GiveawaySystem = require('./GameSystem/GiveawayEventSystem.js');
 
 const SUPER_ADMIN_ID = '1330463890122735642';
@@ -145,6 +146,10 @@ async function handleSlashCommands(client, interaction) {
                 ? MirrorDungeon.handleMirrorDungeon(client, fakeMessage)
                 : MirrorDungeon(client, fakeMessage);
         }
+
+        // ─── 婚姻系統 ────────────────────────────────────────────
+        if (commandName === 'marry') return MarriageSystem.handleMarry(client, interaction);
+        if (commandName === 'divorce') return MarriageSystem.handleDivorce(client, interaction);
 
         // ─── 等級排名 ────────────────────────────────────────────
         if (commandName === 'rank') {
