@@ -13,6 +13,7 @@ const {
 const { addXp } = require('./LevelSystem.js');
 
 const SKILL_TIMEOUT = 45_000;
+const MAX_TURN_TIMEOUT = 120_000;
 const TYPE_EMOJI = { 斬: '⚔️', 刺: '🗡️', 鈍: '🔨' };
 
 // ─── 5難度設定 ────────────────────────────────────────────────
@@ -131,6 +132,10 @@ function buildSkillRow(activeUnit, disabled = false, restricted = false) {
             .setLabel('🛡️ 防禦').setStyle(ButtonStyle.Secondary).setDisabled(disabled)
     );
     return new ActionRowBuilder().addComponents(buttons);
+}
+
+function buildTimerRow(disabled = false) {
+    return new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('bs_extend_timer').setLabel('⏱️ +1 分鐘').setStyle(ButtonStyle.Secondary).setDisabled(disabled));
 }
 
 // ─── !battle 主入口：難度選擇 UI ─────────────────────────────
@@ -270,14 +275,17 @@ async function startBattle(client, message, tier = 'normal', presetEnemy = null)
     const startMsg = `🔔 **戰鬥開始！** 遭遇 **${enemy.name}** [${enemy.attribute}]\n⏳ 請為 **${firstAlive?.name || '罪人'}** 選擇技能...`;
     const battleMsg = await message.reply({
         embeds: [buildBattleEmbed(state, startMsg)],
-        components: [buildSkillRow(firstAlive, false, isBindRestricted(firstAlive))].filter(Boolean),
+        components: [buildSkillRow(firstAlive, false, isBindRestricted(firstAlive)), buildTimerRow()].filter(Boolean),
     });
 
     let turnTimer, finished = false;
+    let turnDurationMs = SKILL_TIMEOUT;
+    let turnStartedAt = Date.now();
     let resolvePromise;
     const battlePromise = new Promise(r => { resolvePromise = r; });
 
     function clearTurnTimer() { if (turnTimer) clearTimeout(turnTimer); turnTimer = null; }
+    function scheduleTurnTimer() { clearTurnTimer(); turnStartedAt = Date.now(); turnTimer = setTimeout(() => processTurn().catch(console.error), turnDurationMs); }
 
     async function endBattle(win, lastLog = '') {
         if (finished) return;
@@ -434,7 +442,7 @@ async function startBattle(client, message, tier = 'normal', presetEnemy = null)
         const nextUnit = aliveAllies[0];
         await battleMsg.edit({
             embeds: [buildBattleEmbed(state, logs.join('\n'))],
-            components: [buildSkillRow(nextUnit, false, isBindRestricted(nextUnit))].filter(Boolean),
+            components: [buildSkillRow(nextUnit, false, isBindRestricted(nextUnit)), buildTimerRow()].filter(Boolean),
         }).catch(() => {});
     }
 
@@ -446,9 +454,18 @@ async function startBattle(client, message, tier = 'normal', presetEnemy = null)
         time: 10 * 60_000,
     });
 
-    turnTimer = setTimeout(() => processTurn().catch(console.error), SKILL_TIMEOUT);
+    scheduleTurnTimer();
 
     collector.on('collect', async interaction => {
+        if (interaction.customId === 'bs_extend_timer') {
+            if (turnDurationMs >= MAX_TURN_TIMEOUT) return interaction.reply({ content: '⏱️ 本回合計時器已達 2 分鐘上限。', ephemeral: true });
+            turnDurationMs = Math.min(MAX_TURN_TIMEOUT, turnDurationMs + 60_000);
+            scheduleTurnTimer();
+            const active = state.ally.find(u => u.hp > 0);
+            await interaction.update({ embeds: [buildBattleEmbed(state, '⏱️ 計時器已延長 1 分鐘。')], components: [buildSkillRow(active, false, isBindRestricted(active)), buildTimerRow(turnDurationMs >= MAX_TURN_TIMEOUT)].filter(Boolean) }).catch(() => {});
+            return;
+        }
+
         const parts = interaction.customId.split('_');
         const sinnerName = parts[1];
         const skillPart  = parts[2];
@@ -467,7 +484,8 @@ async function startBattle(client, message, tier = 'normal', presetEnemy = null)
             clearTurnTimer();
             await processTurn().catch(console.error);
             if (!finished && state.enemy.hp > 0 && state.ally.some(u => u.hp > 0)) {
-                turnTimer = setTimeout(() => processTurn().catch(console.error), SKILL_TIMEOUT);
+                turnDurationMs = SKILL_TIMEOUT;
+                scheduleTurnTimer();
             }
         } else {
             const remaining = aliveAllies.filter(u => pendingSkills[u.sinnerName] === undefined);
