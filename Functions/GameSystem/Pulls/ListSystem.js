@@ -3,9 +3,13 @@
     const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
     const PullSystem = require('./PullSystem.js');
     const identitiesData = require('./identitiesData.js');
+const { getLanguage } = require('../LanguageSystem.js');
     const TIER_ORDER = ['COLOR_FIXER','ABN_ANGELA','ABN_ALEPH','ABN_WAW','ABN_HE','ABN_TETH','ABN_ZAYIN','SPECIAL','S4','EGOS','S3','S2','S1'];
     const TIER_LABELS = { COLOR_FIXER:'🔴 Color Fixer', ABN_ANGELA:'🕊️ 異想體 ANGELA', ABN_ALEPH:'🟣 異想體 ALEPH', ABN_WAW:'🔵 異想體 WAW', ABN_HE:'🟢 異想體 HE', ABN_TETH:'🟡 異想體 TETH', ABN_ZAYIN:'⚪ 異想體 ZAYIN', SPECIAL:'🌌 Special', S4:'👑 0000', EGOS:'🔮 E.G.O', S3:'✨ 000 三星', S2:'⭐ 00 二星', S1:'▫️ 0 一星' };
-    const BUTTON_LABELS = { COLOR_FIXER:'色彩', ABN_ANGELA:'ANGELA', ABN_ALEPH:'ALEPH', ABN_WAW:'WAW', ABN_HE:'HE', ABN_TETH:'TETH', ABN_ZAYIN:'ZAYIN', SPECIAL:'特殊', S4:'0000', EGOS:'E.G.O', S3:'000 三星', S2:'00 二星', S1:'0 一星' };
+    const TIER_LABELS_EN = { COLOR_FIXER:'🔴 Color Fixer', ABN_ANGELA:'🕊️ Abnormality ANGELA', ABN_ALEPH:'🟣 Abnormality ALEPH', ABN_WAW:'🔵 Abnormality WAW', ABN_HE:'🟢 Abnormality HE', ABN_TETH:'🟡 Abnormality TETH', ABN_ZAYIN:'⚪ Abnormality ZAYIN', SPECIAL:'🌌 Special', S4:'👑 0000', EGOS:'🔮 E.G.O', S3:'✨ 000 Three-Star', S2:'⭐ 00 Two-Star', S1:'▫️ 0 One-Star' };
+const BUTTON_LABELS_EN = { COLOR_FIXER:'Color', ABN_ANGELA:'ANGELA', ABN_ALEPH:'ALEPH', ABN_WAW:'WAW', ABN_HE:'HE', ABN_TETH:'TETH', ABN_ZAYIN:'ZAYIN', SPECIAL:'Special', S4:'0000', EGOS:'E.G.O', S3:'000 3★', S2:'00 2★', S1:'0 1★' };
+function displayName(name, language) { const parts = String(name || '').split(' / '); return language === 'en' && parts.length > 1 ? parts[parts.length - 1] : parts[0]; }
+const BUTTON_LABELS = { COLOR_FIXER:'色彩', ABN_ANGELA:'ANGELA', ABN_ALEPH:'ALEPH', ABN_WAW:'WAW', ABN_HE:'HE', ABN_TETH:'TETH', ABN_ZAYIN:'ZAYIN', SPECIAL:'特殊', S4:'0000', EGOS:'E.G.O', S3:'000 三星', S2:'00 二星', S1:'0 一星' };
     function getBanner() { const banners = identitiesData?.BANNERS || {}; return banners.standard || Object.values(banners).find(Boolean) || {}; }
     function buildEntries() {
       const base = PullSystem.BASE_WEIGHTS || {}; const abn = PullSystem.ABN_WEIGHTS || {}; const banner = getBanner(); const entries = [];
@@ -21,11 +25,11 @@
       return entries;
     }
     function formatRate(rate) { const percent = rate * 100; return percent < 0.01 ? percent.toFixed(4) + '%' : percent.toFixed(2) + '%'; }
-    function buildRarityRows(active, disabled = false) { const rows = []; for (let i = 0; i < TIER_ORDER.length; i += 5) { const buttons = TIER_ORDER.slice(i, i + 5).map(tier => new ButtonBuilder().setCustomId('list:filter:' + tier).setLabel(BUTTON_LABELS[tier]).setStyle(active === tier ? ButtonStyle.Success : ButtonStyle.Secondary).setDisabled(disabled)); rows.push(new ActionRowBuilder().addComponents(buttons)); } return rows; }
+    function buildRarityRows(active, language, disabled = false) { const rows = []; for (let i = 0; i < TIER_ORDER.length; i += 5) { const labels = language === 'en' ? BUTTON_LABELS_EN : BUTTON_LABELS; const buttons = TIER_ORDER.slice(i, i + 5).map(tier => new ButtonBuilder().setCustomId('list:filter:' + tier).setLabel(labels[tier]).setStyle(active === tier ? ButtonStyle.Success : ButtonStyle.Secondary).setDisabled(disabled)); rows.push(new ActionRowBuilder().addComponents(buttons)); } return rows; }
     function render(entries, filter, query, page, timerUsed = false, disabled = false) {
       const filtered = entries.filter(item => (filter === 'ALL' || item.tier === filter) && (!query || item.name.toLowerCase().includes(query.toLowerCase()) || TIER_LABELS[item.tier].toLowerCase().includes(query.toLowerCase())));
       const perPage = 12; const pages = Math.max(1, Math.ceil(filtered.length / perPage)); const safePage = Math.min(Math.max(0, page), pages - 1); const chunk = filtered.slice(safePage * perPage, (safePage + 1) * perPage);
-      const text = chunk.length ? chunk.map(item => (item.isUp ? '> 🔺 **' : '• ') + item.name + (item.isUp ? '**' : '') + ' — ' + formatRate(item.rate) + (item.isUp ? ' **[UP!]**' : '')).join('\n') : '沒有符合的資料。';
+      const text = chunk.length ? chunk.map(item => (item.isUp ? '> 🔺 **' : '• ') + displayName(item.name, language) + (item.isUp ? '**' : '') + ' (' + formatRate(item.rate) + ')' + (item.isUp ? ' **[UP!]**' : '')).join('\n') : '沒有符合的資料。';
       const title = query ? '🔎 機率查詢：' + query : (filter === 'ALL' ? '📋 完整提取機率清單' : TIER_LABELS[filter] + ' 機率清單');
       const embed = new EmbedBuilder().setTitle(title).setColor(0x00b4d8).setDescription(text).addFields({ name: '📊 機率說明', value: '包含基礎稀有度、異想體內部稀有度與當期 UP 修正。', inline: false }).setFooter({ text: '第 ' + (safePage + 1) + ' / ' + pages + ' 頁 ｜ 顯示 ' + filtered.length + ' 項' });
       const controls = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('list:prev').setLabel('◀️ 上一頁').setStyle(ButtonStyle.Primary).setDisabled(disabled || safePage === 0), new ButtonBuilder().setCustomId('list:next').setLabel('下一頁 ▶️').setStyle(ButtonStyle.Primary).setDisabled(disabled || safePage >= pages - 1), new ButtonBuilder().setCustomId('list:all').setLabel('📋 全部').setStyle(ButtonStyle.Primary).setDisabled(disabled), new ButtonBuilder().setCustomId('list:search').setLabel('🔎 名稱查詢').setStyle(ButtonStyle.Success).setDisabled(disabled), new ButtonBuilder().setCustomId('list:extend').setLabel('⏱️ +1 分鐘').setStyle(ButtonStyle.Secondary).setDisabled(disabled || timerUsed));
