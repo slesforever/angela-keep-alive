@@ -1,198 +1,56 @@
-// Functions/GameSystem/ListSystem.js
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
-const PullSystem = require('./Pulls/PullSystem.js');
-
-// ── 🎲 1. 定義各階級的基礎總機率（總和為 100%） ─────────────────────────
-const TIER_RATES = {
-    colorFixer: 0.010,  // 1.0% (色彩收尾人)
-    special: 0.010,     // 1.0% (特殊池)
-    tier0000: 0.005,    // 0.5% (金大叔)
-    tier000: 0.029,     // 2.9% (三星)
-    tier00: 0.128,      // 12.8% (二星)
-    tier0: 0.803,       // 80.3% (一星)
-    egos: 0.015         // 1.5% (E.G.O)
-};
-
-const RATE_UP_FRACTION = 0.5; // 當期 UP 佔該階級總機率的 50%
-
-const TIER_ORDER = ['colorFixer', 'special', 'tier0000', 'tier000', 'tier00', 'tier0', 'egos'];
-const TIER_NAMES = {
-    colorFixer: '🔴 Color Fixer (色彩收尾人)',
-    special: '✨ Special (特殊池)',
-    tier0000: '👑 0000',
-    tier000: '🌟 000 (三星人格)',
-    tier00: '⭐ 00 (二星人格)',
-    tier0: '⚪ 0 (初始一星)',
-    egos: '🔮 E.G.O'
-};
-
-// ── 🛠️ 2. 防呆輔助：確保變數大小寫不一致也能讀到資料 ──────────────────
-function getPoolTier(pools, tierKey) {
-    if (!pools) return [];
-    if (pools[tierKey]) return pools[tierKey];
+// Functions/GameSystem/Pulls/ListSystem.js
+    'use strict';
+    const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
+    const PullSystem = require('./PullSystem.js');
+    const identitiesData = require('./identitiesData.js');
+    const TIER_ORDER = ['COLOR_FIXER','ABN_ANGELA','ABN_ALEPH','ABN_WAW','ABN_HE','ABN_TETH','ABN_ZAYIN','SPECIAL','S4','EGOS','S3','S2','S1'];
+    const TIER_LABELS = { COLOR_FIXER:'🔴 Color Fixer', ABN_ANGELA:'🕊️ 異想體 ANGELA', ABN_ALEPH:'🟣 異想體 ALEPH', ABN_WAW:'🔵 異想體 WAW', ABN_HE:'🟢 異想體 HE', ABN_TETH:'🟡 異想體 TETH', ABN_ZAYIN:'⚪ 異想體 ZAYIN', SPECIAL:'🌌 Special', S4:'👑 0000', EGOS:'🔮 E.G.O', S3:'✨ 000 三星', S2:'⭐ 00 二星', S1:'▫️ 0 一星' };
+    const BUTTON_LABELS = { COLOR_FIXER:'色彩', ABN_ANGELA:'ANGELA', ABN_ALEPH:'ALEPH', ABN_WAW:'WAW', ABN_HE:'HE', ABN_TETH:'TETH', ABN_ZAYIN:'ZAYIN', SPECIAL:'特殊', S4:'0000', EGOS:'E.G.O', S3:'000 三星', S2:'00 二星', S1:'0 一星' };
+    function getBanner() { const banners = identitiesData?.BANNERS || {}; return banners.standard || Object.values(banners).find(Boolean) || {}; }
+    function buildEntries() {
+      const base = PullSystem.BASE_WEIGHTS || {}; const abn = PullSystem.ABN_WEIGHTS || {}; const banner = getBanner(); const entries = [];
+      for (const tier of TIER_ORDER) {
+          const pool = typeof PullSystem.getPool === 'function' ? PullSystem.getPool(tier) : [];
+          if (!pool.length) continue;
+          const baseRate = tier.startsWith('ABN_') ? (Number(base.ABN || 0) / 100) * (Number(abn[tier] || 0) / 100) : Number(base[tier] || 0) / 100;
+          if (!baseRate) continue;
+          const upList = typeof PullSystem.getRateUpList === 'function' ? PullSystem.getRateUpList(banner, tier) : [];
+          const up = new Set(upList.filter(name => pool.includes(name))); const normalRate = baseRate / pool.length; const upRate = up.size ? baseRate * 0.5 / up.size : 0;
+          for (const name of pool) entries.push({ name, tier, rate: normalRate + (up.has(name) ? upRate : 0), isUp: up.has(name) });
+      }
+      return entries;
+    }
+    function formatRate(rate) { const percent = rate * 100; return percent < 0.01 ? percent.toFixed(4) + '%' : percent.toFixed(2) + '%'; }
+    function buildRarityRows(active, disabled = false) { const rows = []; for (let i = 0; i < TIER_ORDER.length; i += 5) { const buttons = TIER_ORDER.slice(i, i + 5).map(tier => new ButtonBuilder().setCustomId('list:filter:' + tier).setLabel(BUTTON_LABELS[tier]).setStyle(active === tier ? ButtonStyle.Success : ButtonStyle.Secondary).setDisabled(disabled)); rows.push(new ActionRowBuilder().addComponents(buttons)); } return rows; }
+    function render(entries, filter, query, page, disabled = false) {
+      const filtered = entries.filter(item => (filter === 'ALL' || item.tier === filter) && (!query || item.name.toLowerCase().includes(query.toLowerCase()) || TIER_LABELS[item.tier].toLowerCase().includes(query.toLowerCase())));
+      const perPage = 12; const pages = Math.max(1, Math.ceil(filtered.length / perPage)); const safePage = Math.min(Math.max(0, page), pages - 1); const chunk = filtered.slice(safePage * perPage, (safePage + 1) * perPage);
+      const text = chunk.length ? chunk.map(item => (item.isUp ? '> 🔺 **' : '• ') + item.name + (item.isUp ? '**' : '') + ' — ' + formatRate(item.rate) + (item.isUp ? ' **[UP!]**' : '')).join('\n') : '沒有符合的資料。';
+      const title = query ? '🔎 機率查詢：' + query : (filter === 'ALL' ? '📋 完整提取機率清單' : TIER_LABELS[filter] + ' 機率清單');
+      const embed = new EmbedBuilder().setTitle(title).setColor(0x00b4d8).setDescription(text).addFields({ name: '📊 機率說明', value: '包含基礎稀有度、異想體內部稀有度與當期 UP 修正。', inline: false }).setFooter({ text: '第 ' + (safePage + 1) + ' / ' + pages + ' 頁 ｜ 顯示 ' + filtered.length + ' 項' });
+      const controls = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('list:prev').setLabel('◀️ 上一頁').setStyle(ButtonStyle.Primary).setDisabled(disabled || safePage === 0), new ButtonBuilder().setCustomId('list:next').setLabel('下一頁 ▶️').setStyle(ButtonStyle.Primary).setDisabled(disabled || safePage >= pages - 1), new ButtonBuilder().setCustomId('list:all').setLabel('📋 全部').setStyle(ButtonStyle.Primary).setDisabled(disabled), new ButtonBuilder().setCustomId('list:search').setLabel('🔎 名稱查詢').setStyle(ButtonStyle.Success).setDisabled(disabled));
+      return { embeds: [embed], components: [...buildRarityRows(filter, disabled), controls] };
+    }
+    async function getReplyMessage(message, payload) { const sent = await message.reply(payload); if (sent?.createMessageComponentCollector) return sent; if (message.interaction?.fetchReply) return message.interaction.fetchReply(); return sent; }
+    async function handleList(client, message) {
+      try {
+          const entries = buildEntries(); if (!entries.length) return message.reply('❌ 目前提取池沒有可顯示的資料。');
+          let filter = 'ALL'; let query = ''; let page = 0; let view = render(entries, filter, query, page);
+          const reply = await getReplyMessage(message, view); if (!reply?.createMessageComponentCollector) return;
+          const collector = reply.createMessageComponentCollector({ componentType: ComponentType.Button, time: 120000 });
+          collector.on('collect', async interaction => {
+              if (interaction.user.id !== message.author.id) return interaction.reply({ content: '❌ 這不是你的機率清單。', ephemeral: true });
+              if (interaction.customId === 'list:search') {
+                  const modal = new ModalBuilder().setCustomId('list:search-modal').setTitle('查詢人格 / E.G.O 名稱').addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('list:query').setLabel('輸入名稱或關鍵字').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(80).setPlaceholder('例如：Don、E.G.O、ALEPH')));
+                  await interaction.showModal(modal);
+                  try { const submitted = await interaction.awaitModalSubmit({ time: 30000, filter: i => i.user.id === message.author.id && i.customId === 'list:search-modal' }); query = submitted.fields.getTextInputValue('list:query').trim(); filter = 'ALL'; page = 0; view = render(entries, filter, query, page); await submitted.deferUpdate(); await reply.edit({ embeds: view.embeds, components: view.components }); } catch {}
+                  return;
+              }
+              if (interaction.customId === 'list:all') { filter = 'ALL'; query = ''; page = 0; } else if (interaction.customId === 'list:prev') page -= 1; else if (interaction.customId === 'list:next') page += 1; else if (interaction.customId.startsWith('list:filter:')) { filter = interaction.customId.slice('list:filter:'.length); query = ''; page = 0; }
+              view = render(entries, filter, query, page); await interaction.update({ embeds: view.embeds, components: view.components });
+          });
+          collector.on('end', () => { const ended = render(entries, filter, query, page, true); reply.edit({ components: ended.components }).catch(() => {}); });
+      } catch (error) { console.error('List Command Error:', error); if (!message.interaction?.replied) message.reply('❌ 讀取清單時發生錯誤，請稍後再試。').catch(() => {}); }
+    }
+    module.exports = { handleList, buildEntries };
     
-    // 萬一變數寫成複數或大小寫不同，自動校正
-    const lowerKey = tierKey.toLowerCase();
-    for (const key of Object.keys(pools)) {
-        if (key.toLowerCase() === lowerKey) return pools[key];
-    }
-    if (lowerKey === 'egos' && (pools['ego'] || pools['Egos'] || pools['EGO'])) {
-        return pools['ego'] || pools['Egos'] || pools['EGO'];
-    }
-    if (lowerKey === 'colorfixer' && (pools['colorFixers'] || pools['colorfixers'] || pools['ColorFixer'])) {
-        return pools['colorFixers'] || pools['colorfixers'] || pools['ColorFixer'];
-    }
-    return [];
-}
-
-// ── 📋 3. 核心處理函式 ────────────────────────────────────────────────
-async function handleList(client, message) {
-    try {
-        // 自動相容不同的 Pools 與 UP 命名變數
-        const pools = PullSystem.POOLS || PullSystem.pools || {};
-        const upTargets = PullSystem.upTargets || PullSystem.rateUpIds || PullSystem.targetIdentities || [];
-        
-        const ratesMap = new Map();
-        const lines = [];
-
-        // 動態計算所有角色的機率
-        for (const tier of TIER_ORDER) {
-            const items = getPoolTier(pools, tier);
-            const totalTierRate = TIER_RATES[tier] || 0;
-            if (!items || items.length === 0 || totalTierRate === 0) continue;
-
-            const tierUpTargets = items.filter(item => upTargets.includes(item));
-            const numUp = tierUpTargets.length;
-            const numNormal = items.length - numUp;
-
-            if (numUp > 0) {
-                // 有 UP 角色時的機率計算
-                const upShare = totalTierRate * RATE_UP_FRACTION;
-                const normalShare = totalTierRate * (1 - RATE_UP_FRACTION);
-
-                const upRatePerItem = upShare / numUp;
-                const normalRatePerItem = numNormal > 0 ? (normalShare / numNormal) : 0;
-
-                items.forEach(item => {
-                    const isUp = upTargets.includes(item);
-                    ratesMap.set(item, {
-                        rate: isUp ? upRatePerItem : normalRatePerItem,
-                        isUp: isUp,
-                        tier: tier
-                    });
-                });
-            } else {
-                // 無 UP 角色時均分機率
-                const ratePerItem = totalTierRate / items.length;
-                items.forEach(item => {
-                    ratesMap.set(item, {
-                        rate: ratePerItem,
-                        isUp: false,
-                        tier: tier
-                    });
-                });
-            }
-        }
-
-        // 格式化輸出清單文字
-        TIER_ORDER.forEach(tier => {
-            const items = getPoolTier(pools, tier);
-            if (!items || items.length === 0) return;
-
-            lines.push(`\n**${TIER_NAMES[tier]}**`);
-            items.forEach(item => {
-                const data = ratesMap.get(item);
-                if (!data) return;
-                const ratePercent = (data.rate * 100).toFixed(4) + '%';
-
-                if (data.isUp) {
-                    lines.push(`> 🔺 **${item}** — \`${ratePercent}\` **[UP!]**`);
-                } else {
-                    lines.push(`• ${item} — \`${ratePercent}\``);
-                }
-            });
-        });
-
-        // 嚴格分頁機制：每頁固定 15 行，絕對不會超過 Discord 4096 個字
-        const PAGES = [];
-        const LINES_PER_PAGE = 15;
-        for (let i = 0; i < lines.length; i += LINES_PER_PAGE) {
-            PAGES.push(lines.slice(i, i + LINES_PER_PAGE).join('\n'));
-        }
-
-        if (PAGES.length === 0) {
-            return message.reply('❌ 目前提取池內沒有任何角色資料。');
-        }
-
-        let currentPage = 0;
-
-        const getRow = (pageIdx, total) => {
-            return new ActionRowBuilder().addComponents(
-                new ButtonBuilder()
-                    .setCustomId('prev')
-                    .setLabel('◀️ 上一頁')
-                    .setStyle(ButtonStyle.Primary)
-                    .setDisabled(pageIdx === 0),
-                new ButtonBuilder()
-                    .setCustomId('next')
-                    .setLabel('下一頁 ▶️')
-                    .setStyle(ButtonStyle.Primary)
-                    .setDisabled(pageIdx === total - 1)
-            );
-        };
-
-        const embed = new EmbedBuilder()
-            .setTitle('📋 補給提取物資與動態機率清單')
-            .setColor(0x00b4d8)
-            .setDescription(PAGES[currentPage])
-            .setFooter({ text: `第 ${currentPage + 1} / ${PAGES.length} 頁 ｜ 總計品項：${ratesMap.size} 個` });
-
-        const reply = await message.reply({
-            embeds: [embed],
-            components: PAGES.length > 1 ? [getRow(currentPage, PAGES.length)] : []
-        });
-
-        if (PAGES.length <= 1) return;
-
-        // 按鈕交互收集器
-        const collector = reply.createMessageComponentCollector({
-            componentType: ComponentType.Button,
-            time: 120000 // 2 分鐘後自動關閉監聽
-        });
-
-        collector.on('collect', async (interaction) => {
-            if (interaction.user.id !== message.author.id) {
-                return interaction.reply({ content: '❌ 這不是你的提取清單喔！', ephemeral: true });
-            }
-
-            if (interaction.customId === 'prev') {
-                currentPage--;
-            } else if (interaction.customId === 'next') {
-                currentPage++;
-            }
-
-            embed.setDescription(PAGES[currentPage])
-                 .setFooter({ text: `第 ${currentPage + 1} / ${PAGES.length} 頁 ｜ 總計品項：${ratesMap.size} 個` });
-
-            await interaction.update({
-                embeds: [embed],
-                components: [getRow(currentPage, PAGES.length)]
-            });
-        });
-
-        // 結束後禁用按鈕
-        collector.on('end', () => {
-            const disabledRow = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId('prev').setLabel('◀️ 上一頁').setStyle(ButtonStyle.Primary).setDisabled(true),
-                new ButtonBuilder().setCustomId('next').setLabel('下一頁 ▶️').setStyle(ButtonStyle.Primary).setDisabled(true)
-            );
-            reply.edit({ components: [disabledRow] }).catch(() => {});
-        });
-
-    } catch (error) {
-        console.error('List Command Error:', error);
-        message.reply('❌ 讀取清單時發生錯誤，請檢查後台日誌。');
-    }
-}
-
-module.exports = { handleList };
