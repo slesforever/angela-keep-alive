@@ -22,34 +22,43 @@
     }
     function formatRate(rate) { const percent = rate * 100; return percent < 0.01 ? percent.toFixed(4) + '%' : percent.toFixed(2) + '%'; }
     function buildRarityRows(active, disabled = false) { const rows = []; for (let i = 0; i < TIER_ORDER.length; i += 5) { const buttons = TIER_ORDER.slice(i, i + 5).map(tier => new ButtonBuilder().setCustomId('list:filter:' + tier).setLabel(BUTTON_LABELS[tier]).setStyle(active === tier ? ButtonStyle.Success : ButtonStyle.Secondary).setDisabled(disabled)); rows.push(new ActionRowBuilder().addComponents(buttons)); } return rows; }
-    function render(entries, filter, query, page, disabled = false) {
+    function render(entries, filter, query, page, timerUsed = false, disabled = false) {
       const filtered = entries.filter(item => (filter === 'ALL' || item.tier === filter) && (!query || item.name.toLowerCase().includes(query.toLowerCase()) || TIER_LABELS[item.tier].toLowerCase().includes(query.toLowerCase())));
       const perPage = 12; const pages = Math.max(1, Math.ceil(filtered.length / perPage)); const safePage = Math.min(Math.max(0, page), pages - 1); const chunk = filtered.slice(safePage * perPage, (safePage + 1) * perPage);
       const text = chunk.length ? chunk.map(item => (item.isUp ? '> 🔺 **' : '• ') + item.name + (item.isUp ? '**' : '') + ' — ' + formatRate(item.rate) + (item.isUp ? ' **[UP!]**' : '')).join('\n') : '沒有符合的資料。';
       const title = query ? '🔎 機率查詢：' + query : (filter === 'ALL' ? '📋 完整提取機率清單' : TIER_LABELS[filter] + ' 機率清單');
       const embed = new EmbedBuilder().setTitle(title).setColor(0x00b4d8).setDescription(text).addFields({ name: '📊 機率說明', value: '包含基礎稀有度、異想體內部稀有度與當期 UP 修正。', inline: false }).setFooter({ text: '第 ' + (safePage + 1) + ' / ' + pages + ' 頁 ｜ 顯示 ' + filtered.length + ' 項' });
-      const controls = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('list:prev').setLabel('◀️ 上一頁').setStyle(ButtonStyle.Primary).setDisabled(disabled || safePage === 0), new ButtonBuilder().setCustomId('list:next').setLabel('下一頁 ▶️').setStyle(ButtonStyle.Primary).setDisabled(disabled || safePage >= pages - 1), new ButtonBuilder().setCustomId('list:all').setLabel('📋 全部').setStyle(ButtonStyle.Primary).setDisabled(disabled), new ButtonBuilder().setCustomId('list:search').setLabel('🔎 名稱查詢').setStyle(ButtonStyle.Success).setDisabled(disabled));
+      const controls = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('list:prev').setLabel('◀️ 上一頁').setStyle(ButtonStyle.Primary).setDisabled(disabled || safePage === 0), new ButtonBuilder().setCustomId('list:next').setLabel('下一頁 ▶️').setStyle(ButtonStyle.Primary).setDisabled(disabled || safePage >= pages - 1), new ButtonBuilder().setCustomId('list:all').setLabel('📋 全部').setStyle(ButtonStyle.Primary).setDisabled(disabled), new ButtonBuilder().setCustomId('list:search').setLabel('🔎 名稱查詢').setStyle(ButtonStyle.Success).setDisabled(disabled), new ButtonBuilder().setCustomId('list:extend').setLabel('⏱️ +1 分鐘').setStyle(ButtonStyle.Secondary).setDisabled(disabled || timerUsed));
       return { embeds: [embed], components: [...buildRarityRows(filter, disabled), controls] };
     }
     async function getReplyMessage(message, payload) { const sent = await message.reply(payload); if (sent?.createMessageComponentCollector) return sent; if (message.interaction?.fetchReply) return message.interaction.fetchReply(); return sent; }
     async function handleList(client, message) {
       try {
           const entries = buildEntries(); if (!entries.length) return message.reply('❌ 目前提取池沒有可顯示的資料。');
-          let filter = 'ALL'; let query = ''; let page = 0; let view = render(entries, filter, query, page);
+          let filter = 'ALL'; let query = ''; let page = 0; let timerUsed = false; let startedAt = Date.now(); let view = render(entries, filter, query, page, timerUsed);
           const reply = await getReplyMessage(message, view); if (!reply?.createMessageComponentCollector) return;
-          const collector = reply.createMessageComponentCollector({ componentType: ComponentType.Button, time: 120000 });
+          const collector = reply.createMessageComponentCollector({ componentType: ComponentType.Button, time: 60000 });
           collector.on('collect', async interaction => {
               if (interaction.user.id !== message.author.id) return interaction.reply({ content: '❌ 這不是你的機率清單。', ephemeral: true });
-              if (interaction.customId === 'list:search') {
+              if (interaction.customId === 'list:extend') {
+                if (timerUsed) return interaction.reply({ content: '⏱️ 這個清單的延長按鈕只能使用一次。', ephemeral: true });
+                timerUsed = true;
+                const remaining = Math.max(1000, 120000 - (Date.now() - startedAt));
+                collector.resetTimer({ time: remaining });
+                view = render(entries, filter, query, page, timerUsed);
+                await interaction.update({ embeds: view.embeds, components: view.components });
+                return;
+            }
+            if (interaction.customId === 'list:search') {
                   const modal = new ModalBuilder().setCustomId('list:search-modal').setTitle('查詢人格 / E.G.O 名稱').addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('list:query').setLabel('輸入名稱或關鍵字').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(80).setPlaceholder('例如：Don、E.G.O、ALEPH')));
                   await interaction.showModal(modal);
                   try { const submitted = await interaction.awaitModalSubmit({ time: 30000, filter: i => i.user.id === message.author.id && i.customId === 'list:search-modal' }); query = submitted.fields.getTextInputValue('list:query').trim(); filter = 'ALL'; page = 0; view = render(entries, filter, query, page); await submitted.deferUpdate(); await reply.edit({ embeds: view.embeds, components: view.components }); } catch {}
                   return;
               }
               if (interaction.customId === 'list:all') { filter = 'ALL'; query = ''; page = 0; } else if (interaction.customId === 'list:prev') page -= 1; else if (interaction.customId === 'list:next') page += 1; else if (interaction.customId.startsWith('list:filter:')) { filter = interaction.customId.slice('list:filter:'.length); query = ''; page = 0; }
-              view = render(entries, filter, query, page); await interaction.update({ embeds: view.embeds, components: view.components });
+              view = render(entries, filter, query, page, timerUsed); await interaction.update({ embeds: view.embeds, components: view.components });
           });
-          collector.on('end', () => { const ended = render(entries, filter, query, page, true); reply.edit({ components: ended.components }).catch(() => {}); });
+          collector.on('end', () => { const ended = render(entries, filter, query, page, true, true); reply.edit({ components: ended.components }).catch(() => {}); });
       } catch (error) { console.error('List Command Error:', error); if (!message.interaction?.replied) message.reply('❌ 讀取清單時發生錯誤，請稍後再試。').catch(() => {}); }
     }
     module.exports = { handleList, buildEntries };
