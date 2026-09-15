@@ -16,6 +16,7 @@ const { broadcastAnnouncement, setAnnounceChannel } = require('./GameSystem/Anno
 const { handleGiveAllPlayers, handleGiveSinglePlayer } = require('./GameSystem/GiveAwaySystem.js');
 const { checkSteamUpdates, checkTwitterUpdates, checkYouTubeUpdates } = require('./LimbusNewscheck.js');
 const ShopSystem = require('./GameSystem/ShopSystem.js');
+const { handleList } = require('./GameSystem/Pulls/ListSystem.js');
 const GiveawaySystem = require('./GameSystem/GiveawayEventSystem.js');
 
 const SUPER_ADMIN_ID = '1330463890122735642';
@@ -91,7 +92,12 @@ async function handleSlashCommands(client, interaction) {
         }
 
         // ─── 背包 / 機率表 ───────────────────────────────────────
-        if (commandName === 'pack' || commandName === 'list' || commandName === 'limbusids') {
+        if (commandName === 'list') {
+            fakeMessage.content = '!list';
+            if (isOnCooldown(uid, 'list', 3000)) return interaction.reply({ content: '⏳ 清單冷卻中，請稍後再試。', flags: MessageFlags.Ephemeral });
+            return handleList(client, fakeMessage);
+        }
+        if (commandName === 'pack' || commandName === 'limbusids') {
             fakeMessage.content = commandName === 'limbusids' ? '!limbusids' : `!${commandName}`;
             if (isOnCooldown(uid, 'pack')) {
                 return interaction.reply({ content: '⏳ 指令冷卻中，請稍後再試。', flags: MessageFlags.Ephemeral });
