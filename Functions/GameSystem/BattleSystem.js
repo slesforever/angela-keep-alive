@@ -275,7 +275,7 @@ async function startBattle(client, message, tier = 'normal', presetEnemy = null)
     const startMsg = `🔔 **戰鬥開始！** 遭遇 **${enemy.name}** [${enemy.attribute}]\n⏳ 請為 **${firstAlive?.name || '罪人'}** 選擇技能...`;
     const battleMsg = await message.reply({
         embeds: [buildBattleEmbed(state, startMsg)],
-        components: [buildSkillRow(firstAlive, false, isBindRestricted(firstAlive)), buildTimerRow(timerExtensionUsed)].filter(Boolean),
+        components: [buildSkillRow(firstAlive, false, isBindRestricted(firstAlive)), buildTimerRow(false)].filter(Boolean),
     });
 
     let turnTimer, finished = false;
@@ -443,7 +443,7 @@ async function startBattle(client, message, tier = 'normal', presetEnemy = null)
         const nextUnit = aliveAllies[0];
         await battleMsg.edit({
             embeds: [buildBattleEmbed(state, logs.join('\n'))],
-            components: [buildSkillRow(nextUnit, false, isBindRestricted(nextUnit)), buildTimerRow()].filter(Boolean),
+            components: [buildSkillRow(nextUnit, false, isBindRestricted(nextUnit)), buildTimerRow(timerExtensionUsed)].filter(Boolean),
         }).catch(() => {});
     }
 
