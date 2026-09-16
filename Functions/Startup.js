@@ -713,14 +713,14 @@ const allSlashCommands = [
             PermissionFlagsBits.Administrator
         ),
 
-    new SlashCommandBuilder()
+     new SlashCommandBuilder()
         .setName('leaderboard')
         .setDescription(
             '查看等級排行榜 TOP 10'
-        ),
+        )
         // period=month 可查看本月 XP 排行
         .addStringOption(o => o.setName('period').setDescription('排行榜期間').addChoices({ name: '全部', value: 'all' }, { name: '本月', value: 'month' })),
-
+    
     new SlashCommandBuilder()
         .setName('steam')
         .setDescription(
@@ -2146,14 +2146,6 @@ client.on(
 );
 
 const MarriageSystem = require('./GameSystem/MarriageSystem.js');
-
-client.on(Events.InteractionCreate, async (interaction) => {
-    if (interaction.isButton()) {
-        const id = interaction.customId;
-        if (id.startsWith('marry:'))   return MarriageSystem.handleMarriageButton(client, interaction);
-        if (id.startsWith('divorce:')) return MarriageSystem.handleDivorceButton(client, interaction);
-    }
-
 
 
 // ─────────────────────────────────────────────
