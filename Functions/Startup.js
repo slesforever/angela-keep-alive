@@ -2145,6 +2145,17 @@ client.on(
         )
 );
 
+const MarriageSystem = require('./GameSystem/MarriageSystem.js');
+
+client.on(Events.InteractionCreate, async (interaction) => {
+    if (interaction.isButton()) {
+        const id = interaction.customId;
+        if (id.startsWith('marry:'))   return MarriageSystem.handleMarriageButton(client, interaction);
+        if (id.startsWith('divorce:')) return MarriageSystem.handleDivorceButton(client, interaction);
+    }
+
+
+
 // ─────────────────────────────────────────────
 // Voice State
 // ─────────────────────────────────────────────
