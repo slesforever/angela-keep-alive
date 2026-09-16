@@ -1,5 +1,5 @@
 // Functions/GameSystem/LanguageSystem.js
-// 每位玩家的中文/英文偏好，並對 Discord 指令回覆做保守的即時翻譯
+// 每位玩家的中文/英文偏好,並對 Discord 指令回覆做即時翻譯
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -13,34 +13,54 @@ function setLanguage(userId, language) { const data = read(); data[userId] = lan
 function languageName(language) { return language === 'en' ? 'English' : '繁體中文'; }
 function pick(language, zh, en) { return language === 'en' ? en : zh; }
 
-const TRANSLATION_TIMEOUT_MS = 1200;
-    const TRANSLATION_COOLDOWN_MS = 30_000;
-    const translationCache = new Map();
-    let translationDisabledUntil = 0;
-    function rememberTranslation(key, value) {
-      translationCache.set(key, value);
-      if (translationCache.size > 300) translationCache.delete(translationCache.keys().next().value);
-    }
-    async function translateText(text) {
-      const value = String(text ?? '');
-      if (!value.trim() || value.length > 1500) return value;
-      const key = value;
-      if (translationCache.has(key) || Date.now() < translationDisabledUntil) return translationCache.get(key) || value;
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), TRANSLATION_TIMEOUT_MS);
-      try {
-          const gRes = await fetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=en&dt=t&q=${encodeURIComponent(value)}`, { signal: controller.signal, headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' } });
-          if (!gRes.ok) throw new Error(`HTTP ${gRes.status}`);
-          const gData = await gRes.json();
-          const segments = Array.isArray(gData?.[0]) ? gData[0] : [];
-          const out = segments.map(s => (Array.isArray(s) ? s[0] : '')).join('').trim();
-          if (!out) return value;
-          rememberTranslation(key, out);
-          translationDisabledUntil = 0;
-          return out;
-      } catch { translationDisabledUntil = Date.now() + TRANSLATION_COOLDOWN_MS; return value; }
-      finally { clearTimeout(timer); }
-    }
+const TRANSLATION_TIMEOUT_MS = 4000;
+const TRANSLATION_COOLDOWN_MS = 30_000;
+const translationCache = new Map();
+let translationDisabledUntil = 0;
+function rememberTranslation(key, value) {
+    translationCache.set(key, value);
+    if (translationCache.size > 500) translationCache.delete(translationCache.keys().next().value);
+}
+
+// DeepL Free API(伺服器端專用,不擋機房 IP)。沒設定 key 時自動退回 Google 端點(會被擋,但無害)。
+async function translateText(text) {
+    const value = String(text ?? '');
+    if (!value.trim() || value.length > 1500) return value;
+    const key = value;
+    if (translationCache.has(key) || Date.now() < translationDisabledUntil) return translationCache.get(key) || value;
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), TRANSLATION_TIMEOUT_MS);
+    try {
+        let out = '';
+        if (process.env.DEEPL_API_KEY) {
+            const res = await fetch('https://api-free.deepl.com/v2/translate', {
+                method: 'POST',
+                signal: controller.signal,
+                headers: {
+                    'Authorization': `DeepL-Auth-Key ${process.env.DEEPL_API_KEY}`,
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: `text=${encodeURIComponent(value)}&target_lang=EN`
+            });
+            if (!res.ok) throw new Error(`DeepL HTTP ${res.status}`);
+            const data = await res.json();
+            out = Array.isArray(data?.translations) ? data.translations.map(t => t.text).join('').trim() : '';
+        } else {
+            // 退回 Google(機房 IP 多半 429,僅作最後嘗試)
+            const gRes = await fetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=en&dt=t&q=${encodeURIComponent(value)}`, { signal: controller.signal, headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' } });
+            if (!gRes.ok) throw new Error(`Google HTTP ${gRes.status}`);
+            const gData = await gRes.json();
+            const segments = Array.isArray(gData?.[0]) ? gData[0] : [];
+            out = segments.map(s => (Array.isArray(s) ? s[0] : '')).join('').trim();
+        }
+        if (!out) return value;
+        rememberTranslation(key, out);
+        translationDisabledUntil = 0;
+        return out;
+    } catch { translationDisabledUntil = Date.now() + TRANSLATION_COOLDOWN_MS; return value; }
+    finally { clearTimeout(timer); }
+}
 
 async function localizeEmbed(embed) {
     const data = typeof embed?.toJSON === 'function' ? embed.toJSON() : { ...embed };
@@ -67,13 +87,13 @@ function localizeInteraction(interaction) {
     for (const method of ['reply', 'editReply', 'followUp']) {
         if (typeof interaction[method] !== 'function') continue;
         const original = interaction[method].bind(interaction);
-          interaction[method] = async payload => {
-              const translated = await Promise.race([
-                  localizePayload(interaction.user.id, payload),
-                  new Promise(resolve => setTimeout(() => resolve(payload), TRANSLATION_TIMEOUT_MS))
-              ]);
-              return original(translated);
-          };
+        interaction[method] = async payload => {
+            const translated = await Promise.race([
+                localizePayload(interaction.user.id, payload),
+                new Promise(resolve => setTimeout(() => resolve(payload), TRANSLATION_TIMEOUT_MS))
+            ]);
+            return original(translated);
+        };
     }
     return interaction;
 }
