@@ -30,8 +30,6 @@ const BACKUP_CHANNEL_ID = process.env.PLAYER_BACKUP_CHANNEL_ID || '1510947300212
 let backupTimer = null;
 let backupInFlight = false;
 let backupQueuedReason = 'save';
-let backupPending = false;
-let backupClient = null;
 
 // 以安全大小切分 txt，避免單檔過大
 const MAX_TXT_BYTES = 7_500_000;
@@ -330,27 +328,21 @@ async function sendBackupTxtToChannel(client, reason = 'save') {
 }
 
 function queueAllPlayersBackup(client, reason = 'save') {
-    const activeClient = client || backupClient;
-    if (!activeClient) return;
+    if (!client) return;
 
     backupQueuedReason = reason;
-    backupPending = true;
 
     if (backupTimer) clearTimeout(backupTimer);
     backupTimer = setTimeout(async () => {
-        backupTimer = null;
         if (backupInFlight) return;
         backupInFlight = true;
-        backupPending = false;
 
         try {
-            const sent = await sendBackupTxtToChannel(activeClient, backupQueuedReason);
-            if (!sent) console.error('[Pack] 玩家資料備份未送出；下一次存檔會再排程。');
+            await sendBackupTxtToChannel(client, backupQueuedReason);
         } catch (err) {
             console.error(`[Pack] 頻道備份失敗：${err.message}`);
         } finally {
             backupInFlight = false;
-            if (backupPending) queueAllPlayersBackup(activeClient, backupQueuedReason);
         }
     }, 2500);
 }
@@ -451,40 +443,9 @@ async function restoreFromBackupChannel(client) {
         const userId = match[1].trim();
         const jsonText = match[2].trim();
         try {
-            const backupData = JSON.parse(jsonText);
-            if (!backupData || typeof backupData !== 'object' || Array.isArray(backupData)) {
-                throw new Error('備份中的玩家資料格式錯誤');
-            }
+            const data = JSON.parse(jsonText);
             const file = path.join(DATA_DIR, `${userId}.json`);
-            let data = backupData;
-            if (fs.existsSync(file)) {
-                try {
-                    const localData = JSON.parse(fs.readFileSync(file, 'utf8'));
-                    if (localData && typeof localData === 'object' && !Array.isArray(localData)) {
-                        const localXp = Math.max(Number(localData.xp) || 0, Number(localData.exp) || 0);
-                        const backupXp = Math.max(Number(backupData.xp) || 0, Number(backupData.exp) || 0);
-                        if (localXp >= backupXp) continue;
-                        data = { ...backupData, ...localData, xp: backupXp, exp: backupXp };
-                        data.level = Math.max(Number(localData.level) || 1, Number(backupData.level) || 1);
-                        for (const key of ['xpSources', 'monthlyXp']) {
-                            const merged = { ...(backupData[key] || {}), ...(localData[key] || {}) };
-                            for (const k of new Set([...Object.keys(backupData[key] || {}), ...Object.keys(localData[key] || {})])) {
-                                merged[k] = Math.max(Number(backupData[key]?.[k]) || 0, Number(localData[key]?.[k]) || 0);
-                            }
-                            data[key] = merged;
-                        }
-                    }
-                } catch (localErr) {
-                    try {
-                        const corruptPath = `${file}.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}`;
-                        fs.copyFileSync(file, corruptPath);
-                        console.error(`[Pack] 已保留損壞玩家存檔 ${userId} 的副本`);
-                    } catch (copyErr) {
-                        console.error(`[Pack] 保留損壞玩家存檔失敗 ${userId}:`, copyErr.message);
-                    }
-                }
-            }
-            writeJsonAtomic(file, data);
+            fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf8');
             restored++;
         } catch (err) {
             console.error(`[Pack] 解析玩家 ${userId} 資料失敗:`, err.message);
@@ -549,58 +510,23 @@ function defaultPlayer(username) {
     };
 }
 
-function writeJsonAtomic(file, value) {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    const tempFile = `${file}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`;
-    let fd = null;
-    try {
-        fd = fs.openSync(tempFile, 'w');
-        fs.writeFileSync(fd, JSON.stringify(value, null, 2), 'utf8');
-        fs.fsyncSync(fd);
-        fs.closeSync(fd);
-        fd = null;
-        fs.renameSync(tempFile, file);
-        return true;
-    } catch (err) {
-        if (fd !== null) { try { fs.closeSync(fd); } catch {} }
-        try { fs.unlinkSync(tempFile); } catch {}
-        throw err;
-    }
-}
-
-function setPlayerDataBackupClient(client) { backupClient = client || null; }
-
 function loadPlayerData(_client, userId) {
     const file = path.join(DATA_DIR, `${userId}.json`);
     try {
-        if (!fs.existsSync(file)) return null;
-        const data = JSON.parse(fs.readFileSync(file, 'utf8'));
-        if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('玩家資料格式錯誤');
-        return data;
-    } catch (err) {
-        console.error(`[Pack] 讀取失敗 ${userId}:`, err.message);
-        try {
-            if (fs.existsSync(file)) {
-                const backup = `${file}.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}`;
-                fs.copyFileSync(file, backup);
-                console.error(`[Pack] 損壞存檔副本已保留：${path.basename(backup)}`);
-            }
-        } catch (copyErr) {
-            console.error(`[Pack] 保留損壞存檔失敗 ${userId}:`, copyErr.message);
-        }
-        return null;
+        if (fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, 'utf8'));
+    } catch (e) {
+        console.error(`[Pack] 讀取失敗 ${userId}:`, e.message);
     }
+    return null;
 }
 
 function savePlayerData(client, userId, data) {
     const file = path.join(DATA_DIR, `${userId}.json`);
     try {
-        writeJsonAtomic(file, data);
-        queueAllPlayersBackup(client || backupClient, `save:${userId}`);
-        return true;
-    } catch (err) {
-        console.error(`[Pack] 儲存失敗 ${userId}:`, err.message);
-        return false;
+        fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf8');
+        queueAllPlayersBackup(client, `save:${userId}`);
+    } catch (e) {
+        console.error(`[Pack] 儲存失敗 ${userId}:`, e.message);
     }
 }
 
@@ -662,7 +588,7 @@ function loadUserInventory(_client, userId) {
 function saveUserInventory(client, userId, items) {
     const p = getOrCreatePlayer(client, userId, 'Player');
     p.identities = Array.isArray(items) ? items : [];
-    return savePlayerData(client, userId, p);
+    savePlayerData(client, userId, p);
 }
 
 // ─── UI 元件 ──────────────────────────────────────────────────
@@ -1117,6 +1043,5 @@ module.exports = {
     getIdentitySinnerKey,
     getOwnedSinners,
     queueAllPlayersBackup,
-    setPlayerDataBackupClient,
     restoreFromBackupChannel,
 };
