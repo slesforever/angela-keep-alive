@@ -2627,7 +2627,7 @@ if (
 
     process.exit(1);
 }
-
+require('./GameSystem/AIChatSystem.js').init(client);
 client.login(
     TOKEN
 );
