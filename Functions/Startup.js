@@ -198,8 +198,7 @@ const {
 );
 
 const {
-    restoreFromBackupChannel,
-    setPlayerDataBackupClient
+    restoreFromBackupChannel
 } = require(
     './GameSystem/PacksAndData.js'
 );
@@ -270,8 +269,6 @@ const client =
             GatewayIntentBits.GuildMessageReactions,
         ],
     });
-
-setPlayerDataBackupClient(client);
 
 // ─────────────────────────────────────────────
 // 載入指令模組
@@ -1132,16 +1129,12 @@ async function announceCurrentRateUps(botClient) {
 }
 
 // ─────────────────────────────────────────────
-let playerDataRestorePromise = Promise.resolve();
-
 // InteractionCreate
 // ─────────────────────────────────────────────
 
 client.on(
     Events.InteractionCreate,
     async interaction => {
-
-        await playerDataRestorePromise;
 
         // ═════════════════════════════════════
         // /announce Modal Submit
@@ -1958,8 +1951,6 @@ client.on(
     Events.MessageCreate,
     async message => {
 
-        await playerDataRestorePromise;
-
         if (
             message.author?.bot
         ) {
@@ -2255,16 +2246,6 @@ client.once(
             `🤖 Angela 系統脈衝對齊。已激活：${client.user.tag}`
         );
 
-        playerDataRestorePromise = (async () => {
-            try {
-                const restored = await restoreFromBackupChannel(client);
-                if (restored > 0) console.log(`📂 [Startup] 從備份頻道還原了 ${restored} 位玩家的資料`);
-            } catch (err) {
-                console.error('[Startup] 備份還原失敗（忽略）:', err.message);
-            }
-        })();
-        await playerDataRestorePromise;
-
         // ─────────────────────────────────────
         // 重新註冊 Slash Commands
         // ─────────────────────────────────────
@@ -2517,6 +2498,34 @@ client.once(
                     err.message
                 );
             }
+        }
+
+        // ─────────────────────────────────────
+        // 玩家資料備份還原
+        // ─────────────────────────────────────
+
+        try {
+
+            const restored =
+                await restoreFromBackupChannel(
+                    client
+                );
+
+            if (
+                restored > 0
+            ) {
+
+                console.log(
+                    `📂 [Startup] 從備份頻道還原了 ${restored} 位玩家的資料`
+                );
+            }
+
+        } catch (e) {
+
+            console.error(
+                '[Startup] 備份還原失敗（忽略）:',
+                e.message
+            );
         }
 
         // ─────────────────────────────────────
