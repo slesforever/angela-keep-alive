@@ -518,7 +518,7 @@ const BANNERS = {
         description: '第七賽季人格概率 UP！',
         cost: { single:  0, ten: 0 },
         rateUp: {
-            S3: ['［Cinq協會 南部5科］鴻璐 / Cinq Assoc. East Section 3 Hong Lu'],
+            S3: ['［Cinq協會 東部3科］鴻璐 / Cinq Assoc. East Section 3 Hong Lu'],
             EGOS: [],
             S2: []
         }
