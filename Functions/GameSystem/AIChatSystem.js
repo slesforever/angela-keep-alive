@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 
 const CONFIG_PATH = path.join(process.cwd(), 'data', 'ai-channel-config.json');
-const MODEL = 'gemini-2.0-flash';
+const MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash';
 const API_KEY = process.env.GEMINI_API_KEY;
 const COOLDOWN_MS = 3000;
 
