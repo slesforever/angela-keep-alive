@@ -109,6 +109,12 @@ function retryDelay(response, attempt) {
     return Math.min(800 * (2 ** attempt), 4000);
 }
 
+function isQuotaExhaustion(responseText) {
+    let message = String(responseText || '');
+    try { message = String(JSON.parse(responseText)?.error?.message || message); } catch {}
+    return /you exceeded your current quota|current quota.{0,80}exceed|check your plan and billing details/i.test(message);
+}
+
 async function requestGemini(contents) {
     if (!API_KEY) throw new Error('尚未設定 GEMINI_API_KEY 環境變數。');
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(MODEL)}:generateContent?key=${encodeURIComponent(API_KEY)}`;
@@ -131,13 +137,17 @@ async function requestGemini(contents) {
             const text = await response.text().catch(() => '');
             const safeText = text.replaceAll(API_KEY, '[redacted]').slice(0, 300);
             lastError = new Error(`Gemini HTTP ${response.status}${safeText ? `: ${safeText}` : ''}`);
+            if (response.status === 429 && isQuotaExhaustion(text)) {
+                lastError = new Error(`Gemini quota exhausted (HTTP 429)${safeText ? `: ${safeText}` : ''}`);
+                throw lastError;
+            }
             if (!retryableStatuses.has(response.status) || attempt === 3) throw lastError;
         } catch (err) {
             if (err.name === 'AbortError') lastError = new Error(`Gemini 請求逾時（${REQUEST_TIMEOUT_MS / 1000} 秒）。`);
-            else if (err.message?.startsWith('Gemini HTTP ')) lastError = err;
+            else if (err.message?.startsWith('Gemini HTTP ') || err.message?.startsWith('Gemini quota exhausted')) lastError = err;
             else lastError = new Error(`Gemini 網路請求失敗：${err.message}`);
             const status = response?.status;
-            if ((status && !retryableStatuses.has(status)) || attempt === 3) throw lastError;
+            if (lastError.message?.startsWith('Gemini quota exhausted') || (status && !retryableStatuses.has(status)) || attempt === 3) throw lastError;
         } finally {
             clearTimeout(timer);
         }
@@ -167,6 +177,7 @@ async function askGemini(prompt, userId, attachments = []) {
 }
 
 function getFriendlyError(err) {
+    if (/Gemini quota exhausted/.test(err.message)) return '⚠️ Gemini API 配額已達上限（HTTP 429），系統已停止重試。請管理員查看 https://ai.dev/rate-limit 的用量與重置時間，配額恢復後再試。';
     if (/Gemini HTTP 503/.test(err.message)) return '⚠️ Gemini 目前暫時無法服務（HTTP 503），已自動重試仍未成功，請稍後再傳一次。';
     if (/Gemini HTTP 429/.test(err.message)) return '⚠️ Gemini 目前請求量較大（HTTP 429），系統已重試，請稍後再傳一次。';
     if (/GEMINI_API_KEY/.test(err.message)) return '⚠️ AI 尚未設定完成，請管理員確認 Gemini API 設定。';
