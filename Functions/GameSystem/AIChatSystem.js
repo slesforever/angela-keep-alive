@@ -10,6 +10,12 @@ const MODEL = 'gemini-2.0-flash';
 const API_KEY = process.env.GEMINI_API_KEY;
 const COOLDOWN_MS = 3000;
 
+const setAIChannelCommand = new SlashCommandBuilder()
+    .setName('setaichannel')
+    .setDescription('設定或關閉 AI 自動回覆頻道')
+    .addChannelOption(o => o.setName('channel').setDescription('設為 AI 回覆頻道;不填則關閉').setRequired(false))
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
+
 function readConfig() { try { return fs.existsSync(CONFIG_PATH) ? JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) : {}; } catch { return {}; } }
 function writeConfig(data) { fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true }); fs.writeFileSync(CONFIG_PATH, JSON.stringify(data, null, 2), 'utf8'); }
 function getChannelId(guildId) { return readConfig()[guildId] || null; }
@@ -35,21 +41,6 @@ async function askGemini(prompt, userId) {
 }
 
 function init(client) {
-    // 註冊 /setaichannel(以 guild 指令註冊,獨立不衝突、即時生效)
-    client.once('ready', async () => {
-        try {
-            const builder = new SlashCommandBuilder()
-                .setName('setaichannel')
-                .setDescription('設定或關閉 AI 自動回覆頻道')
-                .addChannelOption(o => o.setName('channel').setDescription('設為 AI 回覆頻道;不填則關閉').setRequired(false))
-                .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
-            for (const guild of client.guilds.cache.values()) {
-                await guild.commands.create(builder).catch(e => console.error(`[AIChat] ${guild.name} 註冊失敗:`, e.message));
-            }
-            console.log('[AIChat] 已註冊 /setaichannel');
-        } catch (err) { console.error('[AIChat] 註冊失敗:', err.message); }
-    });
-
     // 訊息自動回覆
     client.on('messageCreate', async (message) => {
         if (message.author.bot || !message.guild) return;
@@ -80,4 +71,4 @@ function init(client) {
     console.log('[AIChat] 系統已載入');
 }
 
-module.exports = { init, askGemini };
+module.exports = { init, askGemini, command: setAIChannelCommand };
