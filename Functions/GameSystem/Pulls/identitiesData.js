@@ -134,9 +134,8 @@ const identityRegistry = {
         { name: "［六協會 南部4科 部長］羅佳 / Liu Assoc. South Section 4 Rodion" },
         { name: "［五協會 南部5科 科長］堂吉訶德 / Cinq Assoc. South Section 5 Director Don Quixote" },
         { name: "［Cinq協會 南部5科］堂吉訶德 / Cinq Assoc. South Section 5 Don Quixote" },
-        { name: "［Cinq協會 南部5科］鴻璐 / Cinq Assoc. East Section 3 Hong Lu" },
+        { name: "［Cinq協會 東部3科］鴻璐 / Cinq Assoc. East Section 3 Hong Lu" },
         { name: "［Cinq協會 西部3科］默爾索 / Cinq Assoc. West Section 3 Meursault" },
-        { name: "［Cinq協會 南部5科］堂吉訶德 / Cinq Assoc. South Section 5 Don Quixote" },
         { name: "［Zwei協會 西部3科］以實瑪利 / Zwei Assoc. West Section 3 Ishmael" },
         { name: "［Dieci協會 南部4科］羅佳 / Dieci Assoc. South Section 4 Rodion" },
         { name: "［Dieci協會 南部4科］鴻璐 / Dieci Assoc. South Section 4 Hong Lu" },
@@ -254,7 +253,7 @@ const identityRegistry = {
     { name: "[HE] 紅紙片 - 唐吉訶德 / [HE] Red Sheet - Don Quixote" },
     { name: "[WAW] 渴望-米爾卡拉 - 唐吉訶德 / [WAW] Yearning-Mircalla - Don Quixote" },
     { name: "[WAW] 愛與恨之名 - 唐吉訶德 / [WAW] In the Name of Love and Hate - Don Quixote" },
-    { name: "[ZAYIN] 我拿剪刀去，你呢？ - 唐吉訶德 / [ZAYIN] I ll Go fer Scissors. How Bout You? - Don Quixote" },
+    { name: "[ZAYIN] 我拿剪刀去，你呢？ - 唐吉訶德 / [ZAYIN] I'll Go fer Scissors. How 'Bout You? - Don Quixote" },
 
     { name: "[ZAYIN] 森林與火焰 - 良秀 / [ZAYIN] Forest for the Flames - Ryoshu" },
     { name: "[ZAYIN] 蘇打 - 良秀 / [ZAYIN] Soda - Ryoshu" },
@@ -499,7 +498,7 @@ const upTargets = {
         "［蒼藍殘響］阿爾加利亞 / The Blue Reverberation Argalia",
     ], 
     '000': [
-        "［次元折斷者］李箱 / Dimension Shredder Yi Sang",
+        "［次元撕裂者］李箱 / Dimension Shredder Yi Sang",
     ],
 };
 
@@ -532,7 +531,7 @@ const BANNERS = {
         cost: { single:  0, ten: 0 },
         rateUp: {
             S3: [],
-            EGOS: ['[ZAYIN] 我拿剪刀去，你呢？ - 唐吉訶德 / [ZAYIN] I ll Go fer Scissors. How Bout You? - Don Quixote'],
+            EGOS: [identityRegistry.Egos.find(item => item.name.includes('我拿剪刀去，你呢？ - 唐吉訶德'))?.name].filter(Boolean),
             S2: []
         }
     },
@@ -543,7 +542,7 @@ const BANNERS = {
         cost: { single:  0, ten: 0 },
         rateUp: {
             S3: [],
-            EGOS: ['[TETH] 租借申請 - 格里高爾 / [TETH] Move-in Reg - Gregor'],
+            EGOS: [identityRegistry.Egos.find(item => item.name.includes('租借申請 - 格里高爾'))?.name].filter(Boolean),
             S2: []
         }
     },
