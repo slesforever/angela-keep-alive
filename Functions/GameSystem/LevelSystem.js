@@ -122,7 +122,7 @@ async function addXp(client, userId, username, amount, guildId = null, source = 
     player.exp = newXp;
     player.level = newData.level;
     
-    savePlayerData(client, userId, player);
+    if (!savePlayerData(client, userId, player)) throw new Error(`[LevelSystem] 玩家 ${userId} 的 XP 存檔失敗`);
     if (newData.level > oldData.level && client && guildId) {
         await announceLevelUp(client, userId, username, newData.level, guildId, rewards);
     }
@@ -139,7 +139,7 @@ function setPlayerXp(client, userId, username, targetXp) {
     player.exp = xpVal;
     player.level = newData.level;
     
-    savePlayerData(client, userId, player);
+    if (!savePlayerData(client, userId, player)) throw new Error(`[LevelSystem] 玩家 ${userId} 的 XP 存檔失敗`);
     return { ...newData, totalXp: xpVal };
 }
 
@@ -150,7 +150,7 @@ async function handleMessageXp(client, message) {
     const now = Date.now();
     if (now - (messageCooldowns.get(userId) || 0) < 60_000) return;
     messageCooldowns.set(userId, now);
-    await addXp(client, userId, message.author.username, 2, message.guild.id, 'message').catch(() => {});
+    await addXp(client, userId, message.author.username, 2, message.guild.id, 'message').catch(err => console.error('[LevelSystem] 訊息 XP 儲存失敗:', err.message));
 }
 
 const voiceJoinTimes = new Map();
