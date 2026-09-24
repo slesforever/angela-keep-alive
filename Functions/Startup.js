@@ -151,6 +151,7 @@ const {
 
 const ShopSystem = require('./GameSystem/ShopSystem.js');
 const GiveawaySystem = require('./GameSystem/GiveawayEventSystem.js');
+const AIChatSystem = require('./GameSystem/AIChatSystem.js');
 
 const {
     handleMessageXp,
@@ -1020,6 +1021,7 @@ const allSlashCommands = [
     new SlashCommandBuilder().setName('giveaway-end').setDescription('提前結束抽獎')
         .addStringOption(o => o.setName('id').setDescription('抽獎 ID').setRequired(true))
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+    AIChatSystem.command,
 ];
 
 // ─────────────────────────────────────────────
@@ -2627,7 +2629,7 @@ if (
 
     process.exit(1);
 }
-require('./GameSystem/AIChatSystem.js').init(client);
+AIChatSystem.init(client);
 client.login(
     TOKEN
 );
