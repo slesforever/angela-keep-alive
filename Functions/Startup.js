@@ -2524,9 +2524,14 @@ client.once(
                     );
                 }
 
+                const translationSources =
+                    Array.isArray(stored.translationSourceChannelIds)
+                        ? stored.translationSourceChannelIds
+                        : [];
+
                 if (
                     stored.translationOutputChannelId ||
-                    stored.translationSourceChannelIds.length
+                    translationSources.length
                 ) {
 
                     setTranslationConfig(
@@ -2536,7 +2541,7 @@ client.once(
                                 stored.translationOutputChannelId,
 
                             sources:
-                                stored.translationSourceChannelIds
+                                translationSources
                         }
                     );
                 }
@@ -2546,7 +2551,7 @@ client.once(
 
             console.error(
                 '[Startup] Discord 伺服器設定還原失敗:',
-                err.message
+                err.stack || err.message
             );
         }
 
