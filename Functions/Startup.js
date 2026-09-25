@@ -1494,8 +1494,8 @@ client.on(
                     `星星榜：${channel(config.starboardChannelId)}`,
                     `紀錄：${channel(config.auditChannelId)}`,
                     `翻譯輸出：${channel(config.translationOutputChannelId)}`,
-                    `翻譯來源：${sourceChannels}`
-                    `AI 回覆：${channel(require('./GameSystem/AIChatSystem.js').getChannelId(interaction.guild?.id))}`,
+                    `翻譯來源：${sourceChannels}`,
+                    `AI 回覆：${channel(typeof AIChatSystem.getChannelId === 'function' ? AIChatSystem.getChannelId(interaction.guild?.id) : '')}`,
                 ].join('\n'),
 
                 flags:
