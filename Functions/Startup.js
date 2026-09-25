@@ -670,6 +670,10 @@ const allSlashCommands = [
                         {
                             name: '🤖 AI 自動回覆頻道',
                             value: 'aichannel'
+                        },
+                        {
+                            name: '🧠 AI 記憶庫頻道',
+                            value: 'aimemory'
                         }
                     )
         )
@@ -1814,33 +1818,6 @@ client.on(
                 type ===
                 'translate-source'
             ) {
-            // ─────────────────────────────
-            // AI 自動回覆頻道
-            // ─────────────────────────────
-
-            if (
-                type ===
-                'aichannel'
-            ) {
-                const {
-                    setChannelId:
-                        _setAiCh
-                } = require(
-                    './GameSystem/AIChatSystem.js'
-                );
-
-                _setAiCh(
-                    interaction.guild.id,
-                    targetChannel.id
-                );
-
-                return interaction.reply({
-                    content:
-                        `✅ AI 自動回覆頻道已設定至 ${targetChannel}。在該頻道發言(含圖片)Angela 就會用 Gemini 回覆,並可使用伺服器 emoji/貼圖。`,
-                    flags:
-                        MessageFlags.Ephemeral
-                });
-            }
 
                 const enabled =
                     toggleTranslationSource(
@@ -1877,7 +1854,104 @@ client.on(
                 });
             }
         }
+// ─────────────────────────────
+            // AI 自動回覆頻道
+            // ─────────────────────────────
 
+            if (
+                type ===
+                'aichannel'
+            ) {
+                const {
+                    setChannelId:
+                        _setAiCh
+                } = require(
+                    './GameSystem/AIChatSystem.js'
+                );
+
+                _setAiCh(
+                    interaction.guild.id,
+                    targetChannel.id
+                );
+
+                return interaction.reply({
+                    content:
+                        `✅ AI 自動回覆頻道已設定至 ${targetChannel}。在該頻道發言(含圖片)Angela 就會用 Gemini 回覆,並可使用伺服器 emoji/貼圖。`,
+                    flags:
+                        MessageFlags.Ephemeral
+                });
+            }
+
+            // ─────────────────────────────
+            // AI 記憶庫頻道
+            // ─────────────────────────────
+
+            if (
+                type ===
+                'aimemory'
+            ) {
+                const {
+                    setMemoryChannelId:
+                        _setAiMem
+                } = require(
+                    './GameSystem/AIChatSystem.js'
+                );
+
+                _setAiMem(
+                    interaction.guild.id,
+                    targetChannel.id
+                );
+
+                return interaction.reply({
+                    content:
+                        `✅ AI 記憶庫頻道已設定至 ${targetChannel}。\n之後每個使用者的對話記憶會寫成 txt 備份到此頻道,機器人重啟時會自動讀回。`,
+                    flags:
+                        MessageFlags.Ephemeral
+                });
+            }
+
+            // ─────────────────────────────
+            // Translation Source
+            // ─────────────────────────────
+
+            if (
+                type ===
+                'translate-source'
+            ) {
+                const enabled =
+                    toggleTranslationSource(
+                        interaction.guild.id,
+                        targetChannel.id
+                    );
+
+                const translationConfig =
+                    getTranslationConfig(
+                        interaction.guild.id
+                    );
+
+                const persisted =
+                    await saveGuildConfigToDiscord(
+                        client,
+                        interaction.guild.id,
+                        {
+                            translationSourceChannelIds:
+                                translationConfig.sources
+                        }
+                    );
+
+                return interaction.reply({
+                    content:
+                        `✅ 已${enabled ? '加入' : '移除'}翻譯來源頻道：${targetChannel}。` +
+                        (
+                            persisted
+                                ? ''
+                                : '（請先使用 /setstoragechannel 才能跨重啟保存。）'
+                        ),
+
+                    flags:
+                        MessageFlags.Ephemeral
+                });
+            }
         // ═════════════════════════════════════
         // 其他指令
         // ═════════════════════════════════════
@@ -2552,10 +2626,44 @@ client.once(
                 );
             }
 
-        } catch (e) {
+         } catch (e) {
 
             console.error(
                 '[Startup] 備份還原失敗（忽略）:',
+                e.message
+            );
+        }
+
+        // ─────────────────────────────────────
+        // AI 記憶庫還原
+        // ─────────────────────────────────────
+
+        try {
+
+            const {
+                restoreAllMemory
+            } = require(
+                './GameSystem/AIChatSystem.js'
+            );
+
+            const memRestored =
+                await restoreAllMemory(
+                    client
+                );
+
+            if (
+                memRestored > 0
+            ) {
+
+                console.log(
+                    `🧠 [Startup] 從記憶庫頻道還原了 ${memRestored} 個使用者的 AI 記憶`
+                );
+            }
+
+        } catch (e) {
+
+            console.error(
+                '[Startup] AI 記憶還原失敗（忽略）:',
                 e.message
             );
         }
