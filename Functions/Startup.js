@@ -666,6 +666,10 @@ const allSlashCommands = [
                         {
                             name: '🌐 切換翻譯來源頻道',
                             value: 'translate-source'
+                        },
+                        {
+                            name: '🤖 AI 自動回覆頻道',
+                            value: 'aichannel'
                         }
                     )
         )
@@ -1487,6 +1491,7 @@ client.on(
                     `紀錄：${channel(config.auditChannelId)}`,
                     `翻譯輸出：${channel(config.translationOutputChannelId)}`,
                     `翻譯來源：${sourceChannels}`
+                    `AI 回覆：${channel(require('./GameSystem/AIChatSystem.js').getChannelId(interaction.guild?.id))}`,
                 ].join('\n'),
 
                 flags:
@@ -1809,6 +1814,33 @@ client.on(
                 type ===
                 'translate-source'
             ) {
+            // ─────────────────────────────
+            // AI 自動回覆頻道
+            // ─────────────────────────────
+
+            if (
+                type ===
+                'aichannel'
+            ) {
+                const {
+                    setChannelId:
+                        _setAiCh
+                } = require(
+                    './GameSystem/AIChatSystem.js'
+                );
+
+                _setAiCh(
+                    interaction.guild.id,
+                    targetChannel.id
+                );
+
+                return interaction.reply({
+                    content:
+                        `✅ AI 自動回覆頻道已設定至 ${targetChannel}。在該頻道發言(含圖片)Angela 就會用 Gemini 回覆,並可使用伺服器 emoji/貼圖。`,
+                    flags:
+                        MessageFlags.Ephemeral
+                });
+            }
 
                 const enabled =
                     toggleTranslationSource(
