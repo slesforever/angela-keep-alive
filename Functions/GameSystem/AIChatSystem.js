@@ -1,227 +1,132 @@
 // Functions/GameSystem/AIChatSystem.js
-// 獨立 AI 聊天系統：Gemini 自動回覆、Discord 圖片理解與頻道設定
+// 獨立 AI 聊天系統:Gemini 視覺回覆 + 伺服器 emoji/貼圖 + /setchannel 整合
 'use strict';
-const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 
 const CONFIG_PATH = path.join(process.cwd(), 'data', 'ai-channel-config.json');
-const MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash';
+const MODEL = 'gemini-2.0-flash';
 const API_KEY = process.env.GEMINI_API_KEY;
 const COOLDOWN_MS = 3000;
-const REQUEST_TIMEOUT_MS = 30000;
-const MAX_IMAGE_COUNT = 4;
-const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
-const SUPPORTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
-const DISCORD_CDN_HOSTS = new Set(['cdn.discordapp.com', 'media.discordapp.net', 'cdn.discord.com']);
-
-const setAIChannelCommand = new SlashCommandBuilder()
-    .setName('setaichannel')
-    .setDescription('設定或關閉 AI 自動回覆頻道')
-    .addChannelOption(o => o.setName('channel').setDescription('設為 AI 回覆頻道;不填則關閉').setRequired(false))
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
+const MAX_EMOJI = 150;
 
 function readConfig() {
     try { return fs.existsSync(CONFIG_PATH) ? JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) : {}; }
-    catch (err) { console.error('[AIChat] 讀取頻道設定失敗:', err.message); return {}; }
+    catch { return {}; }
 }
 function writeConfig(data) {
     fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
-    const tempPath = `${CONFIG_PATH}.tmp`;
-    fs.writeFileSync(tempPath, JSON.stringify(data, null, 2), 'utf8');
-    fs.renameSync(tempPath, CONFIG_PATH);
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify(data, null, 2), 'utf8');
 }
 function getChannelId(guildId) { return readConfig()[guildId] || null; }
 function setChannelId(guildId, channelId) {
-    const config = readConfig();
-    if (channelId) config[guildId] = channelId;
-    else delete config[guildId];
-    writeConfig(config);
+    const c = readConfig();
+    if (channelId) c[guildId] = channelId; else delete c[guildId];
+    writeConfig(c);
 }
 
-// 每個使用者保留最多 16 則文字對話記憶。圖片只傳本次請求，避免在記憶體長期保留大檔。
 const histories = new Map();
 const cooldowns = new Map();
 function getHistory(userId) { if (!histories.has(userId)) histories.set(userId, []); return histories.get(userId); }
 function pushHistory(userId, role, text) {
-    const history = getHistory(userId);
-    history.push({ role, parts: [{ text }] });
-    if (history.length > 16) history.splice(0, history.length - 16);
+    const h = getHistory(userId); h.push({ role, parts: [{ text }] });
+    if (h.length > 16) h.splice(0, h.length - 16);
 }
 
-function inferImageMimeType(attachment) {
-    const declared = String(attachment.contentType || '').split(';')[0].trim().toLowerCase();
-    if (SUPPORTED_IMAGE_TYPES.has(declared)) return declared;
-    const ext = path.extname(attachment.name || '').toLowerCase();
-    return ({ '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif' })[ext] || null;
+// 把伺服器現有 emoji / 貼圖清單塞給 Gemini,並規定只能用這些
+function buildSystemInstruction(guild) {
+    const emojis = [...guild.emojis.cache.values()].slice(0, MAX_EMOJI).map(e => e.toString());
+    const stickers = [...guild.stickers.cache.values()].map(s => s.name);
+    const lines = [
+        '你是 Angela,這個 Discord 伺服器的聊天夥伴。語氣自然親切,回覆簡短。',
+        '可以使用伺服器自訂 emoji,直接輸出原始格式(例如 <:name:id> 或 <a:name:id>)。',
+        '只能在以下清單挑選 emoji,絕不可捏造名稱或 ID,也不可用不在清單中的自訂 emoji:'
+    ];
+    lines.push(emojis.length ? emojis.join(' ') : '(此伺服器沒有自訂 emoji)');
+    lines.push('若要傳送伺服器貼圖,在回覆末尾單獨一行寫 [STICKER:貼圖名稱],只能用以下貼圖:');
+    lines.push(stickers.length ? stickers.join('、') : '(此伺服器沒有自訂貼圖)');
+    lines.push('不要捏造貼圖名稱,一次最多一張,也不要把 [STICKER:...] 當成普通文字解釋給使用者看。');
+    return { text: lines.join('\n') };
 }
 
-async function downloadDiscordImages(attachments = []) {
-    const imageAttachments = [...attachments].filter(item => inferImageMimeType(item));
-    if (!imageAttachments.length) return [];
-    if (imageAttachments.length > MAX_IMAGE_COUNT) {
-        throw new Error(`一次最多分析 ${MAX_IMAGE_COUNT} 張圖片。`);
+async function attachmentToInline(att) {
+    const res = await fetch(att.url);
+    const buf = Buffer.from(await res.arrayBuffer());
+    return { inline_data: { mimeType: att.contentType || 'image/png', data: buf.toString('base64') } };
+}
+
+// 清理回覆:擋掉不存在的自訂 emoji、解析貼圖
+function postProcessReply(text, guild) {
+    const validEmojiIds = new Set([...guild.emojis.cache.values()].map(e => e.id));
+    text = text.replace(/<(a)?:(\w+):(\d+)>/g, (m, a, name, id) =>
+        validEmojiIds.has(id) ? m : `:${name}:`
+    );
+    let stickerId = null;
+    const stickerMap = new Map([...guild.stickers.cache.values()].map(s => [s.name, s.id]));
+    const m = text.match(/\[STICKER:([^\]]+)\]/);
+    if (m) {
+        const name = m[1].trim();
+        if (stickerMap.has(name)) stickerId = stickerMap.get(name);
+        text = text.replace(/\[STICKER:[^\]]+\]/g, '').replace(/\n{3,}/g, '\n\n').trim();
     }
+    return { content: text.slice(0, 2000), stickerId };
+}
 
-    const result = [];
-    let totalBytes = 0;
-    for (const attachment of imageAttachments) {
-        let url;
-        try { url = new URL(attachment.url); }
-        catch { throw new Error('圖片附件網址無效。'); }
-        if (url.protocol !== 'https:' || !DISCORD_CDN_HOSTS.has(url.hostname)) {
-            throw new Error('圖片附件來源不是 Discord CDN，已拒絕下載。');
-        }
-
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 12000);
-        try {
-            const response = await fetch(url.toString(), { signal: controller.signal, redirect: 'follow' });
-            if (!response.ok) throw new Error(`圖片下載失敗（HTTP ${response.status}）。`);
-            const mimeType = String(response.headers?.get?.('content-type') || inferImageMimeType(attachment) || '')
-                .split(';')[0].trim().toLowerCase();
-            if (!SUPPORTED_IMAGE_TYPES.has(mimeType)) throw new Error(`不支援的圖片格式：${mimeType || '未知'}。請使用 JPG、PNG、WEBP 或 GIF。`);
-            const declaredLength = Number(response.headers?.get?.('content-length') || 0);
-            if (declaredLength && declaredLength + totalBytes > MAX_IMAGE_BYTES) {
-                throw new Error('圖片總大小超過 8MB，請縮小圖片後再傳。');
-            }
-            const buffer = Buffer.from(await response.arrayBuffer());
-            if (buffer.length + totalBytes > MAX_IMAGE_BYTES) {
-                throw new Error('圖片總大小超過 8MB，請縮小圖片後再傳。');
-            }
-            if (!buffer.length) throw new Error('圖片檔案是空的，請重新上傳。');
-            totalBytes += buffer.length;
-            result.push({ inline_data: { mime_type: mimeType, data: buffer.toString('base64') } });
-        } catch (err) {
-            if (err.name === 'AbortError') throw new Error('下載圖片逾時，請稍後再試。');
-            throw err;
-        } finally {
-            clearTimeout(timer);
-        }
+async function askGemini(prompt, userId, images, guild) {
+    if (!API_KEY) return { content: '⚠️ 尚未設定 GEMINI_API_KEY 環境變數。', stickerId: null };
+    const userText = prompt || '（傳送了一張圖片）';
+    const currentParts = [{ text: userText }];
+    for (const att of images) {
+        try { currentParts.push(await attachmentToInline(att)); }
+        catch (e) { console.error('[AIChat] 圖片讀取失敗:', e.message); }
     }
-    return result;
-}
+    const contents = [...getHistory(userId), { role: 'user', parts: currentParts }];
+    pushHistory(userId, 'user', userText);
 
-function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
-function retryDelay(response, attempt) {
-    const retryAfter = Number(response?.headers?.get?.('retry-after'));
-    if (Number.isFinite(retryAfter) && retryAfter > 0) return Math.min(retryAfter * 1000, 5000);
-    return Math.min(800 * (2 ** attempt), 4000);
-}
-
-function isQuotaExhaustion(responseText) {
-    let message = String(responseText || '');
-    try { message = String(JSON.parse(responseText)?.error?.message || message); } catch {}
-    return /you exceeded your current quota|current quota.{0,80}exceed|check your plan and billing details/i.test(message);
-}
-
-async function requestGemini(contents) {
-    if (!API_KEY) throw new Error('尚未設定 GEMINI_API_KEY 環境變數。');
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(MODEL)}:generateContent?key=${encodeURIComponent(API_KEY)}`;
-    const retryableStatuses = new Set([429, 500, 502, 503, 504]);
-    let lastError;
-
-    for (let attempt = 0; attempt < 4; attempt++) {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-        let response;
-        try {
-            response = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ contents }),
-                signal: controller.signal,
-            });
-            if (response.ok) return await response.json();
-
-            const text = await response.text().catch(() => '');
-            const safeText = text.replaceAll(API_KEY, '[redacted]').slice(0, 300);
-            lastError = new Error(`Gemini HTTP ${response.status}${safeText ? `: ${safeText}` : ''}`);
-            if (response.status === 429 && isQuotaExhaustion(text)) {
-                lastError = new Error(`Gemini quota exhausted (HTTP 429)${safeText ? `: ${safeText}` : ''}`);
-                throw lastError;
-            }
-            if (!retryableStatuses.has(response.status) || attempt === 3) throw lastError;
-        } catch (err) {
-            if (err.name === 'AbortError') lastError = new Error(`Gemini 請求逾時（${REQUEST_TIMEOUT_MS / 1000} 秒）。`);
-            else if (err.message?.startsWith('Gemini HTTP ') || err.message?.startsWith('Gemini quota exhausted')) lastError = err;
-            else lastError = new Error(`Gemini 網路請求失敗：${err.message}`);
-            const status = response?.status;
-            if (lastError.message?.startsWith('Gemini quota exhausted') || (status && !retryableStatuses.has(status)) || attempt === 3) throw lastError;
-        } finally {
-            clearTimeout(timer);
-        }
-
-        await sleep(retryDelay(response, attempt));
-    }
-    throw lastError || new Error('Gemini 請求失敗。');
-}
-
-async function askGemini(prompt, userId, attachments = []) {
-    const text = String(prompt || '').trim();
-    const imageParts = await downloadDiscordImages(attachments);
-    if (!text && !imageParts.length) return '請輸入訊息或附上一張圖片。';
-
-    const userParts = [{ text: text || '請仔細描述並分析這張圖片。' }, ...imageParts];
-    const contents = [...getHistory(userId), { role: 'user', parts: userParts }];
-    const data = await requestGemini(contents);
-    const out = (data?.candidates?.[0]?.content?.parts || [])
-        .map(part => part.text || '')
-        .filter(Boolean)
-        .join('\n') || '（沒有回覆內容）';
-
-    // API 成功後才更新對話，避免 503 時留下不完整的 user turn。
-    pushHistory(userId, 'user', text || '（使用者傳送了一張圖片）');
+    const body = {
+        contents,
+        systemInstruction: buildSystemInstruction(guild),
+        generationConfig: { temperature: 0.9, maxOutputTokens: 800 }
+    };
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${API_KEY}`;
+    const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+    });
+    if (!res.ok) { const t = await res.text().catch(() => ''); throw new Error(`Gemini HTTP ${res.status}: ${t.slice(0, 200)}`); }
+    const data = await res.json();
+    const out = data?.candidates?.[0]?.content?.parts?.[0]?.text || '（沒有回覆內容）';
     pushHistory(userId, 'model', out);
-    return out;
-}
-
-function getFriendlyError(err) {
-    if (/Gemini quota exhausted/.test(err.message)) return '⚠️ Gemini API 配額已達上限（HTTP 429），系統已停止重試。請管理員查看 https://ai.dev/rate-limit 的用量與重置時間，配額恢復後再試。';
-    if (/Gemini HTTP 503/.test(err.message)) return '⚠️ Gemini 目前暫時無法服務（HTTP 503），已自動重試仍未成功，請稍後再傳一次。';
-    if (/Gemini HTTP 429/.test(err.message)) return '⚠️ Gemini 目前請求量較大（HTTP 429），系統已重試，請稍後再傳一次。';
-    if (/GEMINI_API_KEY/.test(err.message)) return '⚠️ AI 尚未設定完成，請管理員確認 Gemini API 設定。';
-    if (/圖片|JPG|PNG|WEBP|GIF/.test(err.message)) return `⚠️ ${err.message}`;
-    return '⚠️ AI 回覆失敗，請稍後再試。';
+    return postProcessReply(out, guild);
 }
 
 function init(client) {
     client.on('messageCreate', async (message) => {
-        if (message.author?.bot || !message.guild) return;
+        if (message.author.bot || !message.guild) return;
         if (message.channelId !== getChannelId(message.guild.id)) return;
-        const content = String(message.content || '').trim();
-        const attachments = [...(message.attachments?.values?.() || [])];
-        if (!content && !attachments.some(item => inferImageMimeType(item))) return;
-
+        const text = message.content.trim();
+        const images = [...message.attachments.values()].filter(a =>
+            (a.contentType && a.contentType.startsWith('image/')) || /\.(png|jpe?g|webp|gif)$/i.test(a.url)
+        );
+        if (!text && !images.length) return;
         const now = Date.now();
         if (now - (cooldowns.get(message.author.id) || 0) < COOLDOWN_MS) return;
         cooldowns.set(message.author.id, now);
-        let typingTimer;
         try {
             await message.channel.sendTyping().catch(() => {});
-            typingTimer = setInterval(() => message.channel.sendTyping().catch(() => {}), 8000);
-            const reply = await askGemini(content, message.author.id, attachments);
-            await message.reply({ content: reply.slice(0, 2000), allowedMentions: { repliedUser: false } });
+            const { content, stickerId } = await askGemini(text, message.author.id, images, message.guild);
+            await message.reply({
+                content,
+                allowedMentions: { repliedUser: false },
+                ...(stickerId ? { stickers: [stickerId] } : {})
+            });
         } catch (err) {
             console.error('[AIChat] 回覆失敗:', err.message);
-            await message.reply(getFriendlyError(err)).catch(() => {});
-        } finally {
-            if (typingTimer) clearInterval(typingTimer);
+            await message.reply('⚠️ AI 回覆失敗,請稍後再試。').catch(() => {});
         }
     });
-
-    client.on('interactionCreate', async (interaction) => {
-        if (!interaction.isChatInputCommand() || interaction.commandName !== 'setaichannel') return;
-        const ch = interaction.options.getChannel('channel');
-        if (!ch) {
-            setChannelId(interaction.guild.id, null);
-            return interaction.reply({ content: '已關閉 AI 自動回覆。', ephemeral: true });
-        }
-        setChannelId(interaction.guild.id, ch.id);
-        return interaction.reply({ content: `已將 AI 回覆頻道設為 ${ch}。在該頻道發言我就會回覆。`, ephemeral: true });
-    });
-
-    console.log('[AIChat] 系統已載入');
+    console.log('[AIChat] 系統已載入(視覺 + emoji/貼圖)');
 }
 
-module.exports = { init, askGemini, command: setAIChannelCommand };
+module.exports = { init, askGemini, getChannelId, setChannelId };
