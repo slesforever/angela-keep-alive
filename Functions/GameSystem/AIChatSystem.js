@@ -1,6 +1,6 @@
 // Functions/GameSystem/AIChatSystem.js
 // 獨立 AI 聊天:Gemini 視覺 + 伺服器 emoji/貼圖 + 每人記憶庫(Discord 頻道 txt 備份/還原)
-// 防濫用:每人冷卻 + 每分鐘全域上限 + 歷史/emoji 精簡 + 503/429 自動切換備用模型。
+// 防濫用:每人冷卻 + 每分鐘全域上限 + 歷史/emoji 精簡 + 404/503/429 自動切換備用模型。
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -10,12 +10,13 @@ const { AttachmentBuilder, PermissionFlagsBits } = require('discord.js');
 const CONFIG_PATH     = path.join(process.cwd(), 'data', 'ai-config.json');
 const MEM_DIR         = path.join(process.cwd(), 'data', 'ai-memory');
 
-// 🤖 支援自動切換的模型清單（由上至下依序嘗試）
+// 🤖 官方支援且有效的 Gemini 模型清單（依優先順序輪流嘗試）
 const MODELS = [
+    'gemini-3.8-flash',
     'gemini-2.5-flash',
+    'gemini-2.5-pro',
     'gemini-1.5-flash',
-    'gemini-1.5-pro',
-    'gemini-2.0-flash'
+    'gemini-1.5-pro'
 ];
 
 const COOLDOWN_USER   = 6000;   // 每人冷卻 6 秒
@@ -252,13 +253,13 @@ async function askGemini(prompt, g, u, images, guild, client) {
                 const errText = await res.text().catch(() => '');
                 const errObj = new Error(`[${modelName}] HTTP ${res.status}:${errText.slice(0, 200)}`);
                 
-                // 遇到 503 (過載)、429 (限流) 或 5xx 伺服器錯誤，自動切換至下一個模型
-                if ([503, 429, 500, 502, 504].includes(res.status)) {
-                    console.warn(`⚠️ [AIChat] 模型 ${modelName} 遇到 ${res.status} 繁忙，正在自動切換至下一個備用模型...`);
+                // 包含 404 (模型名稱錯誤/下架)、503 (過載)、429 (限流) 或 5xx 伺服器錯誤，均自動切換至下一個模型
+                if ([404, 503, 429, 500, 502, 504].includes(res.status)) {
+                    console.warn(`⚠️ [AIChat] 模型 ${modelName} 回傳 HTTP ${res.status}，自動切換至下一個備用模型...`);
                     lastError = errObj;
-                    continue; // 試下一個模型
+                    continue; 
                 } else {
-                    // 400 Bad Request / 403 權限等錯誤切換模型通常無效，直接拋出
+                    // 400 Bad Request / 403 Key無效 等設定問題才直接拋出
                     throw errObj;
                 }
             }
@@ -278,8 +279,7 @@ async function askGemini(prompt, g, u, images, guild, client) {
         }
     }
 
-    // 若所有模型都嘗試過且依然失敗，拋出最後一次錯誤
-    throw lastError || new Error('所有 Gemini 備用模型均無法回應（伺服器繁忙），請稍後再試。');
+    throw lastError || new Error('所有 Gemini 備用模型均無法回應，請檢查 API Key 或系統狀態。');
 }
 
 // ─── 啟動(獨立,不動其他腳本)──────────────────────────────────
