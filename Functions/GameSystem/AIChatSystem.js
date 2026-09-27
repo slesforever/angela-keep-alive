@@ -7,15 +7,14 @@ const path = require('path');
 const { AttachmentBuilder, PermissionFlagsBits } = require('discord.js');
 
 // ─── 設定 ──────────────────────────────────────────────────────
-const CONFIG_PATH     = path.join(process.cwd(), 'data', 'ai-config.json');   // { guildId: { channel, memory } }
+const CONFIG_PATH     = path.join(process.cwd(), 'data', 'ai-config.json');
 const MEM_DIR         = path.join(process.cwd(), 'data', 'ai-memory');
 const MODEL           = 'gemini-2.0-flash';
-const API_KEY         = process.env.GEMINI_API_KEY;
 
 const COOLDOWN_USER   = 6000;   // 每人冷卻 6 秒
-const MAX_PER_MINUTE  = 8;      // 全域每分鐘最多 8 次(Gemini 免費 15 RPM,留餘裕)
-const HISTORY_CAP     = 12;     // 每人保留最近 12 則(含圖片描述)
-const EMOJI_CAP       = 60;     // 只送前 60 個 emoji 給 Gemini,省 token
+const MAX_PER_MINUTE  = 8;      // 全域每分鐘最多 8 次
+const HISTORY_CAP     = 12;     // 每人保留最近 12 則
+const EMOJI_CAP       = 60;     // 只送前 60 個 emoji
 
 try { fs.mkdirSync(MEM_DIR, { recursive: true }); } catch {}
 
@@ -38,7 +37,7 @@ function setMemoryChannel(g, c){ cfg[g] = cfg[g] || {}; c ? cfg[g].memory = c : 
 // ─── 記憶體 + 磁碟 ─────────────────────────────────────────────
 const histories = new Map();
 const cooldowns = new Map();
-const callTimestamps = [];                       // 滑動視窗全域 RPM
+const callTimestamps = [];                       
 const memTimer = new Map();
 const memInFlight = new Set();
 
@@ -65,7 +64,7 @@ function pushHist(g, u, role, text) {
     saveHist(g, u, h);
 }
 
-// ─── 歷史紀錄嚴格清洗器 (確保交替與格式合規) ───────────────────
+// ─── 歷史紀錄嚴格清洗器 ────────────────────────────────────────
 function sanitizeHistory(rawHist) {
     if (!Array.isArray(rawHist) || rawHist.length === 0) return [];
     const clean = [];
@@ -78,7 +77,6 @@ function sanitizeHistory(rawHist) {
         expectedRole = expectedRole === 'user' ? 'model' : 'user';
     }
 
-    // 若清洗後末端是 user，必須彈出，因為新發送的訊息就是 user
     if (clean.length > 0 && clean[clean.length - 1].role === 'user') {
         clean.pop();
     }
@@ -97,7 +95,7 @@ function snapshotText(g) {
             const arr = JSON.parse(fs.readFileSync(path.join(MEM_DIR, f), 'utf8'));
             return `==================================================\nMEM KEY: ${g}:${u}\nUPDATED: ${new Date().toISOString()}\n==================================================\n${JSON.stringify(arr)}\n`;
         } catch (e) {
-            return `==================================================\nMEM KEY: ${g}:${u}\nPARSE ERROR: ${e.message}\n==================================================\n`;
+            return `==================================================\nMEM KEY: ${g}:${u}\nPARSE ERROR:${e.message}\n==================================================\n`;
         }
     }).join('\n');
     return head + body;
@@ -209,12 +207,16 @@ function canCall() {
 }
 
 async function askGemini(prompt, g, u, images, guild, client) {
-    if (!API_KEY) return { content: '⚠️ 尚未設定 GEMINI_API_KEY 環境變數。', stickerId: null };
+    // 【修復】改為動態讀取，防止 dotenv 比 require 晚執行的問題
+    const apiKey = (process.env.GEMINI_API_KEY || '').trim();
+    if (!apiKey) {
+        return { content: '❌ **除錯提示**：`process.env.GEMINI_API_KEY` 是空的！請檢查 `.env` 檔或環境變數名稱是否拼錯。', stickerId: null };
+    }
+
     const userText = prompt || '（傳送了一張圖片,請描述並回應）';
     const parts = [{ text: userText }];
     for (const a of images) { try { parts.push(await toInline(a)); } catch (e) { console.error('[AIChat] 圖片下載失敗:', e.message); } }
 
-    // 進行歷史紀錄過濾與清洗
     const cleanHist = sanitizeHistory(getHist(g, u));
     const contents = [...cleanHist, { role: 'user', parts }];
 
@@ -223,7 +225,8 @@ async function askGemini(prompt, g, u, images, guild, client) {
         systemInstruction: systemInstr(guild),
         generationConfig: { temperature: 0.9, maxOutputTokens: 600 }
     };
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${API_KEY}`;
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${apiKey}`;
     
     const res = await fetch(url, { 
         method: 'POST', 
@@ -233,14 +236,13 @@ async function askGemini(prompt, g, u, images, guild, client) {
 
     if (!res.ok) {
         const errText = await res.text().catch(() => '');
-        console.error(`[AIChat Gemini API Error] HTTP ${res.status}:`, errText);
-        throw new Error(`Gemini API 回傳錯誤 (${res.status})`);
+        // 拋出詳細錯誤給外部捕獲
+        throw new Error(`API 請求失敗 [HTTP ${res.status}]:${errText.slice(0, 300)}`);
     }
 
     const data = await res.json();
     const out = data?.candidates?.[0]?.content?.parts?.[0]?.text || '（沒有回覆內容）';
 
-    // 成功後更新歷史紀錄
     pushHist(g, u, 'user', userText);
     pushHist(g, u, 'model', out);
 
@@ -253,7 +255,6 @@ function init(client) {
     client.on('messageCreate', async (msg) => {
         if (msg.author.bot || !msg.guild) return;
 
-        // 文字設定指令
         const isAdmin = msg.member?.permissions?.has(PermissionFlagsBits.Administrator);
         const raw = msg.content.trim();
         if (isAdmin && /^(!!setaichannel|!!setaimemory|!!aioff)$/i.test(raw)) {
@@ -273,7 +274,6 @@ function init(client) {
             }
         }
 
-        // 只在 AI 頻道回覆
         if (msg.channelId !== getAiChannel(msg.guild.id)) return;
 
         const text = raw;
@@ -302,8 +302,10 @@ function init(client) {
                 await msg.reply({ content, allowedMentions: { repliedUser: false } }).catch(() => {});
             }
         } catch (err) {
-            console.error('[AIChat] 回覆失敗原因:', err.message);
-            await msg.reply('⚠️ AI 回覆失敗,請稍後再試。').catch(() => {});
+            console.error('[AIChat] 錯誤詳細資訊:', err);
+            // 【關鍵】直接把真正的錯誤原因噴在 Discord 頻道上！
+            const errMsg = err.message || String(err);
+            await msg.reply(`⚠️ **AI 回覆失敗**\n\`\`\`text\n${errMsg}\n\`\`\``).catch(() => {});
         }
     });
 
