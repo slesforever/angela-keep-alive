@@ -1,46 +1,43 @@
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// 歷史對話 JSON 檔案存儲路徑
-const DATA_DIR = path.join(__dirname, '..', 'data');
+// 取得專案根目錄下的 data 目錄 (相容性最佳寫法)
+const DATA_DIR = path.join(process.cwd(), 'data');
 const HISTORY_FILE = path.join(DATA_DIR, 'ai_history.json');
 
 // ==========================================
 // 1. 模型與備援設定
 // ==========================================
-// 優先使用 2.5-flash，若遇 404 或 503 依序自動降級切換
 const FALLBACK_MODELS = [
     'gemini-2.5-flash',
     'gemini-1.5-flash',
     'gemini-2.0-flash'
 ];
 
-// 記憶體中的對話歷史與防鎖定機制
-const chatHistory = new Map(); // Key: `${guildId}_${userId}`, Value: Array
-const cooldowns = new Map();   // 冷卻冷卻時間紀錄
-const activeLocks = new Set();  // 正在處理請求的使用者鎖
+const chatHistory = new Map();
+const cooldowns = new Map();
+const activeLocks = new Set();
 let backupTimer = null;
 
 // ==========================================
-// 2. 磁碟檔案持久化寫入 (JSON Storage)
+// 2. 部署安全的磁碟寫入 (含唯讀環境退回機制)
 // ==========================================
 
-function ensureDir() {
-    if (!fs.existsSync(DATA_DIR)) {
-        fs.mkdirSync(DATA_DIR, { recursive: true });
+function ensureDirSafe() {
+    try {
+        if (!fs.existsSync(DATA_DIR)) {
+            fs.mkdirSync(DATA_DIR, { recursive: true });
+        }
+        return true;
+    } catch (err) {
+        // 唯讀平台不拋出錯誤，僅警告並繼續以記憶體模式執行
+        return false;
     }
 }
 
-/**
- * 啟動時從硬碟載入 JSON 歷史紀錄
- */
 export function loadHistDisk() {
     try {
-        ensureDir();
+        if (!ensureDirSafe()) return;
         if (fs.existsSync(HISTORY_FILE)) {
             const raw = fs.readFileSync(HISTORY_FILE, 'utf-8');
             const data = JSON.parse(raw);
@@ -50,32 +47,26 @@ export function loadHistDisk() {
                     chatHistory.set(key, val);
                 }
             }
-            console.log(`[AIChat] 成功載入 ${chatHistory.size} 筆 AI 歷史對話記憶。`);
+            console.log(`[AIChat] 成功載入 ${chatHistory.size} 筆歷史紀錄。`);
         }
     } catch (err) {
-        console.error('[AIChat] 讀取歷史記憶檔失敗:', err.message);
+        console.warn('[AIChat] 歷史紀錄載入跳過 (使用記憶體模式):', err.message);
     }
 }
 
-/**
- * 將記憶寫回硬碟
- */
 export function saveHistDisk() {
     try {
-        ensureDir();
+        if (!ensureDirSafe()) return;
         const obj = {};
         for (const [key, val] of chatHistory.entries()) {
             obj[key] = val;
         }
         fs.writeFileSync(HISTORY_FILE, JSON.stringify(obj, null, 2), 'utf-8');
     } catch (err) {
-        console.error('[AIChat] 寫入歷史記憶檔失敗:', err.message);
+        // 忽略寫檔失敗，維持記憶體內運作
     }
 }
 
-/**
- * 防頻繁寫入的防彈備份佇列 (5 秒內無新動作才存檔)
- */
 export function queueBackup(client, guildId) {
     if (backupTimer) clearTimeout(backupTimer);
     backupTimer = setTimeout(() => {
@@ -83,11 +74,11 @@ export function queueBackup(client, guildId) {
     }, 5000);
 }
 
-// 模組初始化時自動讀取記憶檔
+// 安全啟動載入
 loadHistDisk();
 
 // ==========================================
-// 3. 對話歷史紀錄管理與格式防爆
+// 3. 對話紀錄管理
 // ==========================================
 
 export function getHist(guildId, userId) {
@@ -105,7 +96,6 @@ export function pushHist(guildId, userId, role, text) {
         parts: [{ text }]
     });
 
-    // 限制最多保留近 20 條對話紀錄
     if (hist.length > 20) {
         hist.splice(0, hist.length - 20);
     }
@@ -117,9 +107,6 @@ export function clearHist(guildId, userId) {
     saveHistDisk();
 }
 
-/**
- * 整理歷史紀錄，確保符合 Gemini API 要求 (user 與 model 嚴格交替)
- */
 export function sanitizeHistory(hist) {
     if (!Array.isArray(hist) || hist.length === 0) return [];
 
@@ -146,7 +133,6 @@ export function sanitizeHistory(hist) {
         }
     }
 
-    // 若最後一筆依然是 user，先移除以防與最新的請求連續出現兩次 user
     if (cleaned.length > 0 && cleaned[cleaned.length - 1].role === 'user') {
         cleaned.pop();
     }
@@ -158,15 +144,12 @@ export function sanitizeHistory(hist) {
 // 4. 圖片處理與人設設定
 // ==========================================
 
-/**
- * 將 Discord Attachment 下載並轉為 Base64
- */
 export async function toInline(attachment) {
     if (!attachment || !attachment.url) return null;
 
     try {
         const response = await fetch(attachment.url);
-        if (!response.ok) throw new Error(`圖片下載失敗 [HTTP ${response.status}]`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
         const arrayBuffer = await response.arrayBuffer();
         const base64Data = Buffer.from(arrayBuffer).toString('base64');
@@ -179,14 +162,11 @@ export async function toInline(attachment) {
             }
         };
     } catch (err) {
-        console.error('[AIChat] 圖片轉換失敗:', err.message);
+        console.error('[AIChat] 圖片讀取失敗:', err.message);
         return null;
     }
 }
 
-/**
- * Angela 人格與 System Instruction
- */
 export function systemInstr(guild) {
     const guildName = guild?.name || 'Discord 伺服器';
     return {
@@ -204,15 +184,11 @@ export function systemInstr(guild) {
     };
 }
 
-/**
- * 格式化與訊息長度截斷修飾
- */
 export function polish(text, guild) {
     if (!text) return { content: '（沒有回覆內容）', stickerId: null };
 
     let cleanedText = text.trim();
 
-    // 貼圖語法解析 [STICKER:12345678]
     let stickerId = null;
     const stickerMatch = cleanedText.match(/\[STICKER:(\d+)\]/i);
     if (stickerMatch) {
@@ -220,7 +196,6 @@ export function polish(text, guild) {
         cleanedText = cleanedText.replace(/\[STICKER:\d+\]/gi, '').trim();
     }
 
-    // 超過 Discord 2000 字限制時的安全截斷 (保留安全裕度 1900 字)
     if (cleanedText.length > 1900) {
         cleanedText = cleanedText.slice(0, 1900) + '\n\n*(內容過長，已自動切斷剩餘文字)*';
     }
@@ -232,7 +207,7 @@ export function polish(text, guild) {
 }
 
 // ==========================================
-// 5. API 請求發送 (含 503 重試與 404 自動切換)
+// 5. API 請求與自動備援機制
 // ==========================================
 
 async function callGeminiApiWithRetry(apiKey, body) {
@@ -241,7 +216,6 @@ async function callGeminiApiWithRetry(apiKey, body) {
     for (const model of FALLBACK_MODELS) {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
-        // 單一模型最多重試 3 次（解決 503 高負載問題）
         for (let attempt = 1; attempt <= 3; attempt++) {
             try {
                 const res = await fetch(url, {
@@ -257,20 +231,18 @@ async function callGeminiApiWithRetry(apiKey, body) {
 
                 const errText = await res.text().catch(() => '');
 
-                // HTTP 503: 伺服器繁忙 -> 等待 1.5 秒後重試
                 if (res.status === 503) {
-                    console.warn(`[AIChat] 模型 ${model} 伺服器繁忙 (503)，進行第 ${attempt} 次重試...`);
+                    console.warn(`[AIChat] ${model} 503 繁忙，嘗試第 ${attempt} 次重試...`);
                     await new Promise(resolve => setTimeout(resolve, 1500 * attempt));
                     continue;
                 }
 
-                // HTTP 404: 模型下架或不支援 -> 切換至備援模型
                 if (res.status === 404) {
-                    console.warn(`[AIChat] 模型 ${model} 無法使用 (404)，切換至下一個備援模型...`);
+                    console.warn(`[AIChat] ${model} 不可用 (404)，切換下一個模型...`);
                     break;
                 }
 
-                lastError = new Error(`HTTP ${res.status}: ${errText.slice(0, 200)}`);
+                lastError = new Error(`HTTP ${res.status}: ${errText.slice(0, 150)}`);
                 break;
             } catch (err) {
                 lastError = err;
@@ -279,18 +251,18 @@ async function callGeminiApiWithRetry(apiKey, body) {
         }
     }
 
-    throw lastError || new Error('所有 Gemini 備援模型均無法正常回應');
+    throw lastError || new Error('所有 Gemini 備援模型均無法回應');
 }
 
 // ==========================================
-// 6. 主對話進入點與 Discord 事件處理
+// 6. 主對話與訊息進入點
 // ==========================================
 
 export async function askGemini(prompt, g, u, images = [], guild, client) {
     const apiKey = (process.env.GEMINI_API_KEY || '').trim();
     if (!apiKey) {
         return {
-            content: '❌ **設定錯誤**：環境變數 `process.env.GEMINI_API_KEY` 未設定，請檢查 `.env` 檔案。',
+            content: '❌ **設定錯誤**：環境變數 `process.env.GEMINI_API_KEY` 未設定。',
             stickerId: null
         };
     }
@@ -298,7 +270,6 @@ export async function askGemini(prompt, g, u, images = [], guild, client) {
     const userText = prompt || '（傳送了一張圖片，請描述並回應）';
     const parts = [{ text: userText }];
 
-    // 處理附件圖片
     if (Array.isArray(images) && images.length > 0) {
         for (const img of images) {
             const inlineData = await toInline(img);
@@ -306,7 +277,6 @@ export async function askGemini(prompt, g, u, images = [], guild, client) {
         }
     }
 
-    // 整理對話紀錄
     const rawHist = getHist(g, u);
     const cleanHist = sanitizeHistory(rawHist);
     const contents = [...cleanHist, { role: 'user', parts }];
@@ -321,10 +291,9 @@ export async function askGemini(prompt, g, u, images = [], guild, client) {
     };
 
     try {
-        const { data, usedModel } = await callGeminiApiWithRetry(apiKey, body);
+        const { data } = await callGeminiApiWithRetry(apiKey, body);
         const outputText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '（沒有獲得回覆內容）';
 
-        // 寫入記憶與觸發備份
         pushHist(g, u, 'user', userText);
         pushHist(g, u, 'model', outputText);
         queueBackup(client, g);
@@ -337,7 +306,6 @@ export async function askGemini(prompt, g, u, images = [], guild, client) {
     }
 }
 
-// 防洗版與鎖定管理
 export function checkCooldown(userId, cooldownMs = 3000) {
     const now = Date.now();
     const last = cooldowns.get(userId) || 0;
@@ -349,9 +317,6 @@ export function checkCooldown(userId, cooldownMs = 3000) {
     return { isCooling: false, remaining: 0 };
 }
 
-/**
- * Discord Message 事件封裝對話觸發器
- */
 export async function handleDiscordMessage(msg, client) {
     if (!msg || msg.author.bot) return;
 
@@ -359,21 +324,18 @@ export async function handleDiscordMessage(msg, client) {
     const userId = msg.author.id;
     const content = msg.content.trim();
 
-    // 指令：清除記憶
     if (content === '!clear' || content === '!forget' || content === '!清除記憶') {
         clearHist(guildId, userId);
         await msg.reply('🧹 已為您清除目前的對話歷史紀錄！').catch(() => {});
         return;
     }
 
-    // 檢查冷卻
     const cd = checkCooldown(userId, 3000);
     if (cd.isCooling) {
         await msg.reply(`⏱️ 發送太快囉，請等待 ${cd.remaining} 秒後再試。`).catch(() => {});
         return;
     }
 
-    // 防止單一使用者連續發送導致並行並發衝突
     if (activeLocks.has(userId)) {
         await msg.reply('⚠️ 上一個問題還在處理中，請稍候...').catch(() => {});
         return;
@@ -382,12 +344,10 @@ export async function handleDiscordMessage(msg, client) {
     activeLocks.add(userId);
 
     try {
-        // 篩選圖片附件
         const images = Array.from(msg.attachments.values()).filter(a => 
             a.contentType?.startsWith('image/')
         );
 
-        // 顯示打字中
         if (typeof msg.channel.sendTyping === 'function') {
             await msg.channel.sendTyping().catch(() => {});
         }
