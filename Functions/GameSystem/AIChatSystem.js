@@ -16,7 +16,6 @@ const COOLDOWN_USER   = 6000;   // 每人冷卻 6 秒
 const MAX_PER_MINUTE  = 8;      // 全域每分鐘最多 8 次(Gemini 免費 15 RPM,留餘裕)
 const HISTORY_CAP     = 12;     // 每人保留最近 12 則(含圖片描述)
 const EMOJI_CAP       = 60;     // 只送前 60 個 emoji 給 Gemini,省 token
-const MAX_EMOJI_OUT   = 150;    // 輸出後過濾用:完整 emoji 清單
 
 try { fs.mkdirSync(MEM_DIR, { recursive: true }); } catch {}
 
@@ -64,6 +63,26 @@ function pushHist(g, u, role, text) {
     h.push({ role, parts: [{ text }] });
     if (h.length > HISTORY_CAP) h.splice(0, h.length - HISTORY_CAP);
     saveHist(g, u, h);
+}
+
+// ─── 歷史紀錄嚴格清洗器 (確保交替與格式合規) ───────────────────
+function sanitizeHistory(rawHist) {
+    if (!Array.isArray(rawHist) || rawHist.length === 0) return [];
+    const clean = [];
+    let expectedRole = 'user';
+
+    for (const item of rawHist) {
+        if (!item || item.role !== expectedRole) continue;
+        if (!item.parts || !Array.isArray(item.parts) || !item.parts[0]?.text) continue;
+        clean.push({ role: item.role, parts: [{ text: item.parts[0].text }] });
+        expectedRole = expectedRole === 'user' ? 'model' : 'user';
+    }
+
+    // 若清洗後末端是 user，必須彈出，因為新發送的訊息就是 user
+    if (clean.length > 0 && clean[clean.length - 1].role === 'user') {
+        clean.pop();
+    }
+    return clean;
 }
 
 // ─── 頻道記憶備份/還原 ─────────────────────────────────────────
@@ -158,14 +177,12 @@ function systemInstr(guild) {
     L.push('若要傳貼圖,在回覆末尾單獨一行寫 [STICKER:貼圖名稱],只能用以下貼圖,不可捏造,一次最多一張:');
     L.push(stickers.length ? stickers.join('、') : '(此伺服器沒有自訂貼圖)');
 
-    // 【修復】Gemini API 的 systemInstruction 必須包含 parts 陣列
     return { parts: [{ text: L.join('\n') }] };
 }
 
 async function toInline(att) {
     const r = await fetch(att.url);
     const buf = Buffer.from(await r.arrayBuffer());
-    // 【修復】欄位名稱修正為 inlineData
     return { inlineData: { mimeType: att.contentType || 'image/png', data: buf.toString('base64') } };
 }
 
@@ -195,15 +212,11 @@ async function askGemini(prompt, g, u, images, guild, client) {
     if (!API_KEY) return { content: '⚠️ 尚未設定 GEMINI_API_KEY 環境變數。', stickerId: null };
     const userText = prompt || '（傳送了一張圖片,請描述並回應）';
     const parts = [{ text: userText }];
-    for (const a of images) { try { parts.push(await toInline(a)); } catch (e) { console.error('[AIChat] 圖片失敗:', e.message); } }
+    for (const a of images) { try { parts.push(await toInline(a)); } catch (e) { console.error('[AIChat] 圖片下載失敗:', e.message); } }
 
-    const rawHist = getHist(g, u);
-    // 【修復】自動修正舊歷史紀錄中若殘留連續 user 導致的 400 錯誤
-    if (rawHist.length > 0 && rawHist[rawHist.length - 1].role === 'user') {
-        rawHist.pop();
-    }
-
-    const contents = [...rawHist, { role: 'user', parts }];
+    // 進行歷史紀錄過濾與清洗
+    const cleanHist = sanitizeHistory(getHist(g, u));
+    const contents = [...cleanHist, { role: 'user', parts }];
 
     const body = {
         contents,
@@ -211,15 +224,23 @@ async function askGemini(prompt, g, u, images, guild, client) {
         generationConfig: { temperature: 0.9, maxOutputTokens: 600 }
     };
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${API_KEY}`;
-    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    
+    const res = await fetch(url, { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' }, 
+        body: JSON.stringify(body) 
+    });
+
     if (!res.ok) {
-        const t = await res.text().catch(() => '');
-        throw new Error(`Gemini ${res.status}: ${t.slice(0, 200)}`);
+        const errText = await res.text().catch(() => '');
+        console.error(`[AIChat Gemini API Error] HTTP ${res.status}:`, errText);
+        throw new Error(`Gemini API 回傳錯誤 (${res.status})`);
     }
+
     const data = await res.json();
     const out = data?.candidates?.[0]?.content?.parts?.[0]?.text || '（沒有回覆內容）';
 
-    // 【修復】API 成功取得回應後才寫入歷史紀錄，避免 API 失敗時紀錄失衡壞死
+    // 成功後更新歷史紀錄
     pushHist(g, u, 'user', userText);
     pushHist(g, u, 'model', out);
 
@@ -232,7 +253,7 @@ function init(client) {
     client.on('messageCreate', async (msg) => {
         if (msg.author.bot || !msg.guild) return;
 
-        // 文字設定指令(管理員專用,避免跟斜線指令系統衝突)
+        // 文字設定指令
         const isAdmin = msg.member?.permissions?.has(PermissionFlagsBits.Administrator);
         const raw = msg.content.trim();
         if (isAdmin && /^(!!setaichannel|!!setaimemory|!!aioff)$/i.test(raw)) {
@@ -278,16 +299,14 @@ function init(client) {
                     ...(stickerId ? { stickers: [stickerId] } : {})
                 });
             } catch (sendErr) {
-                // 若貼圖發送失敗，退回到單純傳送文字
                 await msg.reply({ content, allowedMentions: { repliedUser: false } }).catch(() => {});
             }
         } catch (err) {
-            console.error('[AIChat] 回覆失敗:', err.message);
+            console.error('[AIChat] 回覆失敗原因:', err.message);
             await msg.reply('⚠️ AI 回覆失敗,請稍後再試。').catch(() => {});
         }
     });
 
-    // 【修復】事件名稱修正為 'ready' (Discord.js 標準事件)
     client.once('ready', async () => {
         try {
             const n = await restoreAll(client);
