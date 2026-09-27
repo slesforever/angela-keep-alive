@@ -1,6 +1,6 @@
 // Functions/GameSystem/AIChatSystem.js
 // 獨立 AI 聊天:Gemini 視覺 + 伺服器 emoji/貼圖 + 每人記憶庫(Discord 頻道 txt 備份/還原)
-// 防濫用:每人冷卻 + 每分鐘全域上限 + 歷史/emoji 精簡,避免額度瞬爆。
+// 防濫用:每人冷卻 + 每分鐘全域上限 + 歷史/emoji 精簡 + 503/429 自動切換備用模型。
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -9,7 +9,14 @@ const { AttachmentBuilder, PermissionFlagsBits } = require('discord.js');
 // ─── 設定 ──────────────────────────────────────────────────────
 const CONFIG_PATH     = path.join(process.cwd(), 'data', 'ai-config.json');
 const MEM_DIR         = path.join(process.cwd(), 'data', 'ai-memory');
-const MODEL           = 'gemini-3.8-flash';
+
+// 🤖 支援自動切換的模型清單（由上至下依序嘗試）
+const MODELS = [
+    'gemini-2.5-flash',
+    'gemini-1.5-flash',
+    'gemini-1.5-pro',
+    'gemini-2.0-flash'
+];
 
 const COOLDOWN_USER   = 6000;   // 每人冷卻 6 秒
 const MAX_PER_MINUTE  = 8;      // 全域每分鐘最多 8 次
@@ -30,7 +37,7 @@ function writeJson(p, data) {
 const cfg = readJson(CONFIG_PATH, {});
 function saveCfg() { writeJson(CONFIG_PATH, cfg); }
 function getAiChannel(g)     { return cfg[g]?.channel  || null; }
-function getMemoryChannel(g) { return cfg[g]?.memory  || null; }
+function getMemoryChannel(g) { return cfg[g]?.memory   || null; }
 function setAiChannel(g, c)    { cfg[g] = cfg[g] || {}; c ? cfg[g].channel = c : delete cfg[g].channel;    saveCfg(); }
 function setMemoryChannel(g, c){ cfg[g] = cfg[g] || {}; c ? cfg[g].memory = c : delete cfg[g].memory;    saveCfg(); }
 
@@ -207,7 +214,6 @@ function canCall() {
 }
 
 async function askGemini(prompt, g, u, images, guild, client) {
-    // 【修復】改為動態讀取，防止 dotenv 比 require 晚執行的問題
     const apiKey = (process.env.GEMINI_API_KEY || '').trim();
     if (!apiKey) {
         return { content: '❌ **除錯提示**：`process.env.GEMINI_API_KEY` 是空的！請檢查 `.env` 檔或環境變數名稱是否拼錯。', stickerId: null };
@@ -215,7 +221,10 @@ async function askGemini(prompt, g, u, images, guild, client) {
 
     const userText = prompt || '（傳送了一張圖片,請描述並回應）';
     const parts = [{ text: userText }];
-    for (const a of images) { try { parts.push(await toInline(a)); } catch (e) { console.error('[AIChat] 圖片下載失敗:', e.message); } }
+    for (const a of images) { 
+        try { parts.push(await toInline(a)); } 
+        catch (e) { console.error('[AIChat] 圖片下載失敗:', e.message); } 
+    }
 
     const cleanHist = sanitizeHistory(getHist(g, u));
     const contents = [...cleanHist, { role: 'user', parts }];
@@ -226,28 +235,51 @@ async function askGemini(prompt, g, u, images, guild, client) {
         generationConfig: { temperature: 0.9, maxOutputTokens: 600 }
     };
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${apiKey}`;
-    
-    const res = await fetch(url, { 
-        method: 'POST', 
-        headers: { 'Content-Type': 'application/json' }, 
-        body: JSON.stringify(body) 
-    });
+    let lastError = null;
 
-    if (!res.ok) {
-        const errText = await res.text().catch(() => '');
-        // 拋出詳細錯誤給外部捕獲
-        throw new Error(`API 請求失敗 [HTTP ${res.status}]:${errText.slice(0, 300)}`);
+    // 🔄 輪流嘗試 MODELS 清單中的每個模型
+    for (const modelName of MODELS) {
+        try {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+            
+            const res = await fetch(url, { 
+                method: 'POST', 
+                headers: { 'Content-Type': 'application/json' }, 
+                body: JSON.stringify(body) 
+            });
+
+            if (!res.ok) {
+                const errText = await res.text().catch(() => '');
+                const errObj = new Error(`[${modelName}] HTTP ${res.status}:${errText.slice(0, 200)}`);
+                
+                // 遇到 503 (過載)、429 (限流) 或 5xx 伺服器錯誤，自動切換至下一個模型
+                if ([503, 429, 500, 502, 504].includes(res.status)) {
+                    console.warn(`⚠️ [AIChat] 模型 ${modelName} 遇到 ${res.status} 繁忙，正在自動切換至下一個備用模型...`);
+                    lastError = errObj;
+                    continue; // 試下一個模型
+                } else {
+                    // 400 Bad Request / 403 權限等錯誤切換模型通常無效，直接拋出
+                    throw errObj;
+                }
+            }
+
+            const data = await res.json();
+            const out = data?.candidates?.[0]?.content?.parts?.[0]?.text || '（沒有回覆內容）';
+
+            pushHist(g, u, 'user', userText);
+            pushHist(g, u, 'model', out);
+
+            queueBackup(client, g);
+            return polish(out, guild);
+
+        } catch (err) {
+            lastError = err;
+            console.error(`❌ [AIChat] 模型 ${modelName} 呼叫失敗:`, err.message);
+        }
     }
 
-    const data = await res.json();
-    const out = data?.candidates?.[0]?.content?.parts?.[0]?.text || '（沒有回覆內容）';
-
-    pushHist(g, u, 'user', userText);
-    pushHist(g, u, 'model', out);
-
-    queueBackup(client, g);
-    return polish(out, guild);
+    // 若所有模型都嘗試過且依然失敗，拋出最後一次錯誤
+    throw lastError || new Error('所有 Gemini 備用模型均無法回應（伺服器繁忙），請稍後再試。');
 }
 
 // ─── 啟動(獨立,不動其他腳本)──────────────────────────────────
@@ -303,7 +335,6 @@ function init(client) {
             }
         } catch (err) {
             console.error('[AIChat] 錯誤詳細資訊:', err);
-            // 【關鍵】直接把真正的錯誤原因噴在 Discord 頻道上！
             const errMsg = err.message || String(err);
             await msg.reply(`⚠️ **AI 回覆失敗**\n\`\`\`text\n${errMsg}\n\`\`\``).catch(() => {});
         }
@@ -316,7 +347,7 @@ function init(client) {
         } catch (e) { console.error('[AIChat] 還原失敗:', e.message); }
     });
 
-    console.log('[AIChat] 獨立系統已載入(視覺 + emoji/貼圖 + 記憶庫 + 防濫用)');
+    console.log('[AIChat] 獨立系統已載入(視覺 + emoji/貼圖 + 記憶庫 + 防濫用 + 多模型故障切換)');
 }
 
 module.exports = { init, getAiChannel, getMemoryChannel };
