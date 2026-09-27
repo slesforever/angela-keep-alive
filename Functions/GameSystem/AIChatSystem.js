@@ -1,6 +1,6 @@
 // Functions/GameSystem/AIChatSystem.js
 // 獨立 AI 聊天:Gemini 視覺 + 伺服器 emoji/貼圖 + 每人記憶庫(Discord 頻道 txt 備份/還原)
-// 防濫用:每人冷卻 + 每分鐘全域上限 + 歷史/emoji 精簡 + 404/503/429 自動切換備用模型。
+// 防濫用:每人冷卻 + 每分鐘全域上限 + 歷史/emoji 精簡 + 自動 ListModels 動態取得可用模型 + 故障自動切換。
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -10,19 +10,15 @@ const { AttachmentBuilder, PermissionFlagsBits } = require('discord.js');
 const CONFIG_PATH     = path.join(process.cwd(), 'data', 'ai-config.json');
 const MEM_DIR         = path.join(process.cwd(), 'data', 'ai-memory');
 
-// 🤖 官方支援且有效的 Gemini 模型清單（依優先順序輪流嘗試）
-const MODELS = [
-    'gemini-3.8-flash',
-    'gemini-2.5-flash',
-    'gemini-1.5-flash-latest',
-    'gemini-1.5-pro-latest',
-    'gemini-1.5-flash'
-];
-
 const COOLDOWN_USER   = 6000;   // 每人冷卻 6 秒
 const MAX_PER_MINUTE  = 8;      // 全域每分鐘最多 8 次
 const HISTORY_CAP     = 12;     // 每人保留最近 12 則
 const EMOJI_CAP       = 60;     // 只送前 60 個 emoji
+
+// 快取經 ListModels API 驗證過的真實可用模型清單
+let cachedModels = [];
+let lastModelFetch = 0;
+const MODEL_CACHE_TTL = 3600_000; // 1 小時重新對齊一次
 
 try { fs.mkdirSync(MEM_DIR, { recursive: true }); } catch {}
 
@@ -41,6 +37,47 @@ function getAiChannel(g)     { return cfg[g]?.channel  || null; }
 function getMemoryChannel(g) { return cfg[g]?.memory   || null; }
 function setAiChannel(g, c)    { cfg[g] = cfg[g] || {}; c ? cfg[g].channel = c : delete cfg[g].channel;    saveCfg(); }
 function setMemoryChannel(g, c){ cfg[g] = cfg[g] || {}; c ? cfg[g].memory = c : delete cfg[g].memory;    saveCfg(); }
+
+// ─── 動態向 Google API 獲取你 API Key 真正支援的模型清單 ──────────────
+async function fetchValidModels(apiKey) {
+    const now = Date.now();
+    if (cachedModels.length > 0 && (now - lastModelFetch < MODEL_CACHE_TTL)) {
+        return cachedModels;
+    }
+
+    try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`ListModels HTTP ${res.status}`);
+        const data = await res.json();
+        
+        if (data.models && Array.isArray(data.models)) {
+            // 篩選支援 generateContent 的模型，並去除 'models/' 前綴
+            const available = data.models
+                .filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent'))
+                .map(m => m.name.replace(/^models\//, ''));
+
+            // 排序：將 flash 類型的輕量速度模型排在前面
+            available.sort((a, b) => {
+                const aFlash = a.includes('flash') ? 0 : 1;
+                const bFlash = b.includes('flash') ? 0 : 1;
+                return aFlash - bFlash;
+            });
+
+            if (available.length > 0) {
+                cachedModels = available;
+                lastModelFetch = now;
+                console.log(`🤖 [AIChat] 已自動查詢並載入 ${available.length} 個可用 Gemini 模型:`, available.join(', '));
+                return cachedModels;
+            }
+        }
+    } catch (e) {
+        console.error('⚠️ [AIChat] ListModels 查詢失敗:', e.message);
+    }
+
+    // 若 ListModels 網路問題失敗，才使用預設名稱
+    return cachedModels.length > 0 ? cachedModels : ['gemini-1.5-flash-latest', 'gemini-1.5-pro-latest'];
+}
 
 // ─── 記憶體 + 磁碟 ─────────────────────────────────────────────
 const histories = new Map();
@@ -220,6 +257,9 @@ async function askGemini(prompt, g, u, images, guild, client) {
         return { content: '❌ **除錯提示**：`process.env.GEMINI_API_KEY` 是空的！請檢查 `.env` 檔或環境變數名稱是否拼錯。', stickerId: null };
     }
 
+    // 🤖 動態取得你目前 API Key 真正開啟的模型清單
+    const modelsToTry = await fetchValidModels(apiKey);
+
     const userText = prompt || '（傳送了一張圖片,請描述並回應）';
     const parts = [{ text: userText }];
     for (const a of images) { 
@@ -238,8 +278,8 @@ async function askGemini(prompt, g, u, images, guild, client) {
 
     let lastError = null;
 
-    // 🔄 輪流嘗試 MODELS 清單中的每個模型
-    for (const modelName of MODELS) {
+    // 🔄 輪流嘗試 API 回傳的真實有效模型
+    for (const modelName of modelsToTry) {
         try {
             const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
             
@@ -253,13 +293,12 @@ async function askGemini(prompt, g, u, images, guild, client) {
                 const errText = await res.text().catch(() => '');
                 const errObj = new Error(`[${modelName}] HTTP ${res.status}:${errText.slice(0, 200)}`);
                 
-                // 包含 404 (模型名稱錯誤/下架)、503 (過載)、429 (限流) 或 5xx 伺服器錯誤，均自動切換至下一個模型
+                // 遇到過載 (503)、限流 (429)、模型狀態問題 (404) 或伺服器錯誤，自動嘗試下一個真實模型
                 if ([404, 503, 429, 500, 502, 504].includes(res.status)) {
-                    console.warn(`⚠️ [AIChat] 模型 ${modelName} 回傳 HTTP ${res.status}，自動切換至下一個備用模型...`);
+                    console.warn(`⚠️ [AIChat] 模型 ${modelName} 暫時無法回應 (${res.status})，自動切換至下一個模型...`);
                     lastError = errObj;
                     continue; 
                 } else {
-                    // 400 Bad Request / 403 Key無效 等設定問題才直接拋出
                     throw errObj;
                 }
             }
@@ -279,7 +318,7 @@ async function askGemini(prompt, g, u, images, guild, client) {
         }
     }
 
-    throw lastError || new Error('所有 Gemini 備用模型均無法回應，請檢查 API Key 或系統狀態。');
+    throw lastError || new Error('所有可用 Gemini 模型均無法回應，請檢查 API Key 狀態。');
 }
 
 // ─── 啟動(獨立,不動其他腳本)──────────────────────────────────
@@ -347,7 +386,7 @@ function init(client) {
         } catch (e) { console.error('[AIChat] 還原失敗:', e.message); }
     });
 
-    console.log('[AIChat] 獨立系統已載入(視覺 + emoji/貼圖 + 記憶庫 + 防濫用 + 多模型故障切換)');
+    console.log('[AIChat] 獨立系統已載入(動態 ListModels 驗證 + 視覺 + emoji/貼圖 + 記憶庫)');
 }
 
 module.exports = { init, getAiChannel, getMemoryChannel };
