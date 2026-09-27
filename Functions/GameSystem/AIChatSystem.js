@@ -1,322 +1,409 @@
-// Functions/GameSystem/AIChatSystem.js
-// 獨立 AI 聊天:Gemini 視覺 + 伺服器 emoji/貼圖 + 每人記憶庫(Discord 頻道 txt 備份/還原)
-// 防濫用:每人冷卻 + 每分鐘全域上限 + 歷史/emoji 精簡,避免額度瞬爆。
-'use strict';
-const fs = require('fs');
-const path = require('path');
-const { AttachmentBuilder, PermissionFlagsBits } = require('discord.js');
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-// ─── 設定 ──────────────────────────────────────────────────────
-const CONFIG_PATH     = path.join(process.cwd(), 'data', 'ai-config.json');
-const MEM_DIR         = path.join(process.cwd(), 'data', 'ai-memory');
-const MODEL           = 'gemini-3.8-flash';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-const COOLDOWN_USER   = 6000;   // 每人冷卻 6 秒
-const MAX_PER_MINUTE  = 8;      // 全域每分鐘最多 8 次
-const HISTORY_CAP     = 12;     // 每人保留最近 12 則
-const EMOJI_CAP       = 60;     // 只送前 60 個 emoji
+// 歷史對話 JSON 檔案存儲路徑
+const DATA_DIR = path.join(__dirname, '..', 'data');
+const HISTORY_FILE = path.join(DATA_DIR, 'ai_history.json');
 
-try { fs.mkdirSync(MEM_DIR, { recursive: true }); } catch {}
+// ==========================================
+// 1. 模型與備援設定
+// ==========================================
+// 優先使用 2.5-flash，若遇 404 或 503 依序自動降級切換
+const FALLBACK_MODELS = [
+    'gemini-2.5-flash',
+    'gemini-1.5-flash',
+    'gemini-2.0-flash'
+];
 
-function readJson(p, fb) {
-    try { return fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf8')) : fb; }
-    catch { return fb; }
-}
-function writeJson(p, data) {
-    fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.writeFileSync(p, JSON.stringify(data, null, 2), 'utf8');
-}
+// 記憶體中的對話歷史與防鎖定機制
+const chatHistory = new Map(); // Key: `${guildId}_${userId}`, Value: Array
+const cooldowns = new Map();   // 冷卻冷卻時間紀錄
+const activeLocks = new Set();  // 正在處理請求的使用者鎖
+let backupTimer = null;
 
-const cfg = readJson(CONFIG_PATH, {});
-function saveCfg() { writeJson(CONFIG_PATH, cfg); }
-function getAiChannel(g)     { return cfg[g]?.channel  || null; }
-function getMemoryChannel(g) { return cfg[g]?.memory  || null; }
-function setAiChannel(g, c)    { cfg[g] = cfg[g] || {}; c ? cfg[g].channel = c : delete cfg[g].channel;    saveCfg(); }
-function setMemoryChannel(g, c){ cfg[g] = cfg[g] || {}; c ? cfg[g].memory = c : delete cfg[g].memory;    saveCfg(); }
+// ==========================================
+// 2. 磁碟檔案持久化寫入 (JSON Storage)
+// ==========================================
 
-// ─── 記憶體 + 磁碟 ─────────────────────────────────────────────
-const histories = new Map();
-const cooldowns = new Map();
-const callTimestamps = [];                       
-const memTimer = new Map();
-const memInFlight = new Set();
-
-const mk = (g, u) => `${g}:${u}`;
-const memFile = k => path.join(MEM_DIR, `${k.replace(/:/g, '_')}.json`);
-
-function loadHist(g, u) {
-    try { const f = memFile(mk(g, u)); return fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : []; }
-    catch (e) { console.error('[AIChat] 讀記憶失敗:', e.message); return []; }
-}
-function saveHist(g, u, arr) {
-    try { fs.writeFileSync(memFile(mk(g, u)), JSON.stringify(arr, null, 2), 'utf8'); }
-    catch (e) { console.error('[AIChat] 寫記憶失敗:', e.message); }
-}
-function getHist(g, u) {
-    const k = mk(g, u);
-    if (!histories.has(k)) histories.set(k, loadHist(g, u));
-    return histories.get(k);
-}
-function pushHist(g, u, role, text) {
-    const h = getHist(g, u);
-    h.push({ role, parts: [{ text }] });
-    if (h.length > HISTORY_CAP) h.splice(0, h.length - HISTORY_CAP);
-    saveHist(g, u, h);
+function ensureDir() {
+    if (!fs.existsSync(DATA_DIR)) {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
 }
 
-// ─── 歷史紀錄嚴格清洗器 ────────────────────────────────────────
-function sanitizeHistory(rawHist) {
-    if (!Array.isArray(rawHist) || rawHist.length === 0) return [];
-    const clean = [];
+/**
+ * 啟動時從硬碟載入 JSON 歷史紀錄
+ */
+export function loadHistDisk() {
+    try {
+        ensureDir();
+        if (fs.existsSync(HISTORY_FILE)) {
+            const raw = fs.readFileSync(HISTORY_FILE, 'utf-8');
+            const data = JSON.parse(raw);
+            chatHistory.clear();
+            for (const [key, val] of Object.entries(data)) {
+                if (Array.isArray(val)) {
+                    chatHistory.set(key, val);
+                }
+            }
+            console.log(`[AIChat] 成功載入 ${chatHistory.size} 筆 AI 歷史對話記憶。`);
+        }
+    } catch (err) {
+        console.error('[AIChat] 讀取歷史記憶檔失敗:', err.message);
+    }
+}
+
+/**
+ * 將記憶寫回硬碟
+ */
+export function saveHistDisk() {
+    try {
+        ensureDir();
+        const obj = {};
+        for (const [key, val] of chatHistory.entries()) {
+            obj[key] = val;
+        }
+        fs.writeFileSync(HISTORY_FILE, JSON.stringify(obj, null, 2), 'utf-8');
+    } catch (err) {
+        console.error('[AIChat] 寫入歷史記憶檔失敗:', err.message);
+    }
+}
+
+/**
+ * 防頻繁寫入的防彈備份佇列 (5 秒內無新動作才存檔)
+ */
+export function queueBackup(client, guildId) {
+    if (backupTimer) clearTimeout(backupTimer);
+    backupTimer = setTimeout(() => {
+        saveHistDisk();
+    }, 5000);
+}
+
+// 模組初始化時自動讀取記憶檔
+loadHistDisk();
+
+// ==========================================
+// 3. 對話歷史紀錄管理與格式防爆
+// ==========================================
+
+export function getHist(guildId, userId) {
+    const key = `${guildId}_${userId}`;
+    if (!chatHistory.has(key)) {
+        chatHistory.set(key, []);
+    }
+    return chatHistory.get(key);
+}
+
+export function pushHist(guildId, userId, role, text) {
+    const hist = getHist(guildId, userId);
+    hist.push({
+        role: role === 'model' ? 'model' : 'user',
+        parts: [{ text }]
+    });
+
+    // 限制最多保留近 20 條對話紀錄
+    if (hist.length > 20) {
+        hist.splice(0, hist.length - 20);
+    }
+}
+
+export function clearHist(guildId, userId) {
+    const key = `${guildId}_${userId}`;
+    chatHistory.delete(key);
+    saveHistDisk();
+}
+
+/**
+ * 整理歷史紀錄，確保符合 Gemini API 要求 (user 與 model 嚴格交替)
+ */
+export function sanitizeHistory(hist) {
+    if (!Array.isArray(hist) || hist.length === 0) return [];
+
+    const cleaned = [];
     let expectedRole = 'user';
 
-    for (const item of rawHist) {
-        if (!item || item.role !== expectedRole) continue;
-        if (!item.parts || !Array.isArray(item.parts) || !item.parts[0]?.text) continue;
-        clean.push({ role: item.role, parts: [{ text: item.parts[0].text }] });
-        expectedRole = expectedRole === 'user' ? 'model' : 'user';
-    }
+    for (const item of hist) {
+        if (!item || !item.role || !Array.isArray(item.parts) || item.parts.length === 0) continue;
+        
+        const currentRole = item.role === 'model' ? 'model' : 'user';
 
-    if (clean.length > 0 && clean[clean.length - 1].role === 'user') {
-        clean.pop();
-    }
-    return clean;
-}
+        if (currentRole === expectedRole) {
+            const validParts = item.parts
+                .map(p => ({ text: p.text || '' }))
+                .filter(p => p.text.trim() !== '');
 
-// ─── 頻道記憶備份/還原 ─────────────────────────────────────────
-function snapshotText(g) {
-    const pre = `${g}_`;
-    const files = fs.existsSync(MEM_DIR)
-        ? fs.readdirSync(MEM_DIR).filter(f => f.startsWith(pre) && f.endsWith('.json')) : [];
-    const head = `# Angela AI Memory Backup\n# Guild: ${g}\n# Generated: ${new Date().toISOString()}\n# Users: ${files.length}\n\n`;
-    const body = files.map(f => {
-        const u = f.slice(pre.length, -5);
-        try {
-            const arr = JSON.parse(fs.readFileSync(path.join(MEM_DIR, f), 'utf8'));
-            return `==================================================\nMEM KEY: ${g}:${u}\nUPDATED: ${new Date().toISOString()}\n==================================================\n${JSON.stringify(arr)}\n`;
-        } catch (e) {
-            return `==================================================\nMEM KEY: ${g}:${u}\nPARSE ERROR:${e.message}\n==================================================\n`;
+            if (validParts.length > 0) {
+                cleaned.push({
+                    role: currentRole,
+                    parts: validParts
+                });
+                expectedRole = expectedRole === 'user' ? 'model' : 'user';
+            }
         }
-    }).join('\n');
-    return head + body;
-}
-
-async function sendBackup(client, g) {
-    const chId = getMemoryChannel(g);
-    if (!chId) return false;
-    const ch = await client.channels.fetch(chId).catch(() => null);
-    if (!ch) return false;
-    const text = snapshotText(g);
-    if (!text.trim()) return false;
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const att = new AttachmentBuilder(Buffer.from(text, 'utf8'), { name: `aimemory_${g}_${stamp}.txt` });
-    await ch.send({ content: '🧠 AI 記憶庫備份', files: [att] });
-    return true;
-}
-function queueBackup(client, g) {
-    if (!getMemoryChannel(g)) return;
-    if (memTimer.has(g)) clearTimeout(memTimer.get(g));
-    memTimer.set(g, setTimeout(async () => {
-        if (memInFlight.has(g)) return;
-        memInFlight.add(g);
-        try { await sendBackup(client, g); } catch (e) { console.error('[AIChat] 備份失敗:', e.message); }
-        finally { memInFlight.delete(g); }
-    }, 5000));
-}
-
-async function restoreGuild(client, g) {
-    const chId = getMemoryChannel(g);
-    if (!chId) return 0;
-    const ch = await client.channels.fetch(chId).catch(() => null);
-    if (!ch) return 0;
-    const msgs = await ch.messages.fetch({ limit: 100 }).catch(() => null);
-    if (!msgs?.size) return 0;
-    let latest = null;
-    for (const m of msgs.values()) for (const a of m.attachments.values()) {
-        const match = a.name?.match(new RegExp(`^aimemory_${g}_(.+)\\.txt$`));
-        if (match && (!latest || m.createdTimestamp > latest.ts)) latest = { ts: m.createdTimestamp, url: a.url };
     }
-    if (!latest) return 0;
-    let text;
-    try { const r = await fetch(latest.url); if (!r.ok) return 0; text = await r.text(); }
-    catch (e) { console.error('[AIChat] 下載備份失敗:', e.message); return 0; }
-    if (!text) return 0;
-    const pat = /==================================================\r?\nMEM KEY:\s*([^\r\n]+)\r?\n[\s\S]*?\r?\n==================================================\r?\n([\s\S]*?)(?=\r?\n==================================================\r?\nMEM KEY:|\s*$)/g;
-    let n = 0, m;
-    while ((m = pat.exec(text)) !== null) {
-        try {
-            const arr = JSON.parse(m[2].trim());
-            fs.writeFileSync(memFile(m[1].trim()), JSON.stringify(arr, null, 2), 'utf8');
-            histories.set(m[1].trim(), arr);
-            n++;
-        } catch (e) { console.error(`[AIChat] 解析 ${m[1]} 失敗:`, e.message); }
+
+    // 若最後一筆依然是 user，先移除以防與最新的請求連續出現兩次 user
+    if (cleaned.length > 0 && cleaned[cleaned.length - 1].role === 'user') {
+        cleaned.pop();
     }
-    console.log(`✅ [AIChat] guild ${g} 還原 ${n} 個使用者記憶`);
-    return n;
+
+    return cleaned;
 }
-async function restoreAll(client) {
-    let t = 0;
-    for (const g of Object.keys(cfg)) {
-        try { t += await restoreGuild(client, g); }
-        catch (e) { console.error(`[AIChat] guild ${g} 還原失敗:`, e.message); }
+
+// ==========================================
+// 4. 圖片處理與人設設定
+// ==========================================
+
+/**
+ * 將 Discord Attachment 下載並轉為 Base64
+ */
+export async function toInline(attachment) {
+    if (!attachment || !attachment.url) return null;
+
+    try {
+        const response = await fetch(attachment.url);
+        if (!response.ok) throw new Error(`圖片下載失敗 [HTTP ${response.status}]`);
+
+        const arrayBuffer = await response.arrayBuffer();
+        const base64Data = Buffer.from(arrayBuffer).toString('base64');
+        const contentType = attachment.contentType || response.headers.get('content-type') || 'image/jpeg';
+
+        return {
+            inlineData: {
+                mimeType: contentType,
+                data: base64Data
+            }
+        };
+    } catch (err) {
+        console.error('[AIChat] 圖片轉換失敗:', err.message);
+        return null;
     }
-    return t;
 }
 
-// ─── Gemini 視覺 + emoji/貼圖 ──────────────────────────────────
-function systemInstr(guild) {
-    const emojis = [...guild.emojis.cache.values()].slice(0, EMOJI_CAP).map(e => e.toString());
-    const stickers = [...guild.stickers.cache.values()].map(s => s.name);
-    const L = [
-        '你是 Angela,這個 Discord 伺服器的聊天夥伴。語氣自然親切,回覆簡短(通常 1~3 句)。',
-        '可使用伺服器自訂 emoji,直接輸出原始格式 <:name:id> 或 <a:name:id>。只可用以下清單,不可捏造:'
-    ];
-    L.push(emojis.length ? emojis.join(' ') : '(此伺服器沒有自訂 emoji)');
-    L.push('若要傳貼圖,在回覆末尾單獨一行寫 [STICKER:貼圖名稱],只能用以下貼圖,不可捏造,一次最多一張:');
-    L.push(stickers.length ? stickers.join('、') : '(此伺服器沒有自訂貼圖)');
+/**
+ * Angela 人格與 System Instruction
+ */
+export function systemInstr(guild) {
+    const guildName = guild?.name || 'Discord 伺服器';
+    return {
+        parts: [{
+            text: `你是由 Sles 開發的 Discord 助理 Angela。
+當前服務的 Discord 伺服器名稱為：${guildName}。
 
-    return { parts: [{ text: L.join('\n') }] };
+請嚴格遵守以下設定與回應風格：
+1. 語氣保持冷靜、優雅、親切且微帶禮貌，使用繁體中文（台灣習慣用語）回應。
+2. 回答注重邏輯與條理，避免無意義的贅詞。
+3. 正確識別你的創作者兼開發者 Sles。
+4. 若使用者傳送圖片，請分析圖片細節並結合內文進行解答。
+5. 若要傳送貼圖，可在內文中包含 [STICKER:貼圖ID] 標記。`
+        }]
+    };
 }
 
-async function toInline(att) {
-    const r = await fetch(att.url);
-    const buf = Buffer.from(await r.arrayBuffer());
-    return { inlineData: { mimeType: att.contentType || 'image/png', data: buf.toString('base64') } };
-}
+/**
+ * 格式化與訊息長度截斷修飾
+ */
+export function polish(text, guild) {
+    if (!text) return { content: '（沒有回覆內容）', stickerId: null };
 
-function polish(text, guild) {
-    const valid = new Set([...guild.emojis.cache.values()].map(e => e.id));
-    text = text.replace(/<(a)?:(\w+):(\d+)>/g, (m, a, n, id) => valid.has(id) ? m : `:${n}:`);
+    let cleanedText = text.trim();
+
+    // 貼圖語法解析 [STICKER:12345678]
     let stickerId = null;
-    const smap = new Map([...guild.stickers.cache.values()].map(s => [s.name, s.id]));
-    const m = text.match(/\[STICKER:([^\]]+)\]/);
-    if (m) {
-        const name = m[1].trim();
-        if (smap.has(name)) stickerId = smap.get(name);
-        text = text.replace(/\[STICKER:[^\]]+\]/g, '').replace(/\n{3,}/g, '\n\n').trim();
+    const stickerMatch = cleanedText.match(/\[STICKER:(\d+)\]/i);
+    if (stickerMatch) {
+        stickerId = stickerMatch[1];
+        cleanedText = cleanedText.replace(/\[STICKER:\d+\]/gi, '').trim();
     }
-    return { content: text.slice(0, 2000), stickerId };
+
+    // 超過 Discord 2000 字限制時的安全截斷 (保留安全裕度 1900 字)
+    if (cleanedText.length > 1900) {
+        cleanedText = cleanedText.slice(0, 1900) + '\n\n*(內容過長，已自動切斷剩餘文字)*';
+    }
+
+    return {
+        content: cleanedText || '（沒有回覆內容）',
+        stickerId
+    };
 }
 
-function canCall() {
-    const now = Date.now();
-    while (callTimestamps.length && now - callTimestamps[0] > 60_000) callTimestamps.shift();
-    if (callTimestamps.length >= MAX_PER_MINUTE) return false;
-    callTimestamps.push(now);
-    return true;
+// ==========================================
+// 5. API 請求發送 (含 503 重試與 404 自動切換)
+// ==========================================
+
+async function callGeminiApiWithRetry(apiKey, body) {
+    let lastError = null;
+
+    for (const model of FALLBACK_MODELS) {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+        // 單一模型最多重試 3 次（解決 503 高負載問題）
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            try {
+                const res = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+
+                if (res.ok) {
+                    const data = await res.json();
+                    return { data, usedModel: model };
+                }
+
+                const errText = await res.text().catch(() => '');
+
+                // HTTP 503: 伺服器繁忙 -> 等待 1.5 秒後重試
+                if (res.status === 503) {
+                    console.warn(`[AIChat] 模型 ${model} 伺服器繁忙 (503)，進行第 ${attempt} 次重試...`);
+                    await new Promise(resolve => setTimeout(resolve, 1500 * attempt));
+                    continue;
+                }
+
+                // HTTP 404: 模型下架或不支援 -> 切換至備援模型
+                if (res.status === 404) {
+                    console.warn(`[AIChat] 模型 ${model} 無法使用 (404)，切換至下一個備援模型...`);
+                    break;
+                }
+
+                lastError = new Error(`HTTP ${res.status}: ${errText.slice(0, 200)}`);
+                break;
+            } catch (err) {
+                lastError = err;
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+        }
+    }
+
+    throw lastError || new Error('所有 Gemini 備援模型均無法正常回應');
 }
 
-async function askGemini(prompt, g, u, images, guild, client) {
-    // 【修復】改為動態讀取，防止 dotenv 比 require 晚執行的問題
+// ==========================================
+// 6. 主對話進入點與 Discord 事件處理
+// ==========================================
+
+export async function askGemini(prompt, g, u, images = [], guild, client) {
     const apiKey = (process.env.GEMINI_API_KEY || '').trim();
     if (!apiKey) {
-        return { content: '❌ **除錯提示**：`process.env.GEMINI_API_KEY` 是空的！請檢查 `.env` 檔或環境變數名稱是否拼錯。', stickerId: null };
+        return {
+            content: '❌ **設定錯誤**：環境變數 `process.env.GEMINI_API_KEY` 未設定，請檢查 `.env` 檔案。',
+            stickerId: null
+        };
     }
 
-    const userText = prompt || '（傳送了一張圖片,請描述並回應）';
+    const userText = prompt || '（傳送了一張圖片，請描述並回應）';
     const parts = [{ text: userText }];
-    for (const a of images) { try { parts.push(await toInline(a)); } catch (e) { console.error('[AIChat] 圖片下載失敗:', e.message); } }
 
-    const cleanHist = sanitizeHistory(getHist(g, u));
+    // 處理附件圖片
+    if (Array.isArray(images) && images.length > 0) {
+        for (const img of images) {
+            const inlineData = await toInline(img);
+            if (inlineData) parts.push(inlineData);
+        }
+    }
+
+    // 整理對話紀錄
+    const rawHist = getHist(g, u);
+    const cleanHist = sanitizeHistory(rawHist);
     const contents = [...cleanHist, { role: 'user', parts }];
 
     const body = {
         contents,
         systemInstruction: systemInstr(guild),
-        generationConfig: { temperature: 0.9, maxOutputTokens: 600 }
+        generationConfig: {
+            temperature: 0.8,
+            maxOutputTokens: 800
+        }
     };
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${apiKey}`;
-    
-    const res = await fetch(url, { 
-        method: 'POST', 
-        headers: { 'Content-Type': 'application/json' }, 
-        body: JSON.stringify(body) 
-    });
+    try {
+        const { data, usedModel } = await callGeminiApiWithRetry(apiKey, body);
+        const outputText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '（沒有獲得回覆內容）';
 
-    if (!res.ok) {
-        const errText = await res.text().catch(() => '');
-        // 拋出詳細錯誤給外部捕獲
-        throw new Error(`API 請求失敗 [HTTP ${res.status}]:${errText.slice(0, 300)}`);
+        // 寫入記憶與觸發備份
+        pushHist(g, u, 'user', userText);
+        pushHist(g, u, 'model', outputText);
+        queueBackup(client, g);
+
+        return polish(outputText, guild);
+
+    } catch (err) {
+        console.error('[AIChat] 對話發生錯誤:', err);
+        throw err;
+    }
+}
+
+// 防洗版與鎖定管理
+export function checkCooldown(userId, cooldownMs = 3000) {
+    const now = Date.now();
+    const last = cooldowns.get(userId) || 0;
+    if (now - last < cooldownMs) {
+        const remaining = ((cooldownMs - (now - last)) / 1000).toFixed(1);
+        return { isCooling: true, remaining };
+    }
+    cooldowns.set(userId, now);
+    return { isCooling: false, remaining: 0 };
+}
+
+/**
+ * Discord Message 事件封裝對話觸發器
+ */
+export async function handleDiscordMessage(msg, client) {
+    if (!msg || msg.author.bot) return;
+
+    const guildId = msg.guild?.id || 'DM';
+    const userId = msg.author.id;
+    const content = msg.content.trim();
+
+    // 指令：清除記憶
+    if (content === '!clear' || content === '!forget' || content === '!清除記憶') {
+        clearHist(guildId, userId);
+        await msg.reply('🧹 已為您清除目前的對話歷史紀錄！').catch(() => {});
+        return;
     }
 
-    const data = await res.json();
-    const out = data?.candidates?.[0]?.content?.parts?.[0]?.text || '（沒有回覆內容）';
+    // 檢查冷卻
+    const cd = checkCooldown(userId, 3000);
+    if (cd.isCooling) {
+        await msg.reply(`⏱️ 發送太快囉，請等待 ${cd.remaining} 秒後再試。`).catch(() => {});
+        return;
+    }
 
-    pushHist(g, u, 'user', userText);
-    pushHist(g, u, 'model', out);
+    // 防止單一使用者連續發送導致並行並發衝突
+    if (activeLocks.has(userId)) {
+        await msg.reply('⚠️ 上一個問題還在處理中，請稍候...').catch(() => {});
+        return;
+    }
 
-    queueBackup(client, g);
-    return polish(out, guild);
-}
+    activeLocks.add(userId);
 
-// ─── 啟動(獨立,不動其他腳本)──────────────────────────────────
-function init(client) {
-    client.on('messageCreate', async (msg) => {
-        if (msg.author.bot || !msg.guild) return;
-
-        const isAdmin = msg.member?.permissions?.has(PermissionFlagsBits.Administrator);
-        const raw = msg.content.trim();
-        if (isAdmin && /^(!!setaichannel|!!setaimemory|!!aioff)$/i.test(raw)) {
-            const cmd = raw.toLowerCase();
-            if (cmd === '!!setaichannel') {
-                setAiChannel(msg.guild.id, msg.channel.id);
-                return msg.reply(`✅ 此頻道設為 AI 自動回覆頻道。在這裡發言(可附圖)Angela 就會回覆。`).catch(() => {});
-            }
-            if (cmd === '!!setaimemory') {
-                setMemoryChannel(msg.guild.id, msg.channel.id);
-                return msg.reply(`✅ 此頻道設為 AI 記憶庫頻道。對話記憶會備份成 txt,重啟自動讀回。`).catch(() => {});
-            }
-            if (cmd === '!!aioff') {
-                setAiChannel(msg.guild.id, null);
-                setMemoryChannel(msg.guild.id, null);
-                return msg.reply(`✅ 已關閉此伺服器的 AI 回覆與記憶庫。`).catch(() => {});
-            }
-        }
-
-        if (msg.channelId !== getAiChannel(msg.guild.id)) return;
-
-        const text = raw;
-        const images = [...msg.attachments.values()].filter(a =>
-            (a.contentType && a.contentType.startsWith('image/')) || /\.(png|jpe?g|webp|gif)$/i.test(a.url)
+    try {
+        // 篩選圖片附件
+        const images = Array.from(msg.attachments.values()).filter(a => 
+            a.contentType?.startsWith('image/')
         );
-        if (!text && !images.length) return;
 
-        const now = Date.now();
-        if (now - (cooldowns.get(msg.author.id) || 0) < COOLDOWN_USER) return;
-        if (!canCall()) {
-            return msg.reply('⏳ 目前太頻繁,請等一分鐘再試。').catch(() => {});
-        }
-        cooldowns.set(msg.author.id, now);
-
-        try {
+        // 顯示打字中
+        if (typeof msg.channel.sendTyping === 'function') {
             await msg.channel.sendTyping().catch(() => {});
-            const { content, stickerId } = await askGemini(text, msg.guild.id, msg.author.id, images, msg.guild, client);
-            try {
-                await msg.reply({
-                    content,
-                    allowedMentions: { repliedUser: false },
-                    ...(stickerId ? { stickers: [stickerId] } : {})
-                });
-            } catch (sendErr) {
-                await msg.reply({ content, allowedMentions: { repliedUser: false } }).catch(() => {});
-            }
-        } catch (err) {
-            console.error('[AIChat] 錯誤詳細資訊:', err);
-            // 【關鍵】直接把真正的錯誤原因噴在 Discord 頻道上！
-            const errMsg = err.message || String(err);
-            await msg.reply(`⚠️ **AI 回覆失敗**\n\`\`\`text\n${errMsg}\n\`\`\``).catch(() => {});
         }
-    });
 
-    client.once('ready', async () => {
-        try {
-            const n = await restoreAll(client);
-            if (n > 0) console.log(`🧠 [AIChat] 共還原 ${n} 個使用者記憶`);
-        } catch (e) { console.error('[AIChat] 還原失敗:', e.message); }
-    });
+        const replyData = await askGemini(content, guildId, userId, images, msg.guild, client);
+        
+        if (replyData.stickerId) {
+            await msg.reply({ content: replyData.content, stickers: [replyData.stickerId] }).catch(() => {});
+        } else {
+            await msg.reply(replyData.content).catch(() => {});
+        }
 
-    console.log('[AIChat] 獨立系統已載入(視覺 + emoji/貼圖 + 記憶庫 + 防濫用)');
+    } catch (err) {
+        console.error('[AIChat] 處理訊息發生異常:', err);
+        await msg.reply(`⚠️ API 請求失敗：${err.message || '未知錯誤'}`).catch(() => {});
+    } finally {
+        activeLocks.delete(userId);
+    }
 }
-
-module.exports = { init, getAiChannel, getMemoryChannel };
