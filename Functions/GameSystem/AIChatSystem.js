@@ -9,7 +9,7 @@ const { AttachmentBuilder, PermissionFlagsBits } = require('discord.js');
 // ─── 設定 ──────────────────────────────────────────────────────
 const CONFIG_PATH     = path.join(process.cwd(), 'data', 'ai-config.json');
 const MEM_DIR         = path.join(process.cwd(), 'data', 'ai-memory');
-const MODEL           = 'gemini-2.5-flash';
+const MODEL           = 'gemini-3.8-flash';
 
 const COOLDOWN_USER   = 6000;   // 每人冷卻 6 秒
 const MAX_PER_MINUTE  = 8;      // 全域每分鐘最多 8 次
