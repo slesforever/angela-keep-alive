@@ -403,7 +403,7 @@ async function restoreFromBackupChannel(client) {
         return 0;
     }
 
-    
+    const fetch = require('node-fetch');
     const textParts = [];
     for (const part of parts) {
         try {
