@@ -1,6 +1,6 @@
 // Functions/GameSystem/AIChatSystem.js
 // 獨立 AI 聊天: Gemini 視覺 + 伺服器 emoji/貼圖 + 個人獨立記憶 + 頻道群聊共享記憶 (雙軌記憶機制)
-// 防濫用: 每人冷卻 + 每分鐘全域上限 + 歷史/emoji 精簡 + 自動 ListModels 動態取得可用模型 + 404/400/429 自動黑名單 + 故障自動切換。
+// 修復: 啟動時優先保留本地硬碟記憶，避免舊 Discord 備份盲目覆蓋最新記憶。
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -13,7 +13,7 @@ const MEM_DIR         = path.join(process.cwd(), 'data', 'ai-memory');
 
 const COOLDOWN_USER   = 6000;      // 每人冷卻 6 秒
 const MAX_PER_MINUTE  = 12;        // 全域每分鐘最多 12 次
-const SHARED_HIST_CAP = 12;        // 頻道群聊共用歷史保留最近 12 則
+const SHARED_HIST_CAP = 14;        // 頻道群聊共用歷史保留最近 14 則
 const USER_HIST_CAP   = 8;         // 個人專屬記憶保留最近 8 則
 const EMOJI_CAP       = 60;        // 只送前 60 個 emoji
 
@@ -206,6 +206,7 @@ function queueBackup(client, g) {
     }, 5000));
 }
 
+// 💡 修復重點：優先保留本地硬碟資料，不盲目覆蓋本地記憶
 async function restoreGuild(client, g) {
     const chId = getMemoryChannel(g);
     if (!chId) return 0;
@@ -227,14 +228,19 @@ async function restoreGuild(client, g) {
     let n = 0, m;
     while ((m = pat.exec(text)) !== null) {
         try {
-            const key = m[1].trim().replace(/:/g, '_');
-            const arr = JSON.parse(m[2].trim());
-            fs.writeFileSync(memFile(key), JSON.stringify(arr, null, 2), 'utf8');
-            histories.set(key, arr);
-            n++;
+            const key = m[1].trim();
+            const targetFile = memFile(key);
+            
+            // 💡 只有當本地硬碟完全不存在該檔案時，才從 Discord 備份還原
+            if (!fs.existsSync(targetFile)) {
+                const arr = JSON.parse(m[2].trim());
+                fs.writeFileSync(targetFile, JSON.stringify(arr, null, 2), 'utf8');
+                histories.set(key, arr);
+                n++;
+            }
         } catch (e) { console.error(`[AIChat] 解析 ${m[1]} 失敗:`, e.message); }
     }
-    console.log(`✅ [AIChat] guild ${g} 還原 ${n} 個記憶檔`);
+    if (n > 0) console.log(`✅ [AIChat] guild ${g} 從 Discord 備份還原了 ${n} 個缺失的記憶檔`);
     return n;
 }
 async function restoreAll(client) {
@@ -306,11 +312,11 @@ async function askGemini(prompt, g, userId, images, guild, client, userName = '�
     const sharedKey = mkShared(g);
     const userKey = mkUser(g, userId);
 
-    // 1. 取得該使用者的「個人專屬記憶」並組合成文字，注入 System Instruction
+    // 1. 取得該使用者的「個人專屬記憶」
     const userHist = sanitizeHistory(getHistByKey(userKey));
     const userPersonalText = userHist.map(h => `${h.role === 'user' ? '他說' : '你回'}: ${h.parts[0]?.text || ''}`).join('\n');
 
-    // 2. 取得「頻道共享對話紀錄」作為發送給 Gemini 的核心內容
+    // 2. 取得「頻道共享對話紀錄」
     const rawContent = prompt || '（傳送了一張圖片，請描述並回應）';
     const userText = `[${userName}]:${rawContent}`;
 
@@ -373,7 +379,7 @@ async function askGemini(prompt, g, userId, images, guild, client, userName = '�
             const data = await res.json();
             const out = data?.candidates?.[0]?.content?.parts?.[0]?.text || '（沒有回覆內容）';
 
-            // 💡 雙軌寫入記憶：同時存入「頻道群聊歷史」與「個人記憶庫」
+            // 💡 即時同步寫入本地 JSON 硬碟檔案
             pushHistByKey(sharedKey, 'user', userText, SHARED_HIST_CAP);
             pushHistByKey(sharedKey, 'model', out, SHARED_HIST_CAP);
 
@@ -477,11 +483,11 @@ function init(client) {
         }
         try {
             const n = await restoreAll(client);
-            if (n > 0) console.log(`🧠 [AIChat] 共還原 ${n} 個記憶檔`);
+            if (n > 0) console.log(`🧠 [AIChat] 共還原 ${n} 個缺少的記憶檔`);
         } catch (e) { console.error('[AIChat] 還原失敗:', e.message); }
     });
 
-    console.log('[AIChat] 獨立系統已載入 (雙軌記憶: 個人 + 群聊共享 + 動態 ListModels + 視覺)');
+    console.log('[AIChat] 獨立系統已載入 (防覆蓋雙軌記憶 + 個人 + 群聊共享 + 動態 ListModels)');
 }
 
 module.exports = { init, getAiChannel, getMemoryChannel };
