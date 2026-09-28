@@ -493,4 +493,4 @@ function init(client) {
     console.log('[AIChat] 獨立系統已載入 (防覆蓋雙軌記憶 + 個人 + 群聊共享 + 動態 ListModels)');
 }
 
-module.exports = { init, getAiChannel, getMemoryChannel };
+module.exports = { init, getAiChannel, getMemoryChannel, restoreAll };
