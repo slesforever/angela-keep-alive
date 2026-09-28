@@ -201,11 +201,8 @@ async function handleMarriageButton(client, interaction) {
 
 async function handleDivorce(client, interaction) {
     const language = getLanguage(interaction.user.id);
-    const raw = interaction.options?.getString('target');
-    let target = raw ? resolveUser(interaction, raw) : null;
+    const target = interaction.options?.getUser('target') || null;
     const spouses = getMarriages(interaction.user.id);
-
-    if (raw && !target) return interaction.reply({ content: language === 'en' ? 'Could not find that user.' : '找不到這位使用者。', ephemeral: true });
     if (!spouses.length) return interaction.reply({ content: language === 'en' ? 'You are not married.' : '你目前沒有婚姻紀錄。', ephemeral: true });
 
     if (!target && spouses.length > 1) {

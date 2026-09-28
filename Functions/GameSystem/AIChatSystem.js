@@ -251,9 +251,7 @@ function canCall() {
 
 async function askGeminiOnly(prompt, g, u, images, guild, client, channelId, userName) {
     const apiKey = (process.env.GEMINI_API_KEY || '').trim();
-    if (!apiKey) {
-        return { content: '❌ **除錯提示**：`process.env.GEMINI_API_KEY` 是空的！請檢查 `.env` 檔或環境變數名稱是否拼錯。', stickerId: null };
-    }
+    if (!apiKey) throw new Error('未設定 GEMINI_API_KEY');
 
     // 🤖 動態取得你目前 API Key 真正開啟的模型清單
     const modelsToTry = await fetchValidModels(apiKey);
