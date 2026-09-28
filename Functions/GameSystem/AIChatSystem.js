@@ -16,10 +16,10 @@ const HISTORY_CAP     = 10;        // 每人保留最近 10 則歷史
 const EMOJI_CAP       = 60;        // 只送前 60 個 emoji
 
 // 模型黑名單與快取機制
-const blacklistedModels = new Set(); // 自動儲存 400/404 或已停用的無效模型
+const blacklistedModels = new Set();
 let cachedModels = [];
 let lastModelFetch = 0;
-const MODEL_CACHE_TTL = 1800_000;  // 30 分鐘重新對齊一次
+const MODEL_CACHE_TTL = 1800_000;  // 30 分鐘更新一次
 const MAX_MODEL_ATTEMPTS = 5;      // 單次對話最多嘗試 5 個模型
 const GENERATION_TIMEOUT_MS = 15000;// 15 秒生成逾時
 
@@ -57,7 +57,7 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
     try {
         return await fetch(url, { ...options, signal: controller.signal });
     } catch (err) {
-        if (err.name === 'AbortError') throw new Error('請求逾时（' + (timeoutMs / 1000) + ' 秒）。');
+        if (err.name === 'AbortError') throw new Error('請求逾時（' + (timeoutMs / 1000) + ' 秒）。');
         throw err;
     } finally {
         clearTimeout(timer);
@@ -81,7 +81,7 @@ async function fetchValidModels(apiKey) {
         const data = await res.json();
         if (!Array.isArray(data.models)) throw new Error('ListModels 回傳格式無效');
 
-        // 關鍵過濾：排除專用/特殊 API 模型 (如 deep-research, embedding, imagen, realtime 等)
+        // 過濾：排除專用/特殊 API 模型 (如 deep-research, embedding, imagen, realtime 等)
         const available = data.models
             .filter(m => {
                 const rawName = String(m.name || '').replace(/^models\//, '');
@@ -302,7 +302,7 @@ function canCall() {
 async function askGemini(prompt, g, u, images, guild, client) {
     const apiKey = (process.env.GEMINI_API_KEY || '').trim();
     if (!apiKey) {
-        return { content: '❌ **除錯提示**：`process.env.GEMINI_API_KEY` 是空的！請檢查 `.env` 檔或環境變數名稱。', stickerId: null };
+        return { content: '❌ **除錯提示**：`process.env.GEMINI_API_KEY` 是空的！請檢查 `.env` 檔。', stickerId: null };
     }
 
     const modelsToTry = await fetchValidModels(apiKey);
@@ -344,16 +344,15 @@ async function askGemini(prompt, g, u, images, guild, client) {
                 const errText = await res.text().catch(() => '');
                 const errObj = new Error(`[${modelName}] HTTP ${res.status}:${errText.slice(0, 150)}`);
 
-                // 🛑 核心修復：遇到 400 (如 Interactions 限制)、404 或特定不支援訊息，立即加黑名單並切換下一個！
+                // 遇到 400 (如 Interactions 限制)、404 或特定不支援訊息，立即加黑名單並切換下一個
                 if (res.status === 400 || res.status === 404 || errText.includes('no longer available') || errText.includes('Interactions API') || errText.includes('not found')) {
                     console.warn(`🚫 [AIChat] 模型 ${modelName} 無效或受限 (${res.status})，已自動加入黑名單！`);
                     blacklistedModels.add(modelName);
                     cachedModels = cachedModels.filter(m => m !== modelName);
                     lastError = errObj;
-                    continue; // 秒切下一個模型
+                    continue;
                 }
 
-                // 其他暫時性錯誤 (429 限流, 503 過載, 500/502/504 伺服器錯誤)
                 console.warn(`⚠️ [AIChat] 模型 ${modelName} 回應失敗 (${res.status})，自動嘗試下一個模型...`);
                 lastError = errObj;
                 continue;
@@ -382,54 +381,70 @@ function init(client) {
     client.on('messageCreate', async (msg) => {
         if (msg.author.bot || !msg.guild) return;
 
+        const raw = msg.content ? msg.content.trim() : '';
         const isAdmin = msg.member?.permissions?.has(PermissionFlagsBits.Administrator);
-        const raw = msg.content.trim();
+
+        // 指令判斷 (不限 AI 頻道，管理員可於任何頻道綁定)
         if (isAdmin && /^(!!setaichannel|!!setaimemory|!!aioff)$/i.test(raw)) {
             const cmd = raw.toLowerCase();
             if (cmd === '!!setaichannel') {
                 setAiChannel(msg.guild.id, msg.channel.id);
-                return msg.reply(`✅ 此頻道設為 AI 自動回覆頻道。在這裡發言(可附圖) Angela 就會回覆。`).catch(() => {});
+                console.log(`[AIChat] 伺服器 ${msg.guild.id} 綁定 AI 頻道: ${msg.channel.id}`);
+                return msg.reply(`✅ 此頻道已設為 AI 自動回覆頻道。在此頻道發言 Angela 就會回覆。`).catch(() => {});
             }
             if (cmd === '!!setaimemory') {
                 setMemoryChannel(msg.guild.id, msg.channel.id);
-                return msg.reply(`✅ 此頻道設為 AI 記憶庫頻道。對話記憶會備份成 txt，重啟自動讀回。`).catch(() => {});
+                console.log(`[AIChat] 伺服器 ${msg.guild.id} 綁定記憶頻道: ${msg.channel.id}`);
+                return msg.reply(`✅ 此頻道已設為 AI 記憶庫頻道。對話記憶會自動備份成 txt。`).catch(() => {});
             }
             if (cmd === '!!aioff') {
                 setAiChannel(msg.guild.id, null);
                 setMemoryChannel(msg.guild.id, null);
+                console.log(`[AIChat] 伺服器 ${msg.guild.id} 已關閉 AI 功能`);
                 return msg.reply(`✅ 已關閉此伺服器的 AI 回覆與記憶庫。`).catch(() => {});
             }
         }
 
-        if (msg.channelId !== getAiChannel(msg.guild.id)) return;
+        const targetChannel = getAiChannel(msg.guild.id);
 
-        const text = raw;
+        // 🔍 [除錯判斷] 如果不是綁定頻道，安靜跳過
+        if (msg.channelId !== targetChannel) return;
+
         const images = [...msg.attachments.values()].filter(a =>
             (a.contentType && a.contentType.startsWith('image/')) || /\.(png|jpe?g|webp|gif)$/i.test(a.url)
         );
-        if (!text && !images.length) return;
+
+        // 🔍 [除錯判斷] 內容與圖片皆空 (常見於沒開 MessageContent Intent)
+        if (!raw && !images.length) {
+            console.warn(`⚠️ [AIChat] 在 AI 頻道收到訊息，但抓不到內容 (msg.content 為空)。請檢查 Discord Developer Portal 的 Message Content Intent 是否開啟！`);
+            return;
+        }
 
         const now = Date.now();
-        if (now - (cooldowns.get(msg.author.id) || 0) < COOLDOWN_USER) return;
+        if (now - (cooldowns.get(msg.author.id) || 0) < COOLDOWN_USER) {
+            console.log(`[AIChat] 使用者 ${msg.author.tag} 處於冷卻中，跳過。`);
+            return;
+        }
         if (!canCall()) {
-            return msg.reply('⏳ 目前太頻繁，請等一分鐘再試。').catch(() => {});
+            return msg.reply('⏳ 目前全域呼叫太頻繁，請等一分鐘再試。').catch(() => {});
         }
         cooldowns.set(msg.author.id, now);
 
         try {
             await msg.channel.sendTyping().catch(() => {});
-            const { content, stickerId } = await askGemini(text, msg.guild.id, msg.author.id, images, msg.guild, client);
-            try {
-                await msg.reply({
-                    content,
-                    allowedMentions: { repliedUser: false },
-                    ...(stickerId ? { stickers: [stickerId] } : {})
-                });
-            } catch (sendErr) {
+            const { content, stickerId } = await askGemini(raw, msg.guild.id, msg.author.id, images, msg.guild, client);
+            
+            await msg.reply({
+                content,
+                allowedMentions: { repliedUser: false },
+                ...(stickerId ? { stickers: [stickerId] } : {})
+            }).catch(async () => {
+                // 若貼圖傳送失敗，降級為純文字
                 await msg.reply({ content, allowedMentions: { repliedUser: false } }).catch(() => {});
-            }
+            });
+
         } catch (err) {
-            console.error('[AIChat] 錯誤詳細資訊:', err);
+            console.error('[AIChat] 執行失敗:', err);
             const errMsg = err.message || String(err);
             await msg.reply(`⚠️ **AI 回覆失敗**\n\`\`\`text\n${errMsg}\n\`\`\``).catch(() => {});
         }
