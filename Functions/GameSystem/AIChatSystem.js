@@ -227,7 +227,7 @@ async function restoreGuild(client, g) {
     let n = 0, m;
     while ((m = pat.exec(text)) !== null) {
         try {
-            const key = m[1].trim();
+            const key = m[1].trim().replace(/:/g, '_');
             const arr = JSON.parse(m[2].trim());
             fs.writeFileSync(memFile(key), JSON.stringify(arr, null, 2), 'utf8');
             histories.set(key, arr);
