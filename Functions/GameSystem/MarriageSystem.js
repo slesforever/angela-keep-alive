@@ -112,10 +112,13 @@ function removeMarriage(a, b) {
 }
 
 async function handleMarry(client, interaction) {
-    const targetOption = interaction.options?.getUser('target');
+    const subcommand = interaction.options?.getSubcommand?.(false) || 'status';
+    const targetOption = subcommand === 'request'
+        ? interaction.options?.getUser('target')
+        : null;
     const language = getLanguage(interaction.user.id);
 
-    if (!targetOption) {
+    if (subcommand === 'status' || !targetOption) {
         return interaction.reply({
             embeds: [new EmbedBuilder()
                 .setColor(0xff6b9a)

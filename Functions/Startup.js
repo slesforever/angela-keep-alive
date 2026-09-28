@@ -581,7 +581,7 @@ const allSlashCommands = [
 
     new SlashCommandBuilder()
         .setName('play')
-        .setDescription('播放 YouTube、Spotify 或 SoundCloud 連結（支援播放清單）')
+        .setDescription('播放 YouTube 或 SoundCloud 音樂（支援播放清單）')
         .addStringOption(option => option.setName('musiclink').setDescription('音樂或播放清單連結').setRequired(true)),
 
     new SlashCommandBuilder()
@@ -592,8 +592,23 @@ const allSlashCommands = [
 
     new SlashCommandBuilder()
         .setName('marry')
-        .setDescription('查看婚姻；選擇使用者即可發送結婚請求')
-        .addUserOption(o => o.setName('target').setDescription('選擇要結婚的使用者').setRequired(false)),
+        .setDescription('查看婚姻狀態或發送結婚請求')
+        .addSubcommand(o =>
+            o
+                .setName('status')
+                .setDescription('查看自己的婚姻狀態與配偶')
+        )
+        .addSubcommand(o =>
+            o
+                .setName('request')
+                .setDescription('向指定使用者發送結婚請求')
+                .addUserOption(user =>
+                    user
+                        .setName('target')
+                        .setDescription('選擇要結婚的使用者')
+                        .setRequired(true)
+                )
+        ),
 
     new SlashCommandBuilder()
         .setName('divorce')
@@ -2247,6 +2262,32 @@ client.on(
 // Client Ready
 // ─────────────────────────────────────────────
 
+const LEGACY_SLASH_COMMAND_NAMES = new Set([
+    'setaichannel',
+    'setaimemory',
+    'aioff'
+]);
+
+async function removeLegacySlashCommands(commandManager, scopeName) {
+    const registered = await commandManager.fetch();
+    let removed = 0;
+
+    for (const command of registered.values()) {
+        if (!LEGACY_SLASH_COMMAND_NAMES.has(command.name)) {
+            continue;
+        }
+
+        await commandManager.delete(command.id);
+        removed++;
+    }
+
+    if (removed > 0) {
+        console.log(
+            `[Commands] 已移除 ${scopeName} 舊 AI 指令：${removed} 個`
+        );
+    }
+}
+
 client.once(
     Events.ClientReady,
     async () => {
@@ -2260,6 +2301,21 @@ client.once(
         // ─────────────────────────────────────
 
         try {
+
+            await removeLegacySlashCommands(
+                client.application.commands,
+                '全域'
+            );
+
+            for (
+                const guild
+                of client.guilds.cache.values()
+            ) {
+                await removeLegacySlashCommands(
+                    guild.commands,
+                    `Guild ${guild.id}`
+                );
+            }
 
             await client.application.commands.set(
                 []
