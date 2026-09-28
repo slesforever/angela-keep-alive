@@ -228,7 +228,7 @@ async function restoreGuild(client, g) {
     let n = 0, m;
     while ((m = pat.exec(text)) !== null) {
         try {
-            const key = m[1].trim();
+            const key = m[1].trim().replace(/:/g, '_');
             const targetFile = memFile(key);
             
             // 💡 只有當本地硬碟完全不存在該檔案時，才從 Discord 備份還原
