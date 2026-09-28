@@ -20,6 +20,8 @@ const EMOJI_CAP       = 60;     // 只送前 60 個 emoji
 let cachedModels = [];
 let lastModelFetch = 0;
 const MODEL_CACHE_TTL = 3600_000; // 1 小時重新對齊一次
+const MAX_MODEL_ATTEMPTS = 3;
+const GENERATION_TIMEOUT_MS = 20000;
 
 try { fs.mkdirSync(MEM_DIR, { recursive: true }); } catch {}
 
@@ -38,46 +40,46 @@ function getAiChannel(g) { return getGuildConfig(g)?.aiChannelId || cfg[g]?.chan
 function getMemoryChannel(g) { return getGuildConfig(g)?.aiMemoryChannelId || cfg[g]?.memory || null; }
 
 // ─── 動態向 Google API 獲取你 API Key 真正支援的模型清單 ──────────────
-async function fetchValidModels(apiKey) {
-    const now = Date.now();
-    if (cachedModels.length > 0 && (now - lastModelFetch < MODEL_CACHE_TTL)) {
-        return cachedModels;
-    }
-
+async function fetchWithTimeout(url, options = {}, timeoutMs = 20000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
-        const res = await fetch(url);
-        if (!res.ok) throw new Error(`ListModels HTTP ${res.status}`);
-        const data = await res.json();
-        
-        if (data.models && Array.isArray(data.models)) {
-            // 篩選支援 generateContent 的模型，並去除 'models/' 前綴
-            const available = data.models
-                .filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent'))
-                .map(m => m.name.replace(/^models\//, ''));
-
-            // 排序：將 flash 類型的輕量速度模型排在前面
-            available.sort((a, b) => {
-                const aFlash = a.includes('flash') ? 0 : 1;
-                const bFlash = b.includes('flash') ? 0 : 1;
-                return aFlash - bFlash;
-            });
-
-            if (available.length > 0) {
-                cachedModels = available;
-                lastModelFetch = now;
-                console.log(`🤖 [AIChat] 已自動查詢並載入 ${available.length} 個可用 Gemini 模型:`, available.join(', '));
-                return cachedModels;
-            }
-        }
-    } catch (e) {
-        console.error('⚠️ [AIChat] ListModels 查詢失敗:', e.message);
+        return await fetch(url, { ...options, signal: controller.signal });
+    } catch (err) {
+        if (err.name === 'AbortError') throw new Error('請求逾時（' + (timeoutMs / 1000) + ' 秒）。');
+        throw err;
+    } finally {
+        clearTimeout(timer);
     }
-
-    // 若 ListModels 網路問題失敗，才使用預設名稱
-    return cachedModels.length > 0 ? cachedModels : ['gemini-1.5-flash-latest', 'gemini-1.5-pro-latest'];
 }
 
+async function fetchValidModels(apiKey) {
+    const now = Date.now();
+    if (cachedModels.length > 0 && (now - lastModelFetch < MODEL_CACHE_TTL)) return cachedModels;
+    try {
+        const url = 'https://generativelanguage.googleapis.com/v1beta/models?key=' + encodeURIComponent(apiKey);
+        const res = await fetchWithTimeout(url, {}, 10000);
+        if (!res.ok) throw new Error('ListModels HTTP ' + res.status);
+        const data = await res.json();
+        const available = Array.isArray(data.models) ? data.models
+            .filter(m => Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes('generateContent'))
+            .map(m => String(m.name || '').replace(/^models\//, ''))
+            .filter(Boolean) : [];
+        available.sort((a, b) => {
+            const aFlash = a.includes('flash') ? 0 : 1;
+            const bFlash = b.includes('flash') ? 0 : 1;
+            return aFlash - bFlash || a.localeCompare(b);
+        });
+        if (!available.length) throw new Error('ListModels 沒有回傳支援 generateContent 的模型');
+        cachedModels = available;
+        lastModelFetch = now;
+        console.log('🤖 [AIChat] 已從 Google ListModels 載入 ' + available.length + ' 個可用 Gemini 模型：', available.join(', '));
+        return cachedModels;
+    } catch (e) {
+        console.error('⚠️ [AIChat] ListModels 查詢失敗：', e.message);
+        return cachedModels;
+    }
+}
 // ─── 記憶體 + 磁碟 ─────────────────────────────────────────────
 const histories = new Map();
 const cooldowns = new Map();
@@ -220,7 +222,7 @@ function systemInstr(guild) {
 }
 
 async function toInline(att) {
-    const r = await fetch(att.url);
+    const r = await fetchWithTimeout(att.url, {}, 12000);
     const buf = Buffer.from(await r.arrayBuffer());
     return { inlineData: { mimeType: att.contentType || 'image/png', data: buf.toString('base64') } };
 }
@@ -253,6 +255,7 @@ async function askGeminiOnly(prompt, g, u, images, guild, client, channelId, use
 
     // 🤖 動態取得你目前 API Key 真正開啟的模型清單
     const modelsToTry = await fetchValidModels(apiKey);
+    if (!modelsToTry.length) throw new Error('Google ListModels 沒有提供可用的 Gemini 模型，請檢查 GEMINI_API_KEY 或 Google API 權限。');
 
     const userText = prompt || '（傳送了一張圖片,請描述並回應）';
     const parts = [{ text: userText }];
@@ -273,15 +276,15 @@ async function askGeminiOnly(prompt, g, u, images, guild, client, channelId, use
     let lastError = null;
 
     // 🔄 輪流嘗試 API 回傳的真實有效模型
-    for (const modelName of modelsToTry) {
+    for (const modelName of modelsToTry.slice(0, MAX_MODEL_ATTEMPTS)) {
         try {
             const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
             
-            const res = await fetch(url, { 
-                method: 'POST', 
-                headers: { 'Content-Type': 'application/json' }, 
-                body: JSON.stringify(body) 
-            });
+            const res = await fetchWithTimeout(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            }, GENERATION_TIMEOUT_MS);
 
             if (!res.ok) {
                 const errText = await res.text().catch(() => '');
@@ -316,25 +319,9 @@ async function askGeminiOnly(prompt, g, u, images, guild, client, channelId, use
     throw lastError || new Error('所有可用 Gemini 模型均無法回應，請檢查 API Key 狀態。');
 }
 
-async function askGemini(prompt, g, u, images, guild, client, channelId, userName) {
-      let geminiError = null;
-      try { return await askGeminiOnly(prompt, g, u, images, guild, client, channelId, userName); }
-      catch (err) { geminiError = err; console.warn('[AIChat] Gemini 失敗，切換 DeepSeek:', err.message); }
-      const key = (process.env.DEEPSEEK_API_KEY || '').trim();
-      if (!key) throw new Error('Gemini 無法回覆，且尚未設定 DEEPSEEK_API_KEY。');
-      const content = [{ type: 'text', text: prompt || '（使用者傳送了一張圖片，請辨識並回應）' }];
-      for (const attachment of images) { try { const inline = await toInline(attachment); content.push({ type: 'image_url', image_url: { url: 'data:' + inline.inlineData.mimeType + ';base64,' + inline.inlineData.data, detail: 'auto' } }); } catch (err) { console.warn('[AIChat] DeepSeek 圖片處理失敗:', err.message); } }
-      const response = await fetch('https://api.deepseek.com/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key }, body: JSON.stringify({ model: 'deepseek-flash', messages: [{ role: 'system', content: systemInstr(guild).parts[0].text }, { role: 'user', content }], temperature: 0.9, max_tokens: 700 }) });
-      const body = await response.text();
-      if (!response.ok) throw new Error('Gemini: ' + geminiError.message + '；DeepSeek HTTP ' + response.status + ': ' + body.slice(0, 300));
-      const out = JSON.parse(body)?.choices?.[0]?.message?.content || '（沒有回覆內容）';
-      pushHist(g, u, 'user', prompt || '（圖片）'); pushHist(g, u, 'model', out);
-      if (channelId) { pushChannelHistory(g, channelId, { role: 'user', authorId: u, authorName: userName || u, content: prompt || '（圖片）' }); pushChannelHistory(g, channelId, { role: 'assistant', authorId: client.user?.id || 'bot', authorName: 'Angela', content: out }); }
-      queueBackup(client, g);
-      return polish(out, guild);
-    }
+const askGemini = askGeminiOnly;
 
-    // ─── 啟動(獨立,不動其他腳本)──────────────────────────────────
+// ─── 啟動(獨立,不動其他腳本)──────────────────────────────────
 function init(client) {
     client.on('messageCreate', async (msg) => {
         if (msg.author.bot || !msg.guild) return;
@@ -379,6 +366,13 @@ function init(client) {
     });
 
     client.once('ready', async () => {
+        const apiKey = (process.env.GEMINI_API_KEY || '').trim();
+        if (!apiKey) {
+            console.error('[AIChat] 未設定 GEMINI_API_KEY，無法查詢 Google ListModels。');
+        } else {
+            const models = await fetchValidModels(apiKey);
+            if (!models.length) console.error('[AIChat] 啟動時沒有取得任何可用 Gemini 模型。');
+        }
         try {
             const n = await restoreAll(client);
             if (n > 0) console.log(`🧠 [AIChat] 共還原 ${n} 個使用者記憶`);
