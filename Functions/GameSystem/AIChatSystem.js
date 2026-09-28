@@ -1,6 +1,6 @@
 // Functions/GameSystem/AIChatSystem.js
 // 獨立 AI 聊天: Gemini 視覺 + 伺服器 emoji/貼圖 + 每人記憶庫(Discord 頻道 txt 備份/還原)
-// 防濫用: 每人冷卻 + 每分鐘全域上限 + 歷史/emoji 精簡 + 自動 ListModels 動態智慧獲取/排序可用模型 + 故障秒切。
+// 防濫用: 每人冷卻 + 每分鐘全域上限 + 歷史/emoji 精簡 + 自動 ListModels 動態智慧獲取/排序可用模型 + 404 自動黑名單過濾 + 故障秒切。
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -12,24 +12,24 @@ const CONFIG_PATH     = path.join(process.cwd(), 'data', 'ai-config.json');
 const MEM_DIR         = path.join(process.cwd(), 'data', 'ai-memory');
 
 const COOLDOWN_USER   = 5000;      // 每人冷卻 5 秒
-const MAX_PER_MINUTE  = 12;     // 全域每分鐘最多 12 次
-const HISTORY_CAP     = 10;     // 每人保留最近 10 則乾淨歷史（避免 Context 膨脹）
-const EMOJI_CAP       = 60;     // 只送前 60 個 emoji
+const MAX_PER_MINUTE  = 12;        // 全域每分鐘最多 12 次
+const HISTORY_CAP     = 10;        // 每人保留最近 10 則歷史（避免 Context 膨脹導致速度變慢）
+const EMOJI_CAP       = 60;        // 只送前 60 個 emoji
 
-// 快取經 ListModels API 驗證過的真實可用模型清單
+// 模型黑名單與快取機制
+const blacklistedModels = new Set(); // 自動儲存回傳 404 或已停用的無效模型
 let cachedModels = [];
 let lastModelFetch = 0;
-const MODEL_CACHE_TTL = 1800_000; // 30 分鐘重新對齊一次
-const MAX_MODEL_ATTEMPTS = 3;
-const GENERATION_TIMEOUT_MS = 15000; // 15 秒生成逾時，確保回應極速
+const MODEL_CACHE_TTL = 1800_000;  // 30 分鐘重新對齊一次
+const MAX_MODEL_ATTEMPTS = 5;      // 單次對話最多嘗試 5 個模型
+const GENERATION_TIMEOUT_MS = 15000;// 15 秒生成逾時
 
-// 現代極速 Gemini 模型優先級定義
+// 現役極速模型精確白名單（依優先順序）
 const PREFERRED_MODEL_ORDER = [
     'gemini-2.0-flash',
     'gemini-1.5-flash',
     'gemini-1.5-flash-8b',
     'gemini-2.0-flash-lite',
-    'gemini-2.0-flash-exp',
     'gemini-1.5-pro'
 ];
 
@@ -63,10 +63,12 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
     }
 }
 
-// ─── 動態向 Google ListModels 獲取並「智慧排序」真正支援的模型 ────
+// ─── 動態向 Google ListModels 獲取並過濾/智慧排序模型 ─────────
 async function fetchValidModels(apiKey) {
     const now = Date.now();
-    if (cachedModels.length > 0 && (now - lastModelFetch < MODEL_CACHE_TTL)) return cachedModels;
+    if (cachedModels.length > 0 && (now - lastModelFetch < MODEL_CACHE_TTL)) {
+        return cachedModels.filter(m => !blacklistedModels.has(m));
+    }
 
     const fallbackModels = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-flash-8b'];
 
@@ -78,37 +80,28 @@ async function fetchValidModels(apiKey) {
         const data = await res.json();
         if (!Array.isArray(data.models)) throw new Error('ListModels 回傳格式無效');
 
-        // 過濾：支援 generateContent，且排除專用/非聊天模型（如 embedding, tts, imagen 等）
+        // 過濾：必須支援 generateContent、非黑名單，且排除非聊天/實驗性質模型
         const available = data.models
             .filter(m => {
-                const name = String(m.name || '').toLowerCase();
+                const rawName = String(m.name || '').replace(/^models\//, '');
+                const lower = rawName.toLowerCase();
                 const supportsGenerate = Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes('generateContent');
-                const isNonChat = name.includes('embedding') || name.includes('tts') || name.includes('imagen') || name.includes('aqa') || name.includes('realtime');
-                return supportsGenerate && !isNonChat;
+                const isNonChat = lower.includes('embedding') || lower.includes('tts') || lower.includes('imagen') || lower.includes('aqa') || lower.includes('realtime');
+                
+                return supportsGenerate && !isNonChat && !blacklistedModels.has(rawName);
             })
             .map(m => String(m.name || '').replace(/^models\//, ''))
             .filter(Boolean);
 
         if (!available.length) throw new Error('無可用的 generateContent 模型');
 
-        // 智慧模型排序：高速度、高品質的 Flash 模型排前面
+        // 精準模型排序：白名單精準比對 > 其他模型
         available.sort((a, b) => {
-            const scoreModel = (name) => {
-                const lower = name.toLowerCase();
-                for (let i = 0; i < PREFERRED_MODEL_ORDER.length; i++) {
-                    if (lower === PREFERRED_MODEL_ORDER[i] || lower.startsWith(PREFERRED_MODEL_ORDER[i])) {
-                        return i;
-                    }
-                }
-                if (lower.includes('2.0-flash')) return 10;
-                if (lower.includes('1.5-flash')) return 20;
-                if (lower.includes('flash')) return 30;
-                if (lower.includes('pro')) return 50;
-                return 100;
-            };
+            const indexA = PREFERRED_MODEL_ORDER.indexOf(a);
+            const indexB = PREFERRED_MODEL_ORDER.indexOf(b);
 
-            const scoreA = scoreModel(a);
-            const scoreB = scoreModel(b);
+            const scoreA = indexA !== -1 ? indexA : 100;
+            const scoreB = indexB !== -1 ? indexB : 100;
 
             if (scoreA !== scoreB) return scoreA - scoreB;
             return a.localeCompare(b);
@@ -116,11 +109,11 @@ async function fetchValidModels(apiKey) {
 
         cachedModels = available;
         lastModelFetch = now;
-        console.log(`🤖 [AIChat] 已從 ListModels 載入並排序 ${available.length} 個可用 Gemini 模型 (首選: ${available.slice(0, 3).join(', ')})`);
+        console.log(`🤖 [AIChat] 成功同步 ListModels (${available.length} 個可用，已過濾 ${blacklistedModels.size} 個無效模型)`);
         return cachedModels;
     } catch (e) {
-        console.error('⚠️ [AIChat] ListModels 查詢失敗，切換至快取或預設模型：', e.message);
-        return cachedModels.length > 0 ? cachedModels : fallbackModels;
+        console.error('⚠️ [AIChat] ListModels 查詢失敗，切換至預設模型：', e.message);
+        return fallbackModels.filter(m => !blacklistedModels.has(m));
     }
 }
 
@@ -159,7 +152,7 @@ function pushHist(g, u, role, text) {
     saveHist(g, u, h);
 }
 
-// ─── 歷史紀錄嚴格清洗器 (確保交替的 user/model 格式) ────────────
+// ─── 歷史紀錄嚴格清洗器 ────────────────────────────────────────
 function sanitizeHistory(rawHist) {
     if (!Array.isArray(rawHist) || rawHist.length === 0) return [];
     const clean = [];
@@ -258,7 +251,7 @@ function systemInstr(guild) {
     const stickers = [...guild.stickers.cache.values()].map(s => s.name);
     const L = [
         '你是 Angela，是這個 Discord 伺服器的聊天夥伴。請自然、連貫、簡潔具體地回應對話，不要空泛敷衍。',
-        '配合使用者要求的角色扮演與情境設定，請保持友善活潑。',
+        '使用者要求你扮演角色、改變語氣或進行情境對話時請配合，不要因為你是 AI 就無端拒絕；只有真正需要安全拒絕時才簡短說明並給替代。',
         '可使用伺服器自訂 emoji，直接輸出原始格式 <:name:id> 或 <a:name:id>。只可用以下清單，不可捏造:'
     ];
     L.push(emojis.length ? emojis.join(' ') : '(此伺服器沒有自訂 emoji)');
@@ -296,14 +289,13 @@ function canCall() {
     return true;
 }
 
-// ─── Gemini 核心呼叫邏輯 ───────────────────────────────────────
+// ─── Gemini 呼叫主體（含 404 自動黑名單與歷史精簡） ───────────────
 async function askGeminiOnly(cleanUserText, fullPromptContext, g, u, images, guild, client, channelId, userName) {
     const apiKey = (process.env.GEMINI_API_KEY || '').trim();
     if (!apiKey) throw new Error('未設定 GEMINI_API_KEY');
 
-    // 🤖 動態取得 ListModels 已排序的可用模型
     const modelsToTry = await fetchValidModels(apiKey);
-    if (!modelsToTry.length) throw new Error('Google ListModels 沒有提供可用的 Gemini 模型，請檢查 API Key 狀態。');
+    if (!modelsToTry.length) throw new Error('目前沒有任何可用的 Gemini 模型，請檢查 API Key 狀態或配額。');
 
     const promptText = fullPromptContext || '（傳送了一張圖片，請描述並回應）';
     const parts = [{ text: promptText }];
@@ -327,7 +319,6 @@ async function askGeminiOnly(cleanUserText, fullPromptContext, g, u, images, gui
 
     let lastError = null;
 
-    // 🔄 輪流嘗試 ListModels 篩選出最快的真實模型
     for (const modelName of modelsToTry.slice(0, MAX_MODEL_ATTEMPTS)) {
         try {
             const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
@@ -340,13 +331,22 @@ async function askGeminiOnly(cleanUserText, fullPromptContext, g, u, images, gui
 
             if (!res.ok) {
                 const errText = await res.text().catch(() => '');
-                const errObj = new Error(`[${modelName}] HTTP ${res.status}:${errText.slice(0, 200)}`);
                 
-                // 遇到過載 (503)、限流 (429)、未找到 (404) 或伺服器錯誤，立刻試下一個模型
-                if ([404, 429, 500, 502, 503, 504].includes(res.status)) {
-                    console.warn(`⚠️ [AIChat] 模型 ${modelName} 無法即時回應 (${res.status})，切換至下一個模型...`);
+                // 🛑 遭遇 404 或已廢棄提示，直接納入黑名單，無感切換下一個模型
+                if (res.status === 404 || errText.includes('no longer available') || errText.includes('not found')) {
+                    console.warn(`🚫 [AIChat] 模型 ${modelName} 無效或已停用 (HTTP ${res.status})，已加入黑名單！`);
+                    blacklistedModels.add(modelName);
+                    cachedModels = cachedModels.filter(m => m !== modelName);
+                    continue;
+                }
+
+                const errObj = new Error(`[${modelName}] HTTP ${res.status}:${errText.slice(0, 150)}`);
+                
+                // 遇到 429 限流、503 過載等暫時問題，嘗試下一個可用模型
+                if ([429, 500, 502, 503, 504].includes(res.status)) {
+                    console.warn(`⚠️ [AIChat] 模型 ${modelName} 繁忙 (${res.status})，切換至下一個...`);
                     lastError = errObj;
-                    continue; 
+                    continue;
                 } else {
                     throw errObj;
                 }
@@ -355,7 +355,7 @@ async function askGeminiOnly(cleanUserText, fullPromptContext, g, u, images, gui
             const data = await res.json();
             const out = data?.candidates?.[0]?.content?.parts?.[0]?.text || '（沒有回覆內容）';
 
-            // 💡【核心修復】：歷史記憶只寫入乾淨的使用者對話，絕不寫入整包舊紀錄！
+            // 僅把乾淨的使用者文字記錄進記憶，避免 Context 指數級膨脹
             const recordUserText = cleanUserText || '（傳送了圖片）';
             pushHist(g, u, 'user', recordUserText);
             pushHist(g, u, 'model', out);
@@ -374,12 +374,12 @@ async function askGeminiOnly(cleanUserText, fullPromptContext, g, u, images, gui
         }
     }
 
-    throw lastError || new Error('所有可用 Gemini 模型均無法回應，請檢查 API Key 權限或配額。');
+    throw lastError || new Error('所有 Gemini 模型均無法回應，請檢查 API Key 權限。');
 }
 
 const askGemini = askGeminiOnly;
 
-// ─── 啟動與監聽 ──────────────────────────────────────────────
+// ─── 啟動與事件監聽 ───────────────────────────────────────────
 function init(client) {
     client.on('messageCreate', async (msg) => {
         if (msg.author.bot || !msg.guild) return;
@@ -411,7 +411,6 @@ function init(client) {
             const authorName = msg.member?.displayName || msg.author.globalName || msg.author.username;
             const fullPromptContext = `[近期頻道對話紀錄]\n${context}\n\n[當前對話者]: ${authorName} (ID: ${msg.author.id})\n[最新訊息]: ${text}`;
 
-            // 第一個參數是使用者真實輸入（存入記憶），第二個參數包含頻道脈絡（給 API 當次參考）
             const { content, stickerId } = await askGemini(
                 text, 
                 fullPromptContext, 
@@ -454,7 +453,7 @@ function init(client) {
         } catch (e) { console.error('[AIChat] 還原失敗:', e.message); }
     });
 
-    console.log('[AIChat] 獨立 AI 聊天系統已就緒 (ListModels 極速模型排序 + 輕量化記憶)');
+    console.log('[AIChat] 獨立 AI 聊天系統已就緒 (ListModels + 動態黑名單 + 輕量記憶備份)');
 }
 
 module.exports = { init, getAiChannel, getMemoryChannel };
