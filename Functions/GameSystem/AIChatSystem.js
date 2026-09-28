@@ -23,15 +23,6 @@ const MODEL_CACHE_TTL = 1800_000;  // 30 分鐘更新一次
 const MAX_MODEL_ATTEMPTS = 5;      // 單次對話最多嘗試 5 個模型
 const GENERATION_TIMEOUT_MS = 15000;// 15 秒生成逾時
 
-// 現役標準對話模型優先順序
-const PREFERRED_MODEL_ORDER = [
-    'gemini-2.0-flash',
-    'gemini-1.5-flash',
-    'gemini-1.5-flash-8b',
-    'gemini-2.0-flash-lite',
-    'gemini-1.5-pro'
-];
-
 try { fs.mkdirSync(MEM_DIR, { recursive: true }); } catch {}
 
 function readJson(p, fb) {
@@ -71,8 +62,6 @@ async function fetchValidModels(apiKey) {
         return cachedModels.filter(m => !blacklistedModels.has(m));
     }
 
-    const fallbackModels = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-flash-8b'];
-
     try {
         const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`;
         const res = await fetchWithTimeout(url, {}, 8000);
@@ -104,16 +93,11 @@ async function fetchValidModels(apiKey) {
 
         if (!available.length) throw new Error('無可用的標準對話模型');
 
-        // 精準排序：依照白名單優先順序 > 其餘模型 alphabetically
+        // 只依照 ListModels 回傳結果排序，flash 優先；不使用任何硬編碼模型名稱。
         available.sort((a, b) => {
-            const indexA = PREFERRED_MODEL_ORDER.indexOf(a);
-            const indexB = PREFERRED_MODEL_ORDER.indexOf(b);
-
-            const scoreA = indexA !== -1 ? indexA : 100;
-            const scoreB = indexB !== -1 ? indexB : 100;
-
-            if (scoreA !== scoreB) return scoreA - scoreB;
-            return a.localeCompare(b);
+            const aFlash = a.toLowerCase().includes('flash') ? 0 : 1;
+            const bFlash = b.toLowerCase().includes('flash') ? 0 : 1;
+            return aFlash - bFlash || a.localeCompare(b);
         });
 
         cachedModels = available;
@@ -121,8 +105,9 @@ async function fetchValidModels(apiKey) {
         console.log(`🤖 [AIChat] 已載入 ${available.length} 個可用 Gemini 模型:`, available.join(', '));
         return cachedModels;
     } catch (e) {
-        console.error('⚠️ [AIChat] ListModels 查詢失敗，切換至備用清單:', e.message);
-        return fallbackModels.filter(m => !blacklistedModels.has(m));
+        console.error('⚠️ [AIChat] ListModels 查詢失敗，不使用猜測的模型名稱:', e.message);
+        // 只有曾經成功由 ListModels 取得的清單可以繼續使用；沒有硬編碼 fallback。
+        return cachedModels.filter(m => !blacklistedModels.has(m));
     }
 }
 
@@ -451,6 +436,13 @@ function init(client) {
     });
 
     client.once('ready', async () => {
+        const apiKey = (process.env.GEMINI_API_KEY || '').trim();
+        if (!apiKey) {
+            console.error('[AIChat] 未設定 GEMINI_API_KEY，無法在啟動時查詢 Google ListModels。');
+        } else {
+            const models = await fetchValidModels(apiKey);
+            if (!models.length) console.error('[AIChat] 啟動時沒有取得任何可用 Gemini 模型。');
+        }
         try {
             const n = await restoreAll(client);
             if (n > 0) console.log(`🧠 [AIChat] 共還原 ${n} 個使用者記憶`);
