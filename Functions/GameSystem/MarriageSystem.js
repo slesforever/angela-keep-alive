@@ -112,10 +112,10 @@ function removeMarriage(a, b) {
 }
 
 async function handleMarry(client, interaction) {
-    const raw = interaction.options?.getString('target');
+    const targetOption = interaction.options?.getUser('target');
     const language = getLanguage(interaction.user.id);
 
-    if (!raw || raw.toLowerCase() === 'status' || raw.toLowerCase() === 'staus') {
+    if (!targetOption) {
         return interaction.reply({
             embeds: [new EmbedBuilder()
                 .setColor(0xff6b9a)
@@ -125,7 +125,7 @@ async function handleMarry(client, interaction) {
         });
     }
 
-    const target = resolveUser(interaction, raw);
+    const target = targetOption;
     if (!target || target.bot || target.id === interaction.user.id) {
         return interaction.reply({
             content: language === 'en' ? 'Please mention another human user.' : '請標記其他使用者。',

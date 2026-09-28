@@ -19,6 +19,7 @@ const ShopSystem = require('./GameSystem/ShopSystem.js');
 const { handleList } = require('./GameSystem/Pulls/ListSystem.js');
 const MarriageSystem = require('./GameSystem/MarriageSystem.js');
 const GiveawaySystem = require('./GameSystem/GiveawayEventSystem.js');
+const MusicSystem = require('./GameSystem/MusicSystem.js');
 
 const SUPER_ADMIN_ID = '1330463890122735642';
 
@@ -222,13 +223,16 @@ async function handleSlashCommands(client, interaction) {
             return interaction.reply({ content: `✅ 已加入語音頻道：**${voiceChannel.name}**` });
         }
 
+        if (commandName === 'play') return MusicSystem.handlePlay(client, interaction);
+
         if (commandName === 'leave') {
             const connection = getVoiceConnection(interaction.guild.id);
             if (!connection) {
                 return interaction.reply({ content: '❌ 機器人目前不在任何語音頻道中。', flags: MessageFlags.Ephemeral });
             }
+            MusicSystem.stop(interaction.guild.id);
             connection.destroy();
-            return interaction.reply({ content: '👋 已離開語音頻道。' });
+            return interaction.reply({ content: '👋 已離開語音頻道並清空播放佇列。' });
         }
 
         if (commandName === 'status') {

@@ -80,7 +80,9 @@ function createDefaultConfig() {
         translationOutputChannelId: '',
         translationSourceChannelIds: [],
 
-        storageChannelId: ''
+        storageChannelId: '',
+        aiChannelId: '',
+        aiMemoryChannelId: ''
     };
 }
 

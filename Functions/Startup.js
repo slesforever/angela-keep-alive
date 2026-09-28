@@ -579,6 +579,11 @@ const allSlashCommands = [
         ),
 
     new SlashCommandBuilder()
+        .setName('play')
+        .setDescription('播放 YouTube、Spotify 或 SoundCloud 連結（支援播放清單）')
+        .addStringOption(option => option.setName('musiclink').setDescription('音樂或播放清單連結').setRequired(true)),
+
+    new SlashCommandBuilder()
         .setName('leave')
         .setDescription(
             '讓機器人離開目前所在的語音頻道'
@@ -586,13 +591,13 @@ const allSlashCommands = [
 
     new SlashCommandBuilder()
         .setName('marry')
-        .setDescription('發送結婚請求，輸入 status 查看婚姻')
-        .addStringOption(o => o.setName('target').setDescription('輸入 @使用者、使用者 ID，或 status').setRequired(false)),
+        .setDescription('查看婚姻；選擇使用者即可發送結婚請求')
+        .addUserOption(o => o.setName('target').setDescription('選擇要結婚的使用者').setRequired(false)),
 
     new SlashCommandBuilder()
         .setName('divorce')
-        .setDescription('離婚；可選擇指定配偶')
-        .addStringOption(o => o.setName('target').setDescription('輸入 @使用者或使用者 ID').setRequired(false)),
+        .setDescription('離婚；不選對象會顯示可選配偶')
+        .addUserOption(o => o.setName('target').setDescription('選擇要離婚的配偶').setRequired(false)),
 
     new SlashCommandBuilder()
         .setName('status')
@@ -666,7 +671,9 @@ const allSlashCommands = [
                         {
                             name: '🌐 切換翻譯來源頻道',
                             value: 'translate-source'
-                        }
+                        },
+                        { name: '🤖 AI 自動回覆頻道', value: 'ai' },
+                        { name: '🧠 AI 記憶庫頻道', value: 'ai-memory' }
                     )
         )
         .addChannelOption(
@@ -1486,7 +1493,9 @@ client.on(
                     `星星榜：${channel(config.starboardChannelId)}`,
                     `紀錄：${channel(config.auditChannelId)}`,
                     `翻譯輸出：${channel(config.translationOutputChannelId)}`,
-                    `翻譯來源：${sourceChannels}`
+                    `翻譯來源：${sourceChannels}`,
+                    `AI 回覆：${channel(config.aiChannelId)}`,
+                    `AI 記憶庫：${channel(config.aiMemoryChannelId)}`
                 ].join('\n'),
 
                 flags:
@@ -1544,11 +1553,10 @@ client.on(
                 },
 
                 news: {
-                    key:
-                        'newsChannelId',
-                    label:
-                        '新聞與社群動態頻道'
-                }
+                    key: 'newsChannelId', label: '新聞與社群動態頻道'
+                },
+                ai: { key: 'aiChannelId', label: 'AI 自動回覆頻道' },
+                'ai-memory': { key: 'aiMemoryChannelId', label: 'AI 記憶庫頻道' }
             };
 
             // ─────────────────────────────

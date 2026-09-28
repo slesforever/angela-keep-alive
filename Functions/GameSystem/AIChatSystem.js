@@ -5,6 +5,7 @@
 const fs = require('fs');
 const path = require('path');
 const { AttachmentBuilder, PermissionFlagsBits } = require('discord.js');
+const { getGuildConfig } = require('./ServerConfigStorage.js');
 
 // ─── 設定 ──────────────────────────────────────────────────────
 const CONFIG_PATH     = path.join(process.cwd(), 'data', 'ai-config.json');
@@ -33,8 +34,8 @@ function writeJson(p, data) {
 
 const cfg = readJson(CONFIG_PATH, {});
 function saveCfg() { writeJson(CONFIG_PATH, cfg); }
-function getAiChannel(g)     { return cfg[g]?.channel  || null; }
-function getMemoryChannel(g) { return cfg[g]?.memory   || null; }
+function getAiChannel(g) { return getGuildConfig(g)?.aiChannelId || cfg[g]?.channel || null; }
+function getMemoryChannel(g) { return getGuildConfig(g)?.aiMemoryChannelId || cfg[g]?.memory || null; }
 function setAiChannel(g, c)    { cfg[g] = cfg[g] || {}; c ? cfg[g].channel = c : delete cfg[g].channel;    saveCfg(); }
 function setMemoryChannel(g, c){ cfg[g] = cfg[g] || {}; c ? cfg[g].memory = c : delete cfg[g].memory;    saveCfg(); }
 
@@ -85,6 +86,10 @@ const cooldowns = new Map();
 const callTimestamps = [];                       
 const memTimer = new Map();
 const memInFlight = new Set();
+const channelHistories = new Map();
+function channelFile(g, c) { return path.join(MEM_DIR, 'channel_' + g + '_' + c + '.json'); }
+function getChannelHistory(g, c) { const k = 'channel:' + g + ':' + c; if (!channelHistories.has(k)) channelHistories.set(k, readJson(channelFile(g, c), [])); return channelHistories.get(k); }
+function pushChannelHistory(g, c, item) { const h = getChannelHistory(g, c); h.push(item); if (h.length > 40) h.splice(0, h.length - 40); writeJson(channelFile(g, c), h); }
 
 const mk = (g, u) => `${g}:${u}`;
 const memFile = k => path.join(MEM_DIR, `${k.replace(/:/g, '_')}.json`);
@@ -130,23 +135,20 @@ function sanitizeHistory(rawHist) {
 
 // ─── 頻道記憶備份/還原 ─────────────────────────────────────────
 function snapshotText(g) {
-    const pre = `${g}_`;
-    const files = fs.existsSync(MEM_DIR)
-        ? fs.readdirSync(MEM_DIR).filter(f => f.startsWith(pre) && f.endsWith('.json')) : [];
-    const head = `# Angela AI Memory Backup\n# Guild: ${g}\n# Generated: ${new Date().toISOString()}\n# Users: ${files.length}\n\n`;
-    const body = files.map(f => {
-        const u = f.slice(pre.length, -5);
-        try {
-            const arr = JSON.parse(fs.readFileSync(path.join(MEM_DIR, f), 'utf8'));
-            return `==================================================\nMEM KEY: ${g}:${u}\nUPDATED: ${new Date().toISOString()}\n==================================================\n${JSON.stringify(arr)}\n`;
-        } catch (e) {
-            return `==================================================\nMEM KEY: ${g}:${u}\nPARSE ERROR:${e.message}\n==================================================\n`;
-        }
-    }).join('\n');
-    return head + body;
-}
+      const files = fs.existsSync(MEM_DIR) ? fs.readdirSync(MEM_DIR).filter(f => (f.startsWith(g + '_') || f.startsWith('channel_' + g + '_')) && f.endsWith('.json')) : [];
+      const out = ['# Angela AI Memory Backup', '# Guild: ' + g, '# Generated: ' + new Date().toISOString(), '# Records: ' + files.length, ''];
+      for (const file of files) {
+          const isChannel = file.startsWith('channel_');
+          const prefix = isChannel ? 'channel_' + g + '_' : g + '_';
+          const id = file.slice(prefix.length, -5);
+          let data = [];
+          try { data = JSON.parse(fs.readFileSync(path.join(MEM_DIR, file), 'utf8')); } catch (e) { data = { error: e.message }; }
+          out.push('==================================================', 'MEM KEY: ' + (isChannel ? 'channel:' : 'user:') + g + ':' + id, 'UPDATED: ' + new Date().toISOString(), '==================================================', JSON.stringify(data), '');
+      }
+      return out.join('\n');
+    }
 
-async function sendBackup(client, g) {
+    async function sendBackup(client, g) {
     const chId = getMemoryChannel(g);
     if (!chId) return false;
     const ch = await client.channels.fetch(chId).catch(() => null);
@@ -170,38 +172,33 @@ function queueBackup(client, g) {
 }
 
 async function restoreGuild(client, g) {
-    const chId = getMemoryChannel(g);
-    if (!chId) return 0;
-    const ch = await client.channels.fetch(chId).catch(() => null);
-    if (!ch) return 0;
-    const msgs = await ch.messages.fetch({ limit: 100 }).catch(() => null);
-    if (!msgs?.size) return 0;
-    let latest = null;
-    for (const m of msgs.values()) for (const a of m.attachments.values()) {
-        const match = a.name?.match(new RegExp(`^aimemory_${g}_(.+)\\.txt$`));
-        if (match && (!latest || m.createdTimestamp > latest.ts)) latest = { ts: m.createdTimestamp, url: a.url };
+      const chId = getMemoryChannel(g); if (!chId) return 0;
+      const ch = await client.channels.fetch(chId).catch(() => null); if (!ch) return 0;
+      const msgs = await ch.messages.fetch({ limit: 100 }).catch(() => null); if (!msgs?.size) return 0;
+      let latest = null;
+      for (const m of msgs.values()) for (const a of m.attachments.values()) {
+          const prefix = 'aimemory_' + g + '_';
+          if (a.name?.startsWith(prefix) && a.name.endsWith('.txt') && (!latest || m.createdTimestamp > latest.ts)) latest = { ts: m.createdTimestamp, url: a.url };
+      }
+      if (!latest) return 0;
+      const response = await fetch(latest.url).catch(() => null); if (!response?.ok) return 0;
+      const text = await response.text();
+      const pattern = /==================================================\r?\nMEM KEY:\s*(user|channel):([^:\r\n]+):([^\r\n]+)\r?\n[\s\S]*?\r?\n==================================================\r?\n([\s\S]*?)(?=\r?\n==================================================\r?\nMEM KEY:|\s*$)/g;
+      let count = 0, match;
+      while ((match = pattern.exec(text)) !== null) {
+          try {
+              const data = JSON.parse(match[4].trim()), type = match[1], id = match[3].trim();
+              const file = type === 'channel' ? channelFile(g, id) : memFile(g + '_' + id);
+              writeJson(file, data);
+              (type === 'channel' ? channelHistories : histories).set(type === 'channel' ? 'channel:' + g + ':' + id : g + ':' + id, Array.isArray(data) ? data : []);
+              count++;
+          } catch (e) { console.warn('[AIChat] 記憶還原失敗:', e.message); }
+      }
+      return count;
     }
-    if (!latest) return 0;
-    let text;
-    try { const r = await fetch(latest.url); if (!r.ok) return 0; text = await r.text(); }
-    catch (e) { console.error('[AIChat] 下載備份失敗:', e.message); return 0; }
-    if (!text) return 0;
-    const pat = /==================================================\r?\nMEM KEY:\s*([^\r\n]+)\r?\n[\s\S]*?\r?\n==================================================\r?\n([\s\S]*?)(?=\r?\n==================================================\r?\nMEM KEY:|\s*$)/g;
-    let n = 0, m;
-    while ((m = pat.exec(text)) !== null) {
-        try {
-            const arr = JSON.parse(m[2].trim());
-            fs.writeFileSync(memFile(m[1].trim()), JSON.stringify(arr, null, 2), 'utf8');
-            histories.set(m[1].trim(), arr);
-            n++;
-        } catch (e) { console.error(`[AIChat] 解析 ${m[1]} 失敗:`, e.message); }
-    }
-    console.log(`✅ [AIChat] guild ${g} 還原 ${n} 個使用者記憶`);
-    return n;
-}
-async function restoreAll(client) {
+    async function restoreAll(client) {
     let t = 0;
-    for (const g of Object.keys(cfg)) {
+    for (const g of client.guilds.cache.keys()) {
         try { t += await restoreGuild(client, g); }
         catch (e) { console.error(`[AIChat] guild ${g} 還原失敗:`, e.message); }
     }
@@ -213,7 +210,8 @@ function systemInstr(guild) {
     const emojis = [...guild.emojis.cache.values()].slice(0, EMOJI_CAP).map(e => e.toString());
     const stickers = [...guild.stickers.cache.values()].map(s => s.name);
     const L = [
-        '你是 Angela,這個 Discord 伺服器的聊天夥伴。語氣自然親切,回覆簡短(通常 1~3 句)。',
+        '你是 Angela，是這個 Discord 伺服器的聊天夥伴。請自然、連貫、具體地接續聊天室，不要空泛敷衍。',
+        '使用者要求你扮演角色、改變語氣或進行情境對話時請配合，不要因為你是 AI 就無端拒絕或跳出角色；只有真正需要安全拒絕時才簡短說明並給替代。',
         '可使用伺服器自訂 emoji,直接輸出原始格式 <:name:id> 或 <a:name:id>。只可用以下清單,不可捏造:'
     ];
     L.push(emojis.length ? emojis.join(' ') : '(此伺服器沒有自訂 emoji)');
@@ -251,7 +249,7 @@ function canCall() {
     return true;
 }
 
-async function askGemini(prompt, g, u, images, guild, client) {
+async function askGeminiOnly(prompt, g, u, images, guild, client, channelId, userName) {
     const apiKey = (process.env.GEMINI_API_KEY || '').trim();
     if (!apiKey) {
         return { content: '❌ **除錯提示**：`process.env.GEMINI_API_KEY` 是空的！請檢查 `.env` 檔或環境變數名稱是否拼錯。', stickerId: null };
@@ -308,6 +306,7 @@ async function askGemini(prompt, g, u, images, guild, client) {
 
             pushHist(g, u, 'user', userText);
             pushHist(g, u, 'model', out);
+            if (channelId) { pushChannelHistory(g, channelId, { role: 'user', authorId: u, authorName: userName || u, content: userText }); pushChannelHistory(g, channelId, { role: 'assistant', authorId: client.user?.id || 'bot', authorName: 'Angela', content: out }); }
 
             queueBackup(client, g);
             return polish(out, guild);
@@ -321,7 +320,25 @@ async function askGemini(prompt, g, u, images, guild, client) {
     throw lastError || new Error('所有可用 Gemini 模型均無法回應，請檢查 API Key 狀態。');
 }
 
-// ─── 啟動(獨立,不動其他腳本)──────────────────────────────────
+async function askGemini(prompt, g, u, images, guild, client, channelId, userName) {
+      let geminiError = null;
+      try { return await askGeminiOnly(prompt, g, u, images, guild, client, channelId, userName); }
+      catch (err) { geminiError = err; console.warn('[AIChat] Gemini 失敗，切換 DeepSeek:', err.message); }
+      const key = (process.env.DEEPSEEK_API_KEY || '').trim();
+      if (!key) throw new Error('Gemini 無法回覆，且尚未設定 DEEPSEEK_API_KEY。');
+      const content = [{ type: 'text', text: prompt || '（使用者傳送了一張圖片，請辨識並回應）' }];
+      for (const attachment of images) { try { const inline = await toInline(attachment); content.push({ type: 'image_url', image_url: { url: 'data:' + inline.inlineData.mimeType + ';base64,' + inline.inlineData.data, detail: 'auto' } }); } catch (err) { console.warn('[AIChat] DeepSeek 圖片處理失敗:', err.message); } }
+      const response = await fetch('https://api.deepseek.com/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key }, body: JSON.stringify({ model: 'deepseek-flash', messages: [{ role: 'system', content: systemInstr(guild).parts[0].text }, { role: 'user', content }], temperature: 0.9, max_tokens: 700 }) });
+      const body = await response.text();
+      if (!response.ok) throw new Error('Gemini: ' + geminiError.message + '；DeepSeek HTTP ' + response.status + ': ' + body.slice(0, 300));
+      const out = JSON.parse(body)?.choices?.[0]?.message?.content || '（沒有回覆內容）';
+      pushHist(g, u, 'user', prompt || '（圖片）'); pushHist(g, u, 'model', out);
+      if (channelId) { pushChannelHistory(g, channelId, { role: 'user', authorId: u, authorName: userName || u, content: prompt || '（圖片）' }); pushChannelHistory(g, channelId, { role: 'assistant', authorId: client.user?.id || 'bot', authorName: 'Angela', content: out }); }
+      queueBackup(client, g);
+      return polish(out, guild);
+    }
+
+    // ─── 啟動(獨立,不動其他腳本)──────────────────────────────────
 function init(client) {
     client.on('messageCreate', async (msg) => {
         if (msg.author.bot || !msg.guild) return;
@@ -362,7 +379,10 @@ function init(client) {
 
         try {
             await msg.channel.sendTyping().catch(() => {});
-            const { content, stickerId } = await askGemini(text, msg.guild.id, msg.author.id, images, msg.guild, client);
+            const recent = await msg.channel.messages.fetch({ limit: 15 }).catch(() => null);
+            const context = recent ? [...recent.values()].reverse().filter(m => !m.system && (m.content || m.attachments?.size)).map(m => '[' + (m.member?.displayName || m.author?.globalName || m.author?.username || 'unknown') + ' (ID: ' + m.author.id + ')] ' + (m.content || '[圖片/附件]')).join('\n') : '';
+            const identifiedText = '目前對話者：' + (msg.member?.displayName || msg.author.globalName || msg.author.username) + ' (ID: ' + msg.author.id + ')\n最近聊天室：\n' + context + '\n\n目前訊息：\n' + text;
+            const { content, stickerId } = await askGemini(identifiedText, msg.guild.id, msg.author.id, images, msg.guild, client, msg.channelId, msg.member?.displayName || msg.author.globalName || msg.author.username);
             try {
                 await msg.reply({
                     content,

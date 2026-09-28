@@ -26,13 +26,14 @@ const commands = [
     new SlashCommandBuilder().setName('gayrate').setDescription('男同指數').addUserOption(o => o.setName('target').setDescription('目標玩家')),
     new SlashCommandBuilder().setName('lesbianrate').setDescription('女同指數').addUserOption(o => o.setName('target').setDescription('目標玩家')),
     new SlashCommandBuilder().setName('join').setDescription('加入語音'),
+    new SlashCommandBuilder().setName('play').setDescription('播放 YouTube、Spotify 或 SoundCloud 連結（支援播放清單）').addStringOption(o => o.setName('musiclink').setDescription('音樂或播放清單連結').setRequired(true)),
     new SlashCommandBuilder().setName('leave').setDescription('離開語音'),
     new SlashCommandBuilder().setName('status').setDescription('查看狀態'),
     new SlashCommandBuilder().setName('setchannel').setDescription('設定系統頻道').setDefaultMemberPermissions(admin)
         .addStringOption(o => o.setName('type').setDescription('頻道類型').setRequired(true).addChoices(
             { name: '系統通知', value: 'notify' }, { name: 'Rate Up', value: 'rateup' }, { name: '新聞', value: 'news' },
             { name: '升級公告', value: 'level' }, { name: 'Sles公告', value: 'announce' }, { name: '星星榜', value: 'starboard' },
-            { name: '紀錄', value: 'audit' }, { name: '翻譯輸出', value: 'translate-output' }, { name: '切換翻譯來源', value: 'translate-source' }))
+            { name: '紀錄', value: 'audit' }, { name: '翻譯輸出', value: 'translate-output' }, { name: '切換翻譯來源', value: 'translate-source' }, { name: 'AI 自動回覆', value: 'ai' }, { name: 'AI 記憶庫', value: 'ai-memory' }))
         .addChannelOption(o => o.setName('target_channel').setDescription('目標文字頻道').addChannelTypes(ChannelType.GuildText).setRequired(true)),
     new SlashCommandBuilder().setName('setlevelchannel').setDescription('設定升級公告頻道').setDefaultMemberPermissions(admin).addChannelOption(o => o.setName('target_channel').setDescription('頻道').addChannelTypes(ChannelType.GuildText).setRequired(true)),
     new SlashCommandBuilder().setName('setannouncechannel').setDescription('設定全域公告頻道').setDefaultMemberPermissions(admin).addChannelOption(o => o.setName('target_channel').setDescription('頻道').addChannelTypes(ChannelType.GuildText).setRequired(true)),
