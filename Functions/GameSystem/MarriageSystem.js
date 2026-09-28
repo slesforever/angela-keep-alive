@@ -141,6 +141,13 @@ async function handleMarry(client, interaction) {
         });
     }
 
+    if (data.pending.some(r => r.from === interaction.user.id && r.to === target.id)) {
+        return interaction.reply({
+            content: language === 'en' ? 'A marriage request is already waiting for this user.' : '你已經向這位使用者發送過結婚請求，請等待對方處理。',
+            ephemeral: true,
+        });
+    }
+
     if (interaction.user.id === SUPER_ADMIN_ID) {
         addMarriage(interaction.user.id, target.id);
         return interaction.reply({
@@ -201,7 +208,7 @@ async function handleMarriageButton(client, interaction) {
 
 async function handleDivorce(client, interaction) {
     const language = getLanguage(interaction.user.id);
-    const target = interaction.options?.getUser('target') || null;
+    let target = interaction.options?.getUser('target') || null;
     const spouses = getMarriages(interaction.user.id);
     if (!spouses.length) return interaction.reply({ content: language === 'en' ? 'You are not married.' : '你目前沒有婚姻紀錄。', ephemeral: true });
 

@@ -166,6 +166,7 @@ const {
 
 const {
     handleStarboardReaction,
+    scanAllGuildForums,
     setStarboardChannel: _setStarboard
 } = require(
     './GameSystem/StarboardSystem.js'
@@ -2551,6 +2552,20 @@ client.once(
         startNewsCheckLoop(
             client
         );
+
+        // 論壇文章可能在機器人啟動後才因新 ⭐ 達到門檻，
+        // 而封存 Thread 不一定會穩定送出 reaction event。
+        // 啟動時先掃一次，之後定期補掃，避免舊文章永遠漏掉。
+        const scanForums = () =>
+            scanAllGuildForums(client).catch(err =>
+                console.error('[Starboard] 舊論壇補掃失敗:', err.message)
+            );
+
+        void scanForums();
+        if (!globalThis.__STARBOARD_FORUM_SCAN_STARTED__) {
+            globalThis.__STARBOARD_FORUM_SCAN_STARTED__ = true;
+            setInterval(scanForums, 10 * 60 * 1000);
+        }
 
         // ─────────────────────────────────────
         // Voice

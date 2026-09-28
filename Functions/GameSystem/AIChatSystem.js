@@ -4,7 +4,7 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
-const { AttachmentBuilder, PermissionFlagsBits } = require('discord.js');
+const { AttachmentBuilder } = require('discord.js');
 const { getGuildConfig } = require('./ServerConfigStorage.js');
 
 // ─── 設定 ──────────────────────────────────────────────────────
@@ -36,8 +36,6 @@ const cfg = readJson(CONFIG_PATH, {});
 function saveCfg() { writeJson(CONFIG_PATH, cfg); }
 function getAiChannel(g) { return getGuildConfig(g)?.aiChannelId || cfg[g]?.channel || null; }
 function getMemoryChannel(g) { return getGuildConfig(g)?.aiMemoryChannelId || cfg[g]?.memory || null; }
-function setAiChannel(g, c)    { cfg[g] = cfg[g] || {}; c ? cfg[g].channel = c : delete cfg[g].channel;    saveCfg(); }
-function setMemoryChannel(g, c){ cfg[g] = cfg[g] || {}; c ? cfg[g].memory = c : delete cfg[g].memory;    saveCfg(); }
 
 // ─── 動態向 Google API 獲取你 API Key 真正支援的模型清單 ──────────────
 async function fetchValidModels(apiKey) {
@@ -341,24 +339,7 @@ function init(client) {
     client.on('messageCreate', async (msg) => {
         if (msg.author.bot || !msg.guild) return;
 
-        const isAdmin = msg.member?.permissions?.has(PermissionFlagsBits.Administrator);
         const raw = msg.content.trim();
-        if (isAdmin && /^(!!setaichannel|!!setaimemory|!!aioff)$/i.test(raw)) {
-            const cmd = raw.toLowerCase();
-            if (cmd === '!!setaichannel') {
-                setAiChannel(msg.guild.id, msg.channel.id);
-                return msg.reply(`✅ 此頻道設為 AI 自動回覆頻道。在這裡發言(可附圖)Angela 就會回覆。`).catch(() => {});
-            }
-            if (cmd === '!!setaimemory') {
-                setMemoryChannel(msg.guild.id, msg.channel.id);
-                return msg.reply(`✅ 此頻道設為 AI 記憶庫頻道。對話記憶會備份成 txt,重啟自動讀回。`).catch(() => {});
-            }
-            if (cmd === '!!aioff') {
-                setAiChannel(msg.guild.id, null);
-                setMemoryChannel(msg.guild.id, null);
-                return msg.reply(`✅ 已關閉此伺服器的 AI 回覆與記憶庫。`).catch(() => {});
-            }
-        }
 
         if (msg.channelId !== getAiChannel(msg.guild.id)) return;
 

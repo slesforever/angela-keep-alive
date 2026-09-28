@@ -319,16 +319,11 @@ async function fetchLatestStarCount(
             );
         }
 
-        let starReaction =
-            getStarReaction(
-                refreshedMessage
-            );
+        let starReaction = null;
 
-        // 如果 cache 還是沒有，直接從 reactions fetch
-        if (
-            !starReaction &&
-            refreshedMessage.reactions
-        ) {
+        // 舊論壇文章通常不在 cache，且 cache 裡的 count 可能是舊值。
+        // 每次處理反應時都重新抓 Reaction Manager，確保門檻判斷使用 Discord 的最新數字。
+        if (refreshedMessage.reactions) {
             try {
                 await refreshedMessage.reactions
                     .fetch();
@@ -545,7 +540,8 @@ function createStarboardEmbed(
 async function processStarboardMessage(
     client,
     message,
-    allowMention = true
+    allowMention = true,
+    fallbackReaction = null
 ) {
     try {
         if (!message) {
@@ -639,7 +635,8 @@ async function processStarboardMessage(
 
         const latest =
             await fetchLatestStarCount(
-                message
+                message,
+                fallbackReaction
             );
 
         message =
@@ -1002,6 +999,23 @@ async function handleStarboardReaction(
             );
         }
 
+        // Forum 貼文的第一則訊息與 Thread 有時會以不同物件回傳。
+        // 只在反應的是 starter message 時重新解析，避免封存文章被當成普通 Thread 回覆。
+        try {
+            const channel = message.channel ||
+                await client.channels.fetch(message.channelId).catch(() => null);
+            if (
+                channel?.isThread?.() &&
+                String(message.id) === String(channel.id) &&
+                typeof channel.fetchStarterMessage === 'function'
+            ) {
+                const starter = await channel.fetchStarterMessage().catch(() => null);
+                if (starter) message = starter;
+            }
+        } catch (err) {
+            console.warn('[Starboard] Forum starter message 解析失敗:', err.message);
+        }
+
         // ─────────────────────────────────────
         // 最終處理
         // ─────────────────────────────────────
@@ -1009,7 +1023,8 @@ async function handleStarboardReaction(
         await processStarboardMessage(
             client,
             message,
-            true
+            true,
+            reaction
         );
 
     } catch (err) {
