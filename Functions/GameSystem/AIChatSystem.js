@@ -5,6 +5,7 @@
 const fs = require('fs');
 const path = require('path');
 const { AttachmentBuilder, PermissionFlagsBits } = require('discord.js');
+const { getGuildConfig } = require('./ServerConfigStorage.js');
 
 // ─── 設定 ──────────────────────────────────────────────────────
 const CONFIG_PATH     = path.join(process.cwd(), 'data', 'ai-config.json');
@@ -36,8 +37,14 @@ function writeJson(p, data) {
 
 const cfg = readJson(CONFIG_PATH, {});
 function saveCfg() { writeJson(CONFIG_PATH, cfg); }
-function getAiChannel(g)     { return cfg[g]?.channel  || null; }
-function getMemoryChannel(g) { return cfg[g]?.memory   || null; }
+function getAiChannel(g) {
+    const serverChannel = getGuildConfig(g)?.aiChannelId;
+    return serverChannel || cfg[g]?.channel || null;
+}
+function getMemoryChannel(g) {
+    const serverChannel = getGuildConfig(g)?.aiMemoryChannelId;
+    return serverChannel || cfg[g]?.memory || null;
+}
 function setAiChannel(g, c)    { cfg[g] = cfg[g] || {}; c ? cfg[g].channel = c : delete cfg[g].channel;    saveCfg(); }
 function setMemoryChannel(g, c){ cfg[g] = cfg[g] || {}; c ? cfg[g].memory = c : delete cfg[g].memory;    saveCfg(); }
 
