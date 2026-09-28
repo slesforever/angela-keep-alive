@@ -2386,6 +2386,9 @@ client.once(
             await restoreAllGuildConfigs(
                 client
             );
+            await AIChatSystem.restoreAll(
+                client
+            );
 
             const {
                 setLevelChannel
