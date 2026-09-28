@@ -245,7 +245,10 @@ async function restoreGuild(client, g) {
 }
 async function restoreAll(client) {
     let t = 0;
-    for (const g of Object.keys(cfg)) {
+    const guilds = new Set(Object.keys(cfg));
+    if (client?.guilds?.cache) for (const g of client.guilds.cache.keys()) guilds.add(g);
+    for (const g of guilds) {
+        if (!getMemoryChannel(g)) continue;   // 沒設記憶頻道就跳過
         try { t += await restoreGuild(client, g); }
         catch (e) { console.error(`[AIChat] guild ${g} 還原失敗:`, e.message); }
     }
