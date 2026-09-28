@@ -1044,7 +1044,6 @@ const allSlashCommands = [
     new SlashCommandBuilder().setName('giveaway-end').setDescription('提前結束抽獎')
         .addStringOption(o => o.setName('id').setDescription('抽獎 ID').setRequired(true))
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
-    AIChatSystem.command,
 ];
 
 // ─────────────────────────────────────────────
