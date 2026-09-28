@@ -2300,53 +2300,62 @@ client.once(
         // 重新註冊 Slash Commands
         // ─────────────────────────────────────
 
-        try {
+        const commandData =
+            allSlashCommands.map(
+                cmd =>
+                    cmd.toJSON()
+            );
 
+        // 舊指令清理失敗不能阻斷新指令註冊。
+        try {
             await removeLegacySlashCommands(
                 client.application.commands,
                 '全域'
             );
-
-            for (
-                const guild
-                of client.guilds.cache.values()
-            ) {
-                await removeLegacySlashCommands(
-                    guild.commands,
-                    `Guild ${guild.id}`
-                );
-            }
-
-            await client.application.commands.set(
-                []
-            );
-
-            const commandData =
-                allSlashCommands.map(
-                    cmd =>
-                        cmd.toJSON()
-                );
-
-            for (
-                const guild
-                of client.guilds.cache.values()
-            ) {
-                await guild.commands.set(
-                    commandData
-                );
-            }
-
-            console.log(
-                '✅ 全域舊指令已清空，伺服器區域指令已重新註冊！'
-            );
-
         } catch (err) {
-
-            console.error(
-                '❌ 註冊斜線指令失敗:',
+            console.warn(
+                '[Commands] 清理全域舊指令失敗，繼續註冊目前指令:',
                 err.message
             );
         }
+
+        try {
+            await client.application.commands.set([]);
+        } catch (err) {
+            console.warn(
+                '[Commands] 清空全域指令失敗，繼續註冊 Guild 指令:',
+                err.message
+            );
+        }
+
+        let registeredGuilds = 0;
+        for (const guild of client.guilds.cache.values()) {
+            try {
+                try {
+                    await removeLegacySlashCommands(
+                        guild.commands,
+                        `Guild ${guild.id}`
+                    );
+                } catch (err) {
+                    console.warn(
+                        `[Commands] Guild ${guild.id} 舊指令清理失敗，仍繼續覆寫指令:`,
+                        err.message
+                    );
+                }
+
+                await guild.commands.set(commandData);
+                registeredGuilds++;
+            } catch (err) {
+                console.error(
+                    `[Commands] Guild ${guild.id} 指令註冊失敗:`,
+                    err.message
+                );
+            }
+        }
+
+        console.log(
+            `✅ 已註冊目前 Slash Commands：${registeredGuilds}/${client.guilds.cache.size} 個 Guild`
+        );
 
         // ─────────────────────────────────────
         // Presence

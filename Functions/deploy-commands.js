@@ -1,6 +1,13 @@
 // Functions/deploy-commands.js
 // 手動註冊指令；Startup.js 上線時也會以同一套核心指令註冊到各伺服器。
-const { REST, Routes, SlashCommandBuilder, PermissionFlagsBits, ChannelType } = require('discord.js');
+const {
+    Client,
+    Events,
+    GatewayIntentBits,
+    SlashCommandBuilder,
+    PermissionFlagsBits,
+    ChannelType
+} = require('discord.js');
 
 const admin = PermissionFlagsBits.Administrator;
 const commands = [
@@ -57,11 +64,41 @@ const commands = [
     new SlashCommandBuilder().setName('help').setDescription('顯示指令清單'),
 ].map(command => command.toJSON());
 
-const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
-(async () => {
-    try {
-        console.log('⏳ 正在註冊斜線指令...');
-        await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: commands });
-        console.log('✅ 斜線指令註冊成功');
-    } catch (err) { console.error('❌ 註冊失敗:', err); }
-})();
+const token = (process.env.DISCORD_TOKEN || '').trim();
+
+if (!token) {
+    console.error('❌ 請設定環境變數 DISCORD_TOKEN');
+    process.exitCode = 1;
+} else {
+    const client = new Client({
+        intents: [GatewayIntentBits.Guilds]
+    });
+
+    client.once(Events.ClientReady, async () => {
+        try {
+            // 由登入後的 client.application.id 識別 App，
+            // 不再要求另外設定 CLIENT_ID。
+            await client.application.commands.set([]);
+
+            let registeredGuilds = 0;
+            for (const guild of client.guilds.cache.values()) {
+                await guild.commands.set(commands);
+                registeredGuilds++;
+            }
+
+            console.log(
+                `✅ Slash Commands 註冊完成：${registeredGuilds} 個 Guild`
+            );
+        } catch (err) {
+            console.error('❌ 註冊失敗:', err.message);
+            process.exitCode = 1;
+        } finally {
+            client.destroy();
+        }
+    });
+
+    client.login(token).catch(err => {
+        console.error('❌ Discord 登入失敗:', err.message);
+        process.exitCode = 1;
+    });
+}
