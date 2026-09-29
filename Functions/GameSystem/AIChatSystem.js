@@ -11,11 +11,11 @@ const { getGuildConfig } = require('./ServerConfigStorage.js');
 const CONFIG_PATH     = path.join(process.cwd(), 'data', 'ai-config.json');
 const MEM_DIR         = path.join(process.cwd(), 'data', 'ai-memory');
 
-const COOLDOWN_USER   = 6000;      // 每人冷卻 6 秒
-const MAX_PER_MINUTE  = 12;        // 全域每分鐘最多 12 次
-const SHARED_HIST_CAP = 14;        // 頻道群聊共用歷史保留最近 14 則
-const USER_HIST_CAP   = 8;         // 個人專屬記憶保留最近 8 則
-const EMOJI_CAP       = 60;        // 只送前 60 個 emoji
+const COOLDOWN_USER   = 6000;       // 每人冷卻 6 秒
+const MAX_PER_MINUTE  = 12;         // 全域每分鐘最多 12 次
+const SHARED_HIST_CAP = 14;         // 頻道群聊共用歷史保留最近 14 則
+const USER_HIST_CAP   = 8;          // 個人專屬記憶保留最近 8 則
+const EMOJI_CAP       = 60;         // 只送前 60 個 emoji
 
 // 模型黑名單與快取機制
 const blacklistedModels = new Set();
@@ -206,7 +206,7 @@ function queueBackup(client, g) {
     }, 5000));
 }
 
-// 💡 修復重點：優先保留本地硬碟資料，不盲目覆蓋本地記憶
+// 💡 優先保留本地硬碟資料，不盲目覆蓋本地記憶
 async function restoreGuild(client, g) {
     const chId = getMemoryChannel(g);
     if (!chId) return 0;
@@ -221,8 +221,14 @@ async function restoreGuild(client, g) {
     }
     if (!latest) return 0;
     let text;
-    try { const r = await fetch(latest.url); if (!r.ok) return 0; text = await r.text(); }
-    catch (e) { console.error('[AIChat] 下載備份失敗:', e.message); return 0; }
+    try { 
+        const r = await fetchWithTimeout(latest.url, {}, 10000); 
+        if (!r.ok) return 0; 
+        text = await r.text(); 
+    } catch (e) { 
+        console.error('[AIChat] 下載備份失敗:', e.message); 
+        return 0; 
+    }
     if (!text) return 0;
     const pat = /==================================================\r?\nMEM KEY:\s*([^\r\n]+)\r?\n[\s\S]*?\r?\n==================================================\r?\n([\s\S]*?)(?=\r?\n==================================================\r?\nMEM KEY:|\s*$)/g;
     let n = 0, m;
@@ -257,8 +263,8 @@ async function restoreAll(client) {
 
 // ─── System Instruction (包含個人紀錄摘要 + 群聊須知) ───────────
 function systemInstr(guild, userName, userPersonalHistText) {
-    const emojis = [...guild.emojis.cache.values()].slice(0, EMOJI_CAP).map(e => e.toString());
-    const stickers = [...guild.stickers.cache.values()].map(s => s.name);
+    const emojis = guild?.emojis?.cache ? [...guild.emojis.cache.values()].slice(0, EMOJI_CAP).map(e => e.toString()) : [];
+    const stickers = guild?.stickers?.cache ? [...guild.stickers.cache.values()].map(s => s.name) : [];
 
     const L = [
         '你是 Angela，這個 Discord 伺服器的 AI 夥伴。',
@@ -267,7 +273,7 @@ function systemInstr(guild, userName, userPersonalHistText) {
         '2. 傲嬌與溫柔（反差萌）：',
         '   - 骨子裡非常關心與寵溺使用者，會細心照顧對方的感受，展現可靠的大姊姊風範。',
         '   - 嘴上習慣帶有微甜的優雅嘴硬與輕微的揶揄（例如「真拿你沒辦法呢...」、「可別以為這樣就能隨便依賴我喔」、「哼，我只是順便幫你留意一下罷了」）。',
-         me => '   - 絕不使用幼態、無理取鬧或暴躁的口吻，更嚴禁講話過份刻薄或真正傷人。',
+        '   - 絕不使用幼態、無理取鬧或暴躁的口吻，更嚴禁講話過份刻薄或真正傷人。',
         '3. 暗號與記憶約定的執行：',
         '   - 當使用者測試記憶或約定暗號時（例如「記得就回答 9」），你「必須精準回答正確答案」。',
         '   - 答對時請搭配成熟大姊姊的傲嬌語氣（例如：「真拿你沒辦法... 這種小約定我怎麼可能忘記？答案是 9 喔。哼，滿意了嗎？」），絕對不可裝傻或假裝不知道。',
@@ -275,8 +281,8 @@ function systemInstr(guild, userName, userPersonalHistText) {
         '',
         '【對話環境說明】：',
         '這是一個多人的群聊頻道，聊天歷史紀錄包含頻道內所有成員的互動對話。',
-        當前正在跟你對話的使用者是: [${userName}]。,
-        userPersonalHistText ? 【關於 ${userName} 的個人記憶歷史】：\n${userPersonalHistText} : '',
+        `當前正在跟你對話的使用者是: [${userName}]。`,
+        userPersonalHistText ? `【關於 ${userName} 的個人記憶歷史】：\n${userPersonalHistText}` : '',
         '請記住任何成員提到的偏好、自訂稱呼（例如「請叫我...」），並在群聊中保持全域連貫性。',
         '',
         '【伺服器表情符號與貼圖規則】：',
@@ -297,10 +303,10 @@ async function toInline(att) {
 }
 
 function polish(text, guild) {
-    const valid = new Set([...guild.emojis.cache.values()].map(e => e.id));
+    const valid = new Set(guild?.emojis?.cache ? [...guild.emojis.cache.values()].map(e => e.id) : []);
     text = text.replace(/<(a)?:(\w+):(\d+)>/g, (m, a, n, id) => valid.has(id) ? m : `:${n}:`);
     let stickerId = null;
-    const smap = new Map([...guild.stickers.cache.values()].map(s => [s.name, s.id]));
+    const smap = new Map(guild?.stickers?.cache ? [...guild.stickers.cache.values()].map(s => [s.name, s.id]) : []);
     const m = text.match(/\[STICKER:([^\]]+)\]/);
     if (m) {
         const name = m[1].trim();
