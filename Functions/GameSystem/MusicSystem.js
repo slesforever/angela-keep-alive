@@ -1,7 +1,7 @@
 // Functions/GameSystem/MusicSystem.js
 'use strict';
 const play = require('play-dl');
-const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, NoSubscriberBehavior, StreamType, VoiceConnectionStatus } = require('@discordjs/voice');
+const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, NoSubscriberBehavior, StreamType } = require('@discordjs/voice');
 const queues = new Map();
 const RESOLVE_TIMEOUT_MS = 20000;
 const STREAM_TIMEOUT_MS = 20000;
@@ -14,29 +14,53 @@ function withTimeout(promise, ms, label) {
     return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-const isYoutubePlaylist = url => /(youtube\.com|youtu\.be)/i.test(url) && /[?&]list=/i.test(url);
-const makeTrack = (x, source) => ({ url: x.url, title: x.title || x.name || x.name_raw || '未命名歌曲', source });
+// 判斷是否為「一般播放清單」，排除 YouTube 動態生成的 Mix 播放清單 (list=RD...)
+const isYoutubePlaylist = url => {
+    if (!/(youtube\.com|youtu\.be)/i.test(url)) return false;
+    const match = url.match(/[?&]list=([^&]+)/i);
+    if (!match) return false;
+    const listId = match[1];
+    // RD 開頭的是YouTube個人化/動態Mix電台，API無法讀取全表，當作單曲處理
+    return !listId.startsWith('RD');
+};
+
+const makeTrack = (x, source) => ({ 
+    url: x.url, 
+    title: x.title || x.name || x.name_raw || '未命名歌曲', 
+    source 
+});
 
 async function resolve(url) {
     if (/open\.spotify\.com\/(track|album|playlist)/i.test(url)) {
         throw new Error('目前不支援 Spotify 連結；請改用 YouTube 或 SoundCloud 連結（不需要 API）。');
     }
+
+    // 1. YouTube 實體播放清單 (非 RD 播單)
     if (isYoutubePlaylist(url)) {
         const p = await withTimeout(play.playlist_info(url, { incomplete: true }), RESOLVE_TIMEOUT_MS, 'YouTube 播放清單讀取');
         return (await withTimeout(p.all_videos(), RESOLVE_TIMEOUT_MS, 'YouTube 播放清單讀取')).slice(0, 100).map(x => makeTrack(x, 'YouTube')).filter(x => x.url);
     }
+
+    // 2. SoundCloud 連結
     if (/soundcloud\.com/i.test(url)) {
         const item = await withTimeout(play.soundcloud(url), RESOLVE_TIMEOUT_MS, 'SoundCloud 連結讀取');
         if (typeof item.all_tracks === 'function') return (await withTimeout(item.all_tracks(), RESOLVE_TIMEOUT_MS, 'SoundCloud 播放清單讀取')).slice(0, 100).map(x => makeTrack(x, 'SoundCloud')).filter(x => x.url);
         return [makeTrack(item, 'SoundCloud')];
     }
-    return [makeTrack((await withTimeout(play.video_basic_info(url), RESOLVE_TIMEOUT_MS, 'YouTube 連結讀取')).video_details, 'YouTube')];
+
+    // 3. 一般 YouTube 連結 (含 list=RD... 動態 Mix 網址) 或關鍵字搜尋
+    // 改用 play.search 避開 "Sign in to confirm you’re not a bot" 阻擋
+    const searchResults = await withTimeout(play.search(url, { limit: 1 }), RESOLVE_TIMEOUT_MS, 'YouTube 讀取');
+    if (!searchResults || !searchResults.length) {
+        throw new Error('找不到可播放的歌曲。');
+    }
+    return [makeTrack(searchResults[0], 'YouTube')];
 }
 
 async function next(guildId) {
     const q = queues.get(guildId);
     if (!q || !q.tracks.length) {
-        stop(guildId); // 播放完畢後自動斷開與清理
+        stop(guildId);
         return;
     }
     const t = q.tracks.shift();
@@ -69,7 +93,6 @@ async function handlePlay(client, interaction) {
 
     let q = queues.get(interaction.guild.id);
 
-    // 1. 如果佇列不存在，建立 Player 與 Queue
     if (!q) {
         const player = createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Play } });
         q = { connection: null, player, tracks: [], text: interaction.channel, channelId: null };
@@ -79,14 +102,14 @@ async function handlePlay(client, interaction) {
         player.on('error', err => interaction.channel.send('⚠️ 播放器錯誤：' + err.message.slice(0, 300)).catch(() => {}));
     }
 
-    // 2. 檢查是否需要加入或切換語音頻道（機器人尚未加入或使用者在不同頻道時）
+    // 當機器人不在該語音頻道，或是使用者在別的語音頻道時，自動加入/移動過去
     if (!q.connection || q.channelId !== voice.id) {
         const connection = joinVoiceChannel({
             channelId: voice.id,
             guildId: interaction.guild.id,
             adapterCreator: interaction.guild.voiceAdapterCreator
         });
-        
+
         connection.subscribe(q.player);
         q.connection = connection;
         q.channelId = voice.id;
@@ -107,7 +130,7 @@ function stop(guildId) {
     if (!q) return;
     q.player.stop(true);
     if (q.connection) {
-        q.connection.destroy(); // 正確離開語音頻道
+        q.connection.destroy();
     }
     queues.delete(guildId);
 }
