@@ -48,9 +48,20 @@ async function resolve(url) {
         return [makeTrack(item, 'SoundCloud')];
     }
 
-    // 3. 一般 YouTube 連結 (含 list=RD... 動態 Mix 網址) 或關鍵字搜尋
-    // 改用 play.search 避開 "Sign in to confirm you’re not a bot" 阻擋
-    const searchResults = await withTimeout(play.search(url, { limit: 1 }), RESOLVE_TIMEOUT_MS, 'YouTube 讀取');
+    // 3. 直接 YouTube 連結 (含 list=RD... 動態 Mix) — 直接用網址串流，不丟給搜尋
+    const yt = /(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([\w-]{11})/i.exec(url);
+    if (yt) {
+        const directUrl = 'https://www.youtube.com/watch?v=' + yt[1];
+        let title = 'YouTube 歌曲';
+        try {
+            const info = await withTimeout(play.video_basic_info(directUrl), 8000, 'YouTube 影片資訊');
+            if (info?.video_details?.title) title = info.video_details.title;
+        } catch (_) { /* bot 驗證/逾時：忽略，仍可直接串流 */ }
+        return [{ url: directUrl, title, source: 'YouTube' }];
+    }
+
+    // 4. 關鍵字搜尋 (非 URL 輸入)
+    const searchResults = await withTimeout(play.search(url, { limit: 1 }), RESOLVE_TIMEOUT_MS, 'YouTube 搜尋');
     if (!searchResults || !searchResults.length) {
         throw new Error('找不到可播放的歌曲。');
     }
