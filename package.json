@@ -1,13 +1,12 @@
 {
   "name": "angela-bot",
   "version": "1.2.0",
-  "description": "Angela Bot for Discord - Fast & High Quality Music Version",
+  "description": "Angela Bot for Discord - Safe Pure JS Version",
   "main": "Functions/Startup.js",
   "scripts": {
     "start": "node Functions/Startup.js"
   },
   "dependencies": {
-    "@discordjs/opus": "^0.9.0",
     "@discordjs/voice": "^0.16.1",
     "@distube/soundcloud": "^1.3.2",
     "@distube/youtube": "^1.0.2",
@@ -17,6 +16,7 @@
     "ffmpeg-static": "^5.2.0",
     "libsodium-wrappers": "^0.7.13",
     "node-fetch": "^2.7.0",
+    "opusscript": "^0.0.8",
     "prism-media": "^1.3.5"
   },
   "engines": {
