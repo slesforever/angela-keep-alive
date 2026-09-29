@@ -1,18 +1,21 @@
-// Functions/GameSystem/MusicSystem.js 
+// Functions/GameSystem/MusicSystem.js
 'use strict';
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, NoSubscriberBehavior, StreamType, VoiceConnectionStatus } = require('@discordjs/voice');
-const { Innertube } = require('youtubei.js');
+const { Innertube, UniversalCache } = require('youtubei.js');
 const play = require('play-dl'); // 僅用於 SoundCloud
 
 const queues = new Map();
 const RESOLVE_TIMEOUT_MS = 20000;
 const STREAM_TIMEOUT_MS = 20000;
 
-// Innertube 單例（免 cookie，使用內部 Web Client）
+// Innertube 單例（免 cookie，模擬 Android/Web 雙 client 繞過阻擋）
 let _yt = null;
 async function getYt() {
     if (!_yt) {
-        _yt = await Innertube.create();
+        _yt = await Innertube.create({
+            cache: new UniversalCache(false),
+            generate_session_locally: true
+        });
     }
     return _yt;
 }
@@ -40,26 +43,42 @@ const makeTrack = (id, title, source) => ({
     source
 });
 
-// 取 YouTube 音訊串流（webm/opus 優先，免 ffmpeg）
+// ── 取 YouTube 音訊串流 ──
 async function getYoutubeStream(videoId) {
     const yt = await getYt();
     const info = await withTimeout(yt.getInfo(videoId), STREAM_TIMEOUT_MS, 'YouTube 影片資訊');
     
-    // 取得所有僅有音訊 (adaptive_formats) 的格式
-    const formats = (info.streaming_data?.adaptive_formats || []).filter(f => f.has_audio && !f.has_video);
-    if (!formats.length) throw new Error('找不到可播放的音訊格式。');
+    // 1. 優先從 adaptive_formats 找純音訊軌
+    const adaptiveFormats = info.streaming_data?.adaptive_formats || [];
+    let audioFormats = adaptiveFormats.filter(f => f.has_audio && !f.has_video);
 
-    // 優先選 webm/opus (Discord 原生支援)
-    let format = formats.find(f => /webm/i.test(f.mime_type || '') && /opus/i.test(f.codecs || ''));
-    let inputType = StreamType.WebmOpus;
-    
-    if (!format) {
-        // 退而求其次：按最高位元率排序
-        format = formats.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0];
-        inputType = /webm/i.test(format.mime_type || '') ? StreamType.WebmOpus : StreamType.Arbitrary;
+    // 2. 如果 adaptive 沒有，嘗試從傳統混合軌 (formats) 抓出含音訊的格式
+    if (!audioFormats.length) {
+        const regularFormats = info.streaming_data?.formats || [];
+        audioFormats = regularFormats.filter(f => f.has_audio);
     }
 
-    const stream = await info.download({ format });
+    if (!audioFormats.length) {
+        throw new Error('找不到可播放的音訊格式。');
+    }
+
+    // 3. 優先選擇 WebM/Opus (Discord 原生支援最佳)
+    let selectedFormat = audioFormats.find(f => /webm/i.test(f.mime_type || '') && /opus/i.test(f.codecs || ''));
+    let inputType = StreamType.WebmOpus;
+
+    if (!selectedFormat) {
+        // 退而求其次：按最高 audio bitrate 排序
+        selectedFormat = audioFormats.sort((a, b) => (b.bitrate || b.average_bitrate || 0) - (a.bitrate || a.average_bitrate || 0))[0];
+        inputType = /webm/i.test(selectedFormat.mime_type || '') ? StreamType.WebmOpus : StreamType.Arbitrary;
+    }
+
+    // 4. 呼叫下載串流
+    const stream = await yt.download(videoId, {
+        type: 'audio',
+        quality: 'best',
+        format: selectedFormat.container || 'any'
+    });
+
     return { stream, inputType };
 }
 
@@ -96,7 +115,7 @@ async function resolve(url) {
             const ytInst = await getYt();
             const info = await withTimeout(ytInst.getInfo(id), 8000, 'YouTube 影片資訊');
             if (info?.basic_info?.title) title = info.basic_info.title;
-        } catch (_) { /* 資訊讀取失敗仍可嘗試合併播放 */ }
+        } catch (_) { /* 資訊讀取失敗仍可嘗試串流 */ }
         return [makeTrack(id, title, 'YouTube')];
     }
 
@@ -166,7 +185,6 @@ async function handlePlay(client, interaction) {
         player.on('error', err => interaction.channel.send('⚠️ 播放器錯誤：' + err.message.slice(0, 300)).catch(() => {}));
     }
 
-    // 若連線不存在或使用者處於不同的語音頻道，重新加入/切換頻道
     if (!q.connection || q.channelId !== voice.id) {
         const connection = joinVoiceChannel({
             channelId: voice.id,
