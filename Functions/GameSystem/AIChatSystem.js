@@ -1,6 +1,6 @@
 // Functions/GameSystem/AIChatSystem.js
 // 獨立 AI 聊天: Gemini 視覺 + 伺服器 emoji/貼圖 + 個人獨立記憶 + 頻道群聊共享記憶 (雙軌記憶機制)
-// 修復: 啟動時優先保留本地硬碟記憶，避免舊 Discord 備份盲目覆蓋最新記憶。
+// 修復版: 自動過濾 Gemini 思考過程 (Thought Parts)、提高 Token 上限防截斷、修正 429 誤殺黑名單、過期冷卻自動清理
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -23,7 +23,7 @@ let cachedModels = [];
 let lastModelFetch = 0;
 const MODEL_CACHE_TTL = 1800_000;  // 30 分鐘更新一次
 const MAX_MODEL_ATTEMPTS = 5;      // 單次對話最多嘗試 5 個模型
-const GENERATION_TIMEOUT_MS = 15000;// 15 秒生成逾時
+const GENERATION_TIMEOUT_MS = 20000;// 20 秒生成逾時
 
 try { fs.mkdirSync(MEM_DIR, { recursive: true }); } catch {}
 
@@ -50,7 +50,7 @@ function setAiChannel(g, c)    { cfg[g] = cfg[g] || {}; c ? cfg[g].channel = c :
 function setMemoryChannel(g, c){ cfg[g] = cfg[g] || {}; c ? cfg[g].memory = c : delete cfg[g].memory;    saveCfg(); }
 
 // ─── 超時控制 Fetch ───────────────────────────────────────────
-async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
+async function fetchWithTimeout(url, options = {}, timeoutMs = 20000) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -206,7 +206,7 @@ function queueBackup(client, g) {
     }, 5000));
 }
 
-// 💡 優先保留本地硬碟資料，不盲目覆蓋本地記憶
+// 優先保留本地硬碟資料，不盲目覆蓋本地記憶
 async function restoreGuild(client, g) {
     const chId = getMemoryChannel(g);
     if (!chId) return 0;
@@ -237,7 +237,6 @@ async function restoreGuild(client, g) {
             const key = m[1].trim().replace(/:/g, '_');
             const targetFile = memFile(key);
             
-            // 💡 只有當本地硬碟完全不存在該檔案時，才從 Discord 備份還原
             if (!fs.existsSync(targetFile)) {
                 const arr = JSON.parse(m[2].trim());
                 fs.writeFileSync(targetFile, JSON.stringify(arr, null, 2), 'utf8');
@@ -254,7 +253,7 @@ async function restoreAll(client) {
     const guilds = new Set(Object.keys(cfg));
     if (client?.guilds?.cache) for (const g of client.guilds.cache.keys()) guilds.add(g);
     for (const g of guilds) {
-        if (!getMemoryChannel(g)) continue;   // 沒設記憶頻道就跳過
+        if (!getMemoryChannel(g)) continue;
         try { t += await restoreGuild(client, g); }
         catch (e) { console.error(`[AIChat] guild ${g} 還原失敗:`, e.message); }
     }
@@ -268,7 +267,7 @@ function systemInstr(guild, userName, userPersonalHistText) {
 
     const L = [
         '你是 Angela，這個 Discord 伺服器的 AI 夥伴。',
-        '【性格與語氣設定 - 成熟溫柔傲嬌大姊姊】：',
+        '【性格與語氣設定 - 成成熟溫柔傲嬌大姊姊】：',
         '1. 人格定位：優雅、成熟且充滿包容感的大姊姊。說話沉穩有條理，帶有優雅從容的社交氣場與親切感。',
         '2. 傲嬌與溫柔（反差萌）：',
         '   - 骨子裡非常關心與寵溺使用者，會細心照顧對方的感受，展現可靠的大姊姊風範。',
@@ -277,7 +276,10 @@ function systemInstr(guild, userName, userPersonalHistText) {
         '3. 暗號與記憶約定的執行：',
         '   - 當使用者測試記憶或約定暗號時（例如「記得就回答 9」），你「必須精準回答正確答案」。',
         '   - 答對時請搭配成熟大姊姊的傲嬌語氣（例如：「真拿你沒辦法... 這種小約定我怎麼可能忘記？答案是 9 喔。哼，滿意了嗎？」），絕對不可裝傻或假裝不知道。',
-        '4. 回覆保持簡短具體、情感豐富，適度搭配伺服器 emoji，展現成熟女性的優雅與魅力。',
+        '4. 回覆保持完整且簡潔具體、情感豐富，適度搭配伺服器 emoji，展現成熟女性的優雅與魅力。',
+        '',
+        '【嚴格禁止事項】：',
+        '嚴禁在輸出的對話中包含任何你的內部思考過程、草稿分析、自我提醒（例如「(wait, check emoji ID)」、「Wait, the user...」等字眼）。你只需直接輸出要對使用者說的話，句子必須完整說完。',
         '',
         '【對話環境說明】：',
         '這是一個多人的群聊頻道，聊天歷史紀錄包含頻道內所有成員的互動對話。',
@@ -337,11 +339,9 @@ async function askGemini(prompt, g, userId, images, guild, client, userName = '�
     const sharedKey = mkShared(g);
     const userKey = mkUser(g, userId);
 
-    // 1. 取得該使用者的「個人專屬記憶」
     const userHist = sanitizeHistory(getHistByKey(userKey));
     const userPersonalText = userHist.map(h => `${h.role === 'user' ? '他說' : '你回'}: ${h.parts[0]?.text || ''}`).join('\n');
 
-    // 2. 取得「頻道共享對話紀錄」
     const rawContent = prompt || '（傳送了一張圖片，請描述並回應）';
     const userText = `[${userName}]:${rawContent}`;
 
@@ -368,7 +368,7 @@ async function askGemini(prompt, g, userId, images, guild, client, userName = '�
         generationConfig: {
             temperature: 0.75,
             topP: 0.95,
-            maxOutputTokens: 800
+            maxOutputTokens: 2048 // 💡 將限制從 800 提高至 2048，防止講話中途被截斷
         }
     };
 
@@ -388,8 +388,16 @@ async function askGemini(prompt, g, userId, images, guild, client, userName = '�
                 const errText = await res.text().catch(() => '');
                 const errObj = new Error(`[${modelName}] HTTP ${res.status}:${errText.slice(0, 150)}`);
 
-                if (res.status === 400 || res.status === 404 || res.status === 429 || errText.includes('quota') || errText.includes('no longer available') || errText.includes('Interactions API') || errText.includes('not found')) {
-                    console.warn(`🚫 [AIChat] 模型 ${modelName} 無效/配額不足 (${res.status})，已自動加入黑名單！`);
+                // 💡 429 速率限制為暫時狀況，切換模型即可，不拉入黑名單
+                if (res.status === 429 || errText.includes('quota') || errText.includes('RESOURCE_EXHAUSTED')) {
+                    console.warn(`⏳ [AIChat] 模型 ${modelName} 觸發配額/速率限制 (${res.status})，嘗試下一個...`);
+                    lastError = errObj;
+                    continue;
+                }
+
+                // 400 / 404 / 已廢棄模型永久拉黑
+                if (res.status === 400 || res.status === 404 || errText.includes('no longer available') || errText.includes('not found')) {
+                    console.warn(`🚫 [AIChat] 模型 ${modelName} 無效/已停用 (${res.status})，已加入黑名單！`);
                     blacklistedModels.add(modelName);
                     cachedModels = cachedModels.filter(m => m !== modelName);
                     lastError = errObj;
@@ -402,9 +410,20 @@ async function askGemini(prompt, g, userId, images, guild, client, userName = '�
             }
 
             const data = await res.json();
-            const out = data?.candidates?.[0]?.content?.parts?.[0]?.text || '（沒有回覆內容）';
+            const rawParts = data?.candidates?.[0]?.content?.parts || [];
 
-            // 💡 即時同步寫入本地 JSON 硬碟檔案
+            // 💡 核心修復：過濾掉 Gemini 2.0/2.5 輸出的內部思考過程（thought: true）
+            const textParts = rawParts.filter(p => !p.thought && typeof p.text === 'string');
+            let out = textParts.map(p => p.text).join('').trim();
+
+            // 防護：若全部被過濾掉則備用提取
+            if (!out && rawParts.length > 0) {
+                out = rawParts.map(p => p.text || '').join('').trim();
+            }
+
+            if (!out) out = '（沒有回覆內容）';
+
+            // 即時同步寫入本地 JSON 硬碟檔案
             pushHistByKey(sharedKey, 'user', userText, SHARED_HIST_CAP);
             pushHistByKey(sharedKey, 'model', out, SHARED_HIST_CAP);
 
@@ -452,21 +471,21 @@ function init(client) {
         }
 
         const targetChannel = getAiChannel(msg.guild.id);
-
         if (msg.channelId !== targetChannel) return;
 
         const raw = msg.cleanContent ? msg.cleanContent.trim() : '';
-
         const images = [...msg.attachments.values()].filter(a =>
             (a.contentType && a.contentType.startsWith('image/')) || /\.(png|jpe?g|webp|gif)$/i.test(a.url)
         );
 
-        if (!raw && !images.length) {
-            console.warn(`⚠️ [AIChat] 在 AI 頻道收到訊息，但抓不到內容 (msg.cleanContent 為空)。`);
-            return;
-        }
+        if (!raw && !images.length) return;
 
         const now = Date.now();
+        // 自動清理過期冷卻記錄，避免記憶體洩漏
+        for (const [id, ts] of cooldowns.entries()) {
+            if (now - ts > 60000) cooldowns.delete(id);
+        }
+
         if (now - (cooldowns.get(msg.author.id) || 0) < COOLDOWN_USER) {
             console.log(`[AIChat] 使用者 ${msg.author.tag} 處於冷卻中，跳過。`);
             return;
