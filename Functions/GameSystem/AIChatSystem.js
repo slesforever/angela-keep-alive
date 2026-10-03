@@ -1,4 +1,4 @@
-// Functions/GameSystem/AIChatSystem.js
+// Functions/GameSystem/AIChatSystem.js 
 // 獨立 AI 聊天: Gemini 視覺 + 伺服器 emoji/貼圖 + 個人獨立記憶 + 頻道群聊共享記憶 (雙軌記憶機制)
 // 修復版: 自動過濾 Gemini 思考過程 (Thought Parts)、提高 Token 上限防截斷、修正 429 誤殺黑名單、過期冷卻自動清理
 'use strict';
