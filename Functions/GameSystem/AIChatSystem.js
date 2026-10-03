@@ -296,13 +296,6 @@ function systemInstr(guild, userName, userPersonalHistText) {
     return { parts: [{ text: L.filter(Boolean).join('\n') }] };
 }
 
-    L.push(emojis.length ? emojis.join(' ') : '(此伺服器沒有自訂 emoji)');
-    L.push('若要傳貼圖，在回覆末尾單獨一行寫 [STICKER:貼圖名稱]，只能用以下貼圖，不可捏造，一次最多一張:');
-    L.push(stickers.length ? stickers.join('、') : '(此伺服器沒有自訂貼圖)');
-
-    return { parts: [{ text: L.filter(Boolean).join('\n') }] };
-}
-
 async function toInline(att) {
     const r = await fetchWithTimeout(att.url, {}, 12000);
     const buf = Buffer.from(await r.arrayBuffer());
