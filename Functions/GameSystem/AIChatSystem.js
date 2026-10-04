@@ -10,6 +10,13 @@ const { getGuildConfig } = require('./ServerConfigStorage.js');
 // ─── 設定 ──────────────────────────────────────────────────────
 const CONFIG_PATH     = path.join(process.cwd(), 'data', 'ai-config.json');
 const MEM_DIR         = path.join(process.cwd(), 'data', 'ai-memory');
+    const CHANNELS_PATH   = path.join(process.cwd(), 'data', 'ai-channels.json');
+    const PERSONAS = {
+        default:  { name: 'Angela', trait: '冷靜、可靠的圖書館 AI 主管', style: '簡潔、專業、條理清楚' },
+        tsundere: { name: '安潔菈', trait: '傲嬌、嘴硬心軟，會真誠關心對方', style: '偶爾毒舌，但保持溫暖與尊重' },
+        scholar:  { name: '博士', trait: '博學、求知欲強，重視準確性', style: '詳盡解釋、適度引用知識，不捏造來源' },
+        buddy:    { name: '小安', trait: '像熟悉的朋友一樣親切', style: '輕鬆口語、簡短自然' }
+    };
 
 const COOLDOWN_USER   = 6000;       // 每人冷卻 6 秒
 const MAX_PER_MINUTE  = 12;         // 全域每分鐘最多 12 次
@@ -37,19 +44,43 @@ function writeJson(p, data) {
 }
 
 const cfg = readJson(CONFIG_PATH, {});
-function saveCfg() { writeJson(CONFIG_PATH, cfg); }
-function getAiChannel(g) {
-    const serverChannel = getGuildConfig(g)?.aiChannelId;
-    return serverChannel || cfg[g]?.channel || null;
-}
-function getMemoryChannel(g) {
-    const serverChannel = getGuildConfig(g)?.aiMemoryChannelId;
-    return serverChannel || cfg[g]?.memory || null;
-}
-function setAiChannel(g, c)    { cfg[g] = cfg[g] || {}; c ? cfg[g].channel = c : delete cfg[g].channel;    saveCfg(); }
-function setMemoryChannel(g, c){ cfg[g] = cfg[g] || {}; c ? cfg[g].memory = c : delete cfg[g].memory;    saveCfg(); }
+    const aiChannels = readJson(CHANNELS_PATH, {});
+    function saveCfg() { writeJson(CONFIG_PATH, cfg); }
+    function saveAiChannels() { writeJson(CHANNELS_PATH, aiChannels); }
+    function getAiChannel(g) {
+        if (cfg[g]?.disabled) return null;
+        const serverChannel = getGuildConfig(g)?.aiChannelId;
+        return serverChannel || cfg[g]?.channel || null;
+    }
+    function getMemoryChannel(g) {
+        const serverChannel = getGuildConfig(g)?.aiMemoryChannelId;
+        return serverChannel || cfg[g]?.memory || null;
+    }
+    function setAiChannel(g, c, persona = 'default') {
+        cfg[g] = cfg[g] || {};
+        if (!c) {
+            for (const id of Object.keys(cfg[g].channels || {})) delete aiChannels[id];
+            delete cfg[g].channels;
+            delete cfg[g].channel;
+            cfg[g].disabled = true;
+        } else {
+            cfg[g].disabled = false;
+            cfg[g].channel = c;
+            cfg[g].channels = cfg[g].channels || {};
+            cfg[g].channels[c] = true;
+            aiChannels[c] = PERSONAS[persona] ? persona : 'default';
+        }
+        saveCfg();
+        saveAiChannels();
+    }
+    function getChannelPersona(g, channelId) {
+        if (cfg[g]?.channels?.[channelId] && PERSONAS[aiChannels[channelId]]) return aiChannels[channelId];
+        return getAiChannel(g) === channelId ? (PERSONAS[aiChannels[channelId]] ? aiChannels[channelId] : 'default') : null;
+    }
+    function getPersonaLabel(persona) { return (PERSONAS[persona] || PERSONAS.default).name; }
+    function setMemoryChannel(g, c) { cfg[g] = cfg[g] || {}; c ? cfg[g].memory = c : delete cfg[g].memory; saveCfg(); }
 
-// ─── 超時控制 Fetch ───────────────────────────────────────────
+    // ─── 超時控制 Fetch ───────────────────────────────────────────
 async function fetchWithTimeout(url, options = {}, timeoutMs = 20000) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -124,7 +155,7 @@ const callTimestamps = [];
 const memTimer = new Map();
 const memInFlight = new Set();
 
-const mkShared = (g) => `${g}_shared`;
+const mkShared = (g, channelId) => g + '_' + channelId + '_shared';
 const mkUser = (g, u) => `${g}_${u}`;
 const memFile = k => path.join(MEM_DIR, `${k}.json`);
 
@@ -137,10 +168,20 @@ function saveHistByKey(key, arr) {
     catch (e) { console.error(`[AIChat] 寫入記憶 ${key} 失敗:`, e.message); }
 }
 function getHistByKey(key) {
-    if (!histories.has(key)) histories.set(key, loadHistByKey(key));
-    return histories.get(key);
-}
-function pushHistByKey(key, role, text, cap) {
+        if (!histories.has(key)) {
+            let history = loadHistByKey(key);
+            const match = key.match(/^(\d+)_(\d+)_shared$/);
+            if (!history.length && match && !fs.existsSync(memFile(key)) && getAiChannel(match[1]) === match[2]) {
+                const legacyKey = match[1] + '_shared';
+                history = loadHistByKey(legacyKey);
+                if (history.length) saveHistByKey(key, history);
+            }
+            histories.set(key, history);
+        }
+        return histories.get(key);
+    }
+
+    function pushHistByKey(key, role, text, cap) {
     const h = getHistByKey(key);
     h.push({ role, parts: [{ text }] });
     if (h.length > cap) h.splice(0, h.length - cap);
@@ -235,14 +276,16 @@ async function restoreGuild(client, g) {
     while ((m = pat.exec(text)) !== null) {
         try {
             const key = m[1].trim().replace(/:/g, '_');
-            const targetFile = memFile(key);
-            
-            if (!fs.existsSync(targetFile)) {
-                const arr = JSON.parse(m[2].trim());
-                fs.writeFileSync(targetFile, JSON.stringify(arr, null, 2), 'utf8');
-                histories.set(key, arr);
-                n++;
-            }
+                const keyPattern = new RegExp('^' + g + '_(?:shared|\\d+|\\d+_shared|\\d+_facts)$');
+                if (!keyPattern.test(key)) continue;
+                const targetFile = memFile(key);
+                if (!fs.existsSync(targetFile)) {
+                    const data = JSON.parse(m[2].trim());
+                    if (key.endsWith('_facts') ? (!data || !Array.isArray(data.facts)) : !Array.isArray(data)) continue;
+                    fs.writeFileSync(targetFile, JSON.stringify(data, null, 2), 'utf8');
+                    if (Array.isArray(data)) histories.set(key, data);
+                    n++;
+                }
         } catch (e) { console.error(`[AIChat] 解析 ${m[1]} 失敗:`, e.message); }
     }
     if (n > 0) console.log(`✅ [AIChat] guild ${g} 從 Discord 備份還原了 ${n} 個缺失的記憶檔`);
