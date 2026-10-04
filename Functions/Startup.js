@@ -706,7 +706,19 @@ const allSlashCommands = [
         ),
 
     new SlashCommandBuilder()
-        .setName('setstoragechannel')
+            .setName('setaichannel')
+            .setDescription('將 AI 人格綁定至一個文字頻道')
+            .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+            .addStringOption(o => o.setName('persona').setDescription('此頻道使用的人格').setRequired(true).addChoices(
+                { name: 'Angela — 冷靜的圖書館 AI 主管', value: 'default' },
+                { name: '安潔菈 — 傲嬌但關心人', value: 'tsundere' },
+                { name: '博士 — 博學詳盡', value: 'scholar' },
+                { name: '小安 — 輕鬆像朋友', value: 'buddy' }
+            ))
+            .addChannelOption(o => o.setName('channel').setDescription('目標頻道（不選則使用目前頻道）').addChannelTypes(ChannelType.GuildText)),
+
+        new SlashCommandBuilder()
+            .setName('setstoragechannel')
         .setDescription(
             '伺服器管理員 設定 Angela 設定資料的永久儲存頻道'
         )
@@ -746,7 +758,15 @@ const allSlashCommands = [
         .addStringOption(o => o.setName('period').setDescription('排行榜期間').addChoices({ name: '全部', value: 'all' }, { name: '本月', value: 'month' })),
     
     new SlashCommandBuilder()
-        .setName('steam')
+            .setName('achievements')
+            .setDescription('查看已解鎖與尚未解鎖的成就'),
+
+        new SlashCommandBuilder()
+            .setName('dailyquest')
+            .setDescription('查看每日與本小時任務'),
+
+        new SlashCommandBuilder()
+            .setName('steam')
         .setDescription(
             '伺服器管理員 手動觸發 Steam 最新更新檢測'
         )
@@ -1257,6 +1277,8 @@ client.on(
 
         if (interaction.isButton() && interaction.customId.startsWith('marry:')) return MarriageSystem.handleMarriageButton(client, interaction);
         if (interaction.isButton() && interaction.customId.startsWith('divorce:')) return MarriageSystem.handleDivorceButton(client, interaction);
+            if (interaction.isButton() && interaction.customId.startsWith('claim_achievements:')) return require('./GameSystem/AchievementSystem.js').handleClaim(client, interaction, interaction.customId.slice('claim_achievements:'.length));
+            if (interaction.isButton() && interaction.customId.startsWith('claim_quests:')) return require('./GameSystem/DailyQuestSystem.js').handleClaim(client, interaction, interaction.customId.slice('claim_quests:'.length));
 
         if (
             !interaction.isChatInputCommand()
@@ -1518,8 +1540,24 @@ client.on(
             });
         }
 
-        // ═════════════════════════════════════
-        // /setchannel
+        if (interaction.commandName === 'setaichannel') {
+                if (!interaction.guild || !interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+                    return interaction.reply({ content: '此指令僅限伺服器管理員使用。', flags: MessageFlags.Ephemeral });
+                }
+                const channel = interaction.options.getChannel('channel') || interaction.channel;
+                if (!channel || channel.type !== ChannelType.GuildText) {
+                    return interaction.reply({ content: '請在伺服器文字頻道執行，或選擇文字頻道。', flags: MessageFlags.Ephemeral });
+                }
+                const persona = interaction.options.getString('persona');
+                AIChatSystem.setAiChannel(interaction.guild.id, channel.id, persona);
+                const patch = { aiChannelId: channel.id };
+                saveConfig(patch);
+                const persisted = await saveGuildConfigToDiscord(client, interaction.guild.id, patch);
+                return interaction.reply({ content: '已將 ' + channel + ' 設為 ' + AIChatSystem.getPersonaLabel(persona) + ' AI 頻道。' + (persisted ? '' : '（提醒：尚未設定 Discord 儲存頻道。）'), flags: MessageFlags.Ephemeral });
+            }
+
+            // ═════════════════════════════════════
+            // /setchannel
         // ═════════════════════════════════════
 
         if (
@@ -1980,17 +2018,17 @@ client.on(
             return;
         }
 
-        if (message.content?.trim().toLowerCase() === '!list') {
-            require('./GameSystem/Pulls/ListSystem.js').handleList(client, message).catch(err => console.error('[List] 執行失敗:', err.message));
-            return;
-        }
-
         handleMessageXp(
             client,
             message
         ).catch(
             () => {}
         );
+
+        if (message.content?.trim().toLowerCase() === '!list') {
+            require('./GameSystem/Pulls/ListSystem.js').handleList(client, message).catch(err => console.error('[List] 執行失敗:', err.message));
+            return;
+        }
 
         handleTranslationMessage(
             client,
@@ -2225,7 +2263,8 @@ client.on(
             trackVoiceJoin(
                 userId,
                 username,
-                guildId
+                guildId,
+                client
             );
 
         } else if (
@@ -2235,7 +2274,9 @@ client.on(
 
             trackVoiceLeave(
                 userId,
-                guildId
+                guildId,
+                client,
+                username
             );
 
         } else if (
@@ -2245,13 +2286,16 @@ client.on(
 
             trackVoiceLeave(
                 userId,
-                guildId
+                guildId,
+                client,
+                username
             );
 
             trackVoiceJoin(
                 userId,
                 username,
-                guildId
+                guildId,
+                client
             );
         }
     }
@@ -2262,7 +2306,6 @@ client.on(
 // ─────────────────────────────────────────────
 
 const LEGACY_SLASH_COMMAND_NAMES = new Set([
-    'setaichannel',
     'setaimemory',
     'aioff'
 ]);
@@ -2720,6 +2763,8 @@ if (
     process.exit(1);
 }
 AIChatSystem.init(client);
+require('./GameSystem/AchievementSystem.js').init(client);
+require('./GameSystem/DailyQuestSystem.js').init(client);
 client.login(
     TOKEN
 );
