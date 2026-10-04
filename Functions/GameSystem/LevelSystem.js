@@ -213,6 +213,7 @@ async function handleMessageXp(client, message) {
         }
         const { savePlayerData } = require('./PacksAndData.js');
     try {
+        fs.mkdirSync(PLAYERS_DIR, { recursive: true });
         for (const file of fs.readdirSync(PLAYERS_DIR)) {
             if (!file.endsWith('.json')) continue;
             const userId = file.slice(0, -5);
