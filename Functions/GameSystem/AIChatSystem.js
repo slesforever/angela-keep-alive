@@ -535,9 +535,9 @@ function init(client) {
         const rawCommand = msg.content ? msg.content.trim() : '';
         const isAdmin = msg.member?.permissions?.has(PermissionFlagsBits.Administrator);
 
-        const personaMatch = rawCommand.match(/^!!aipersona\s+(default|tsundere|scholar|buddy)$/i);
-            if (isAdmin && personaMatch) {
-                const persona = personaMatch[1].toLowerCase();
+        const personaTokens = rawCommand.toLowerCase().trim().split(' ').filter(Boolean);
+            const persona = personaTokens[1];
+            if (isAdmin && personaTokens.length === 2 && personaTokens[0] === '!!aipersona' && PERSONAS[persona]) {
                 setAiChannel(msg.guild.id, msg.channel.id, persona);
                 return msg.reply('✅ 此頻道 AI 人格已切換為 ' + getPersonaLabel(persona) + '。').catch(() => {});
             }
