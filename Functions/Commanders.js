@@ -20,6 +20,8 @@ const { handleList } = require('./GameSystem/Pulls/ListSystem.js');
 const MarriageSystem = require('./GameSystem/MarriageSystem.js');
 const GiveawaySystem = require('./GameSystem/GiveawayEventSystem.js');
 const MusicSystem = require('./GameSystem/MusicSystem.js');
+    const AchievementSystem = require('./GameSystem/AchievementSystem.js');
+    const DailyQuestSystem = require('./GameSystem/DailyQuestSystem.js');
 
 const SUPER_ADMIN_ID = '1330463890122735642';
 
@@ -374,8 +376,11 @@ async function handleSlashCommands(client, interaction) {
             return GiveawaySystem.handleGiveawayEnd(client, interaction, interaction.options.getString('id'));
         }
 
-        // ─── 等級排行榜 ────────────────────────────────────────
-        if (commandName === 'leaderboard') {
+        if (commandName === 'achievements') return AchievementSystem.handleAchievements(client, interaction);
+            if (commandName === 'dailyquest') return DailyQuestSystem.handleDailyQuest(client, interaction);
+
+            // ─── 等級排行榜 ────────────────────────────────────────
+            if (commandName === 'leaderboard') {
             return interaction.options?.getString('period') === 'month' ? handleMonthlyLeaderboard(client, interaction) : handleLeaderboard(client, interaction);
         }
 
