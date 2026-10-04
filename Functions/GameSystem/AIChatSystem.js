@@ -170,9 +170,10 @@ function saveHistByKey(key, arr) {
 function getHistByKey(key) {
         if (!histories.has(key)) {
             let history = loadHistByKey(key);
-            const match = key.match(/^(\d+)_(\d+)_shared$/);
-            if (!history.length && match && !fs.existsSync(memFile(key)) && getAiChannel(match[1]) === match[2]) {
-                const legacyKey = match[1] + '_shared';
+            const parts = key.split('_');
+            const legacyPrimaryChannel = parts.length === 3 && parts[2] === 'shared' && getAiChannel(parts[0]) === parts[1];
+            if (!history.length && legacyPrimaryChannel && !fs.existsSync(memFile(key))) {
+                const legacyKey = parts[0] + '_shared';
                 history = loadHistByKey(legacyKey);
                 if (history.length) saveHistByKey(key, history);
             }
@@ -276,12 +277,16 @@ async function restoreGuild(client, g) {
     while ((m = pat.exec(text)) !== null) {
         try {
             const key = m[1].trim().replace(/:/g, '_');
-                const keyPattern = new RegExp('^' + g + '_(?:shared|\\d+|\\d+_shared|\\d+_facts)$');
-                if (!keyPattern.test(key)) continue;
+                const prefix = String(g) + '_';
+                const suffix = key.startsWith(prefix) ? key.slice(prefix.length) : '';
+                const pieces = suffix.split('_');
+                const digits = value => value.length > 0 && value.split('').every(ch => ch >= '0' && ch <= '9');
+                const valid = suffix === 'shared' || digits(suffix) || (pieces.length === 2 && digits(pieces[0]) && (pieces[1] === 'shared' || pieces[1] === 'facts'));
+                if (!valid) continue;
                 const targetFile = memFile(key);
                 if (!fs.existsSync(targetFile)) {
                     const data = JSON.parse(m[2].trim());
-                    if (key.endsWith('_facts') ? (!data || !Array.isArray(data.facts)) : !Array.isArray(data)) continue;
+                    if (suffix.endsWith('_facts') ? (!data || !Array.isArray(data.facts)) : !Array.isArray(data)) continue;
                     fs.writeFileSync(targetFile, JSON.stringify(data, null, 2), 'utf8');
                     if (Array.isArray(data)) histories.set(key, data);
                     n++;
@@ -308,6 +313,7 @@ function systemInstr(guild, userName, userPersonalHistText, personaId, userFacts
         const emojis = [...guild.emojis.cache.values()].slice(0, EMOJI_CAP).map(e => e.toString());
         const stickers = [...guild.stickers.cache.values()].map(s => s.name);
         const persona = PERSONAS[personaId] || PERSONAS.default;
+        const newline = String.fromCharCode(10);
         const L = [
             '你是 ' + persona.name + '，這個 Discord 伺服器的 AI 夥伴。',
             '【人格與語氣】' + persona.trait + '；回覆風格：' + persona.style + '。',
@@ -315,9 +321,9 @@ function systemInstr(guild, userName, userPersonalHistText, personaId, userFacts
             '',
             '【當前對話者】你現在正在跟 ' + userName + '（Discord ID ' + userId + '）對話。',
             '【此人的長期事實】',
-            userFacts.length ? userFacts.map(f => '- ' + f).join('\n') : '目前沒有已確認的長期事實。',
+            userFacts.length ? userFacts.map(f => '- ' + f).join(newline) : '目前沒有已確認的長期事實。',
             '這些事實只屬於上面這個 Discord ID。群聊歷史包含多位成員；絕不可把其他人的經歷、偏好、名字或稱呼套用到當前使用者。若不確定，先詢問。',
-            userPersonalHistText ? '【此使用者近期個人對話】\n' + userPersonalHistText : '',
+            userPersonalHistText ? '【此使用者近期個人對話】' + newline + userPersonalHistText : '',
             '',
             '【群聊環境】頻道歷史可能包含其他成員的對話。你可以理解脈絡，但不能把他人資訊當成當前使用者的個人資料。',
             '',
@@ -327,7 +333,7 @@ function systemInstr(guild, userName, userPersonalHistText, personaId, userFacts
         L.push(emojis.length ? emojis.join(' ') : '(此伺服器沒有自訂 emoji)');
         L.push('若要傳貼圖，在回覆末尾單獨一行寫 [STICKER:貼圖名稱]，只能用以下貼圖，不可捏造，一次最多一張:');
         L.push(stickers.length ? stickers.join('、') : '(此伺服器沒有自訂貼圖)');
-        return { parts: [{ text: L.filter(Boolean).join('\n') }] };
+        return { parts: [{ text: L.filter(Boolean).join(newline) }] };
     }
 
     async function toInline(att) {
@@ -360,7 +366,7 @@ function canCall() {
 
 function likelyContainsPersonalFacts(text) {
         if (typeof text !== 'string' || text.trim().length < 15 || text.trim().startsWith('/')) return false;
-        return /\b(i am|i'm|my|i like|i love|i prefer|i have|i work|i study|i live|i dislike|i hate)\b|我(是|叫|喜歡|喜欢|偏好|有|正在|住在|討厭|不喜歡|不喜欢|想|在)|我的/u.test(text);
+        return /(i am|i'm|my|i like|i love|i prefer|i have|i work|i study|i live|i dislike|i hate)/i.test(text) || /(我(是|叫|喜歡|喜欢|偏好|有|正在|住在|討厭|不喜歡|不喜欢|想|在)|我的)/u.test(text);
     }
     function loadUserFacts(guildId, userId) {
         const data = readJson(memFile(guildId + '_' + userId + '_facts'), {});
@@ -374,7 +380,12 @@ function likelyContainsPersonalFacts(text) {
         if (!models.length) return false;
         const fileKey = guildId + '_' + userId + '_facts';
         const current = loadUserFacts(guildId, userId).facts;
-        const prompt = 'Discord 使用者「' + userName + '」剛傳送以下訊息。只抽取訊息明確表達、關於說話者本人的長期事實；不要推測，不要收錄他人資訊、一次性事件、密碼/API 金鑰/憑證、財務帳號、健康或政治宗教等敏感資訊、精確地址或定位。將新事實與既有事實合併；若訊息明確更正舊事實，請更新舊項。回覆只能是 JSON 字串陣列，最多 30 個簡短事實；若沒有新事實就保留既有陣列。\n既有事實：' + JSON.stringify(current) + '\n訊息：' + text;
+        const newline = String.fromCharCode(10);
+        const prompt = [
+            'Discord 使用者「' + userName + '」剛傳送以下訊息。只抽取訊息明確表達、關於說話者本人的長期事實；不要推測，不要收錄他人資訊、一次性事件、密碼/API 金鑰/憑證、財務帳號、健康或政治宗教等敏感資訊、精確地址或定位。將新事實與既有事實合併；若訊息明確更正舊事實，請更新舊項。回覆只能是 JSON 字串陣列，最多 30 個簡短事實；若沒有新事實就保留既有陣列。',
+            '既有事實：' + JSON.stringify(current),
+            '訊息：' + text
+        ].join(newline);
         const response = await fetchWithTimeout('https://generativelanguage.googleapis.com/v1beta/models/' + models[0] + ':generateContent?key=' + encodeURIComponent(apiKey), {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }] }], generationConfig: { temperature: 0.1, maxOutputTokens: 512 } })
@@ -388,7 +399,8 @@ function likelyContainsPersonalFacts(text) {
         let facts;
         try { facts = JSON.parse(output.slice(start, end + 1)); } catch { return false; }
         if (!Array.isArray(facts)) return false;
-        facts = [...new Set(facts.filter(f => typeof f === 'string' && f.trim()).map(f => f.trim().slice(0, 200)))].slice(0, 30);
+        const blocked = /(password|api key|token|secret|credential|健康|疾病|政治|宗教|精確地址|詳細住址)/i;
+        facts = [...new Set(facts.filter(f => typeof f === 'string' && f.trim() && !blocked.test(f)).map(f => f.trim().slice(0, 200)))].slice(0, 30);
         if (!facts.length && current.length) return false;
         if (JSON.stringify(facts) === JSON.stringify(current)) return false;
         writeJson(memFile(fileKey), { facts, updatedAt: new Date().toISOString() });
