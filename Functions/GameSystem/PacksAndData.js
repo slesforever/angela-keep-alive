@@ -507,6 +507,14 @@ function defaultPlayer(username) {
         exp:            0,
         stageProgress:  1,
         xp:             0,
+        totalMessages:  0,
+        totalVoiceMinutes: 0,
+        currentVoiceMinutes: 0,
+        longestVoiceSessionMinutes: 0,
+        voiceSessionStartedAt: null,
+        dailyQuestStreak: 0,
+        hourlyQuestCompletions: 0,
+        achievements: { unlocked: [], claimed: [] },
     };
 }
 
