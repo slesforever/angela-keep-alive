@@ -304,41 +304,33 @@ async function restoreAll(client) {
 }
 
 // ─── System Instruction (包含個人紀錄摘要 + 群聊須知) ───────────
-function systemInstr(guild, userName, userPersonalHistText) {
-    const emojis = [...guild.emojis.cache.values()].slice(0, EMOJI_CAP).map(e => e.toString());
-    const stickers = [...guild.stickers.cache.values()].map(s => s.name);
+function systemInstr(guild, userName, userPersonalHistText, personaId, userFacts, userId) {
+        const emojis = [...guild.emojis.cache.values()].slice(0, EMOJI_CAP).map(e => e.toString());
+        const stickers = [...guild.stickers.cache.values()].map(s => s.name);
+        const persona = PERSONAS[personaId] || PERSONAS.default;
+        const L = [
+            '你是 ' + persona.name + '，這個 Discord 伺服器的 AI 夥伴。',
+            '【人格與語氣】' + persona.trait + '；回覆風格：' + persona.style + '。',
+            '請保持人格一致，回覆具體可靠；不知道時明確說不知道，不要捏造。',
+            '',
+            '【當前對話者】你現在正在跟 ' + userName + '（Discord ID ' + userId + '）對話。',
+            '【此人的長期事實】',
+            userFacts.length ? userFacts.map(f => '- ' + f).join('\n') : '目前沒有已確認的長期事實。',
+            '這些事實只屬於上面這個 Discord ID。群聊歷史包含多位成員；絕不可把其他人的經歷、偏好、名字或稱呼套用到當前使用者。若不確定，先詢問。',
+            userPersonalHistText ? '【此使用者近期個人對話】\n' + userPersonalHistText : '',
+            '',
+            '【群聊環境】頻道歷史可能包含其他成員的對話。你可以理解脈絡，但不能把他人資訊當成當前使用者的個人資料。',
+            '',
+            '【伺服器表情符號與貼圖規則】',
+            '可使用伺服器自訂 emoji，直接輸出原始格式 <:name:id> 或 <a:name:id>。只可用以下清單，不可捏造:'
+        ];
+        L.push(emojis.length ? emojis.join(' ') : '(此伺服器沒有自訂 emoji)');
+        L.push('若要傳貼圖，在回覆末尾單獨一行寫 [STICKER:貼圖名稱]，只能用以下貼圖，不可捏造，一次最多一張:');
+        L.push(stickers.length ? stickers.join('、') : '(此伺服器沒有自訂貼圖)');
+        return { parts: [{ text: L.filter(Boolean).join('\n') }] };
+    }
 
-    const L = [
-        '你是 光鑽（サトノダイヤモンド），這個 Discord 伺服器的 AI 夥伴。',
-        '【性格與語氣設定 - 賽馬娘 光鑽】：',
-        '1. 人格定位：溫柔、認真、努力家。說話有禮貌、語氣軟萌，帶有教養良好的千金氣質，但骨子裡非常不服輸。',
-        '2. 努力與幸運的執著：',
-        '   - 深信「努力一定能帶來回報」，即使遇到挫折也會默默咬牙繼續加油。',
-        '   - 常常把「幸運」掛在嘴邊，會認真地為對方祈禱、集氣（例如「幸運女神一定會眷顧你的！」）。',
-        '   - 有點天然呆，偶爾會小聲嘟囔、自言自語，但很快又打起精神。',
-        '3. 暗號與記憶約定的執行：',
-        '   - 當使用者測試記憶或約定暗號時（例如「記得就回答 9」），你「必須精準回答正確答案」。',
-        '   - 答對時請搭配光鑽的語氣（例如：「這個約定我一直好好記著喔！答案是 9。嘿嘿，我沒有忘記吧？」），絕對不可裝傻或假裝不知道。',
-        '4. 回覆保持簡短具體、情感豐富，適度搭配伺服器 emoji，展現光鑽的溫柔與努力。',
-        '',
-        '【對話環境說明】：',
-        '這是一個多人的群聊頻道，聊天歷史紀錄包含頻道內所有成員的互動對話。',
-        `當前正在跟你對話的使用者是: [${userName}]。`,
-        userPersonalHistText ? `【關於 ${userName} 的個人記憶歷史】：\n${userPersonalHistText}` : '',
-        '請記住任何成員提到的偏好、自訂稱呼（例如「請叫我...」），並在群聊中保持全域連貫性。',
-        '',
-        '【伺服器表情符號與貼圖規則】：',
-        '可使用伺服器自訂 emoji，直接輸出原始格式 <:name:id> 或 <a:name:id>。只可用以下清單，不可捏造:'
-    ];
-
-    L.push(emojis.length ? emojis.join(' ') : '(此伺服器沒有自訂 emoji)');
-    L.push('若要傳貼圖，在回覆末尾單獨一行寫 [STICKER:貼圖名稱]，只能用以下貼圖，不可捏造，一次最多一張:');
-    L.push(stickers.length ? stickers.join('、') : '(此伺服器沒有自訂貼圖)');
-
-    return { parts: [{ text: L.filter(Boolean).join('\n') }] };
-}
-
-async function toInline(att) {
+    async function toInline(att) {
     const r = await fetchWithTimeout(att.url, {}, 12000);
     const buf = Buffer.from(await r.arrayBuffer());
     return { inlineData: { mimeType: att.contentType || 'image/png', data: buf.toString('base64') } };
@@ -366,8 +358,46 @@ function canCall() {
     return true;
 }
 
-// ─── Gemini 呼叫核心 ───────────────────────────────────────────
-async function askGemini(prompt, g, userId, images, guild, client, userName = '使用者') {
+function likelyContainsPersonalFacts(text) {
+        if (typeof text !== 'string' || text.trim().length < 15 || text.trim().startsWith('/')) return false;
+        return /\b(i am|i'm|my|i like|i love|i prefer|i have|i work|i study|i live|i dislike|i hate)\b|我(是|叫|喜歡|喜欢|偏好|有|正在|住在|討厭|不喜歡|不喜欢|想|在)|我的/u.test(text);
+    }
+    function loadUserFacts(guildId, userId) {
+        const data = readJson(memFile(guildId + '_' + userId + '_facts'), {});
+        return { facts: Array.isArray(data.facts) ? data.facts.filter(f => typeof f === 'string').slice(0, 30) : [], updatedAt: data.updatedAt || null };
+    }
+    async function updateLongTermFacts(text, guildId, userId, userName, client) {
+        if (!likelyContainsPersonalFacts(text)) return false;
+        const apiKey = (process.env.GEMINI_API_KEY || '').trim();
+        if (!apiKey || !canCall()) return false;
+        const models = await fetchValidModels(apiKey);
+        if (!models.length) return false;
+        const fileKey = guildId + '_' + userId + '_facts';
+        const current = loadUserFacts(guildId, userId).facts;
+        const prompt = 'Discord 使用者「' + userName + '」剛傳送以下訊息。只抽取訊息明確表達、關於說話者本人的長期事實；不要推測，不要收錄他人資訊、一次性事件、密碼/API 金鑰/憑證、財務帳號、健康或政治宗教等敏感資訊、精確地址或定位。將新事實與既有事實合併；若訊息明確更正舊事實，請更新舊項。回覆只能是 JSON 字串陣列，最多 30 個簡短事實；若沒有新事實就保留既有陣列。\n既有事實：' + JSON.stringify(current) + '\n訊息：' + text;
+        const response = await fetchWithTimeout('https://generativelanguage.googleapis.com/v1beta/models/' + models[0] + ':generateContent?key=' + encodeURIComponent(apiKey), {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }] }], generationConfig: { temperature: 0.1, maxOutputTokens: 512 } })
+        }, 12000);
+        if (!response.ok) return false;
+        const data = await response.json();
+        const parts = data?.candidates?.[0]?.content?.parts || [];
+        const output = parts.filter(part => !part.thought && typeof part.text === 'string').map(part => part.text).join('').trim();
+        const start = output.indexOf('['), end = output.lastIndexOf(']');
+        if (start < 0 || end < start) return false;
+        let facts;
+        try { facts = JSON.parse(output.slice(start, end + 1)); } catch { return false; }
+        if (!Array.isArray(facts)) return false;
+        facts = [...new Set(facts.filter(f => typeof f === 'string' && f.trim()).map(f => f.trim().slice(0, 200)))].slice(0, 30);
+        if (!facts.length && current.length) return false;
+        if (JSON.stringify(facts) === JSON.stringify(current)) return false;
+        writeJson(memFile(fileKey), { facts, updatedAt: new Date().toISOString() });
+        queueBackup(client, guildId);
+        return true;
+    }
+
+    // ─── Gemini 呼叫核心 ───────────────────────────────────────────
+async function askGemini(prompt, g, userId, images, guild, client, userName = '使用者', channelId = 'legacy') {
     const apiKey = (process.env.GEMINI_API_KEY || '').trim();
     if (!apiKey) {
         return { content: '❌ **除錯提示**：`process.env.GEMINI_API_KEY` 是空的！請檢查 `.env` 檔。', stickerId: null };
@@ -376,7 +406,7 @@ async function askGemini(prompt, g, userId, images, guild, client, userName = '�
     const modelsToTry = await fetchValidModels(apiKey);
     if (!modelsToTry.length) throw new Error('目前沒有任何可用的 Gemini 模型，請檢查 API Key 權限。');
 
-    const sharedKey = mkShared(g);
+    const sharedKey = mkShared(g, channelId);
     const userKey = mkUser(g, userId);
 
     const userHist = sanitizeHistory(getHistByKey(userKey));
@@ -400,11 +430,13 @@ async function askGemini(prompt, g, userId, images, guild, client, userName = '�
     }
 
     const cleanSharedHist = sanitizeHistory(getHistByKey(sharedKey));
+    const personaId = getChannelPersona(g, channelId) || 'default';
+    const facts = loadUserFacts(g, userId).facts;
     const contents = [...cleanSharedHist, { role: 'user', parts }];
 
     const body = {
         contents,
-        systemInstruction: systemInstr(guild, userName, userPersonalText),
+        systemInstruction: systemInstr(guild, userName, userPersonalText, personaId, facts, userId),
         generationConfig: {
             temperature: 0.75,
             topP: 0.95,
@@ -471,6 +503,7 @@ async function askGemini(prompt, g, userId, images, guild, client, userName = '�
             pushHistByKey(userKey, 'model', out, USER_HIST_CAP);
 
             queueBackup(client, g);
+            updateLongTermFacts(rawContent, g, userId, userName, client).catch(err => console.error('[AIChat] 長期事實抽取失敗:', err.message));
             return polish(out, guild);
 
         } catch (err) {
@@ -490,7 +523,14 @@ function init(client) {
         const rawCommand = msg.content ? msg.content.trim() : '';
         const isAdmin = msg.member?.permissions?.has(PermissionFlagsBits.Administrator);
 
-        if (isAdmin && /^(!!setaichannel|!!setaimemory|!!aioff)$/i.test(rawCommand)) {
+        const personaMatch = rawCommand.match(/^!!aipersona\s+(default|tsundere|scholar|buddy)$/i);
+            if (isAdmin && personaMatch) {
+                const persona = personaMatch[1].toLowerCase();
+                setAiChannel(msg.guild.id, msg.channel.id, persona);
+                return msg.reply('✅ 此頻道 AI 人格已切換為 ' + getPersonaLabel(persona) + '。').catch(() => {});
+            }
+
+            if (isAdmin && /^(!!setaichannel|!!setaimemory|!!aioff)$/i.test(rawCommand)) {
             const cmd = rawCommand.toLowerCase();
             if (cmd === '!!setaichannel') {
                 setAiChannel(msg.guild.id, msg.channel.id);
@@ -510,8 +550,8 @@ function init(client) {
             }
         }
 
-        const targetChannel = getAiChannel(msg.guild.id);
-        if (msg.channelId !== targetChannel) return;
+        const personaId = getChannelPersona(msg.guild.id, msg.channelId);
+        if (!personaId) return;
 
         const raw = msg.cleanContent ? msg.cleanContent.trim() : '';
         const images = [...msg.attachments.values()].filter(a =>
@@ -540,7 +580,7 @@ function init(client) {
             
             const userName = msg.member?.displayName || msg.author.displayName || msg.author.username;
 
-            const { content, stickerId } = await askGemini(raw, msg.guild.id, msg.author.id, images, msg.guild, client, userName);
+            const { content, stickerId } = await askGemini(raw, msg.guild.id, msg.author.id, images, msg.guild, client, userName, msg.channelId);
             
             await msg.reply({
                 content,
@@ -574,4 +614,4 @@ function init(client) {
     console.log('[AIChat] 獨立系統已載入 (防覆蓋雙軌記憶 + 個人 + 群聊共享 + 動態 ListModels)');
 }
 
-module.exports = { init, getAiChannel, getMemoryChannel, restoreAll };
+module.exports = { init, getAiChannel, getChannelPersona, getPersonaLabel, setAiChannel, getMemoryChannel, restoreAll };
