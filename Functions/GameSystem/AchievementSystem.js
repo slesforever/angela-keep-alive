@@ -63,7 +63,7 @@ function makeView(player, userId) {
   const claimable = state.unlocked.filter(id => !state.claimed.includes(id));
   const lines = ACHIEVEMENTS.map(item => statusLine(item, state) + ' (' + item.reward[0] + ' SC / ' + item.reward[1] + ' LS)');
   const embed = new EmbedBuilder().setTitle('🏆 成就').setColor(0xf1c40f)
-    .setDescription(lines.join('\n'))
+    .setDescription(lines.join(String.fromCharCode(10)))
     .addFields({ name: '統計', value: '訊息：' + (Number(player.totalMessages) || 0).toLocaleString() + '｜最長連續語音：' + (Number(player.longestVoiceSessionMinutes) || 0) + ' 分鐘' });
   const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('claim_achievements:' + userId).setLabel('領取所有成就獎勵').setStyle(ButtonStyle.Success).setDisabled(claimable.length === 0));
   return { embed, row };
