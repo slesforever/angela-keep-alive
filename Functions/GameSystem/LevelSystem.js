@@ -145,59 +145,110 @@ function setPlayerXp(client, userId, username, targetXp) {
 
 const messageCooldowns = new Map();
 async function handleMessageXp(client, message) {
-    if (!message || message.author?.bot || !message.guild) return;
-    const userId = message.author.id;
-    const now = Date.now();
-    if (now - (messageCooldowns.get(userId) || 0) < 60_000) return;
-    messageCooldowns.set(userId, now);
-    await addXp(client, userId, message.author.username, 2, message.guild.id, 'message').catch(() => {});
-}
+        if (!message || message.author?.bot || !message.guild) return;
+        const userId = message.author.id;
+        const username = message.author.username;
+        const { getOrCreatePlayer, savePlayerData } = require('./PacksAndData.js');
+        const player = getOrCreatePlayer(client, userId, username);
+        player.totalMessages = (Number(player.totalMessages) || 0) + 1;
+        savePlayerData(client, userId, player);
+        require('./AchievementSystem.js').checkAchievements(client, userId, username, message.guild.id).catch(() => {});
+        const now = Date.now();
+        if (now - (messageCooldowns.get(userId) || 0) < 60_000) return;
+        messageCooldowns.set(userId, now);
+        await addXp(client, userId, username, 2, message.guild.id, 'message').catch(() => {});
+    }
 
-const voiceJoinTimes = new Map();
-function voiceKey(userId, guildId) { return `${guildId}:${userId}`; }
+    const voiceJoinTimes = new Map();
+    function voiceKey(userId, guildId) { return guildId + ':' + userId; }
 
-function trackVoiceJoin(userId, username, guildId) {
-    const key = voiceKey(userId, guildId);
-    if (!voiceJoinTimes.has(key)) voiceJoinTimes.set(key, { userId, joinedAt: Date.now(), guildId, username });
-}
+    function trackVoiceJoin(userId, username, guildId, client = null) {
+        const key = voiceKey(userId, guildId);
+        if (voiceJoinTimes.has(key)) return;
+        const now = Date.now();
+        let sessionStartedAt = now;
+        if (client) {
+            const { getOrCreatePlayer, savePlayerData } = require('./PacksAndData.js');
+            const player = getOrCreatePlayer(client, userId, username);
+            const savedStart = Number(player.voiceSessionStartedAt);
+            if (Number.isFinite(savedStart) && savedStart > 0 && savedStart <= now) sessionStartedAt = savedStart;
+            player.voiceSessionStartedAt = sessionStartedAt;
+            player.currentVoiceMinutes = Math.max(0, Math.floor((now - sessionStartedAt) / 60_000));
+            savePlayerData(client, userId, player);
+        }
+        voiceJoinTimes.set(key, { userId, joinedAt: now, sessionStartedAt, guildId, username });
+    }
 
-function trackVoiceLeave(userId, guildId) { voiceJoinTimes.delete(voiceKey(userId, guildId)); }
+    function trackVoiceLeave(userId, guildId, client = null, username = 'Player') {
+        const key = voiceKey(userId, guildId);
+        const data = voiceJoinTimes.get(key);
+        voiceJoinTimes.delete(key);
+        if (!client) return;
+        const { getOrCreatePlayer, savePlayerData } = require('./PacksAndData.js');
+        const player = getOrCreatePlayer(client, userId, username || data?.username);
+        const now = Date.now();
+        const sessionStartedAt = data?.sessionStartedAt || Number(player.voiceSessionStartedAt) || now;
+        const sessionMinutes = Math.max(0, Math.floor((now - sessionStartedAt) / 60_000));
+        const extraMinutes = data ? Math.max(0, Math.floor((now - data.joinedAt) / 60_000)) : 0;
+        player.totalVoiceMinutes = (Number(player.totalVoiceMinutes) || 0) + extraMinutes;
+        player.currentVoiceMinutes = 0;
+        player.longestVoiceSessionMinutes = Math.max(Number(player.longestVoiceSessionMinutes) || 0, sessionMinutes);
+        player.voiceSessionStartedAt = null;
+        savePlayerData(client, userId, player);
+        if (extraMinutes > 0) require('./DailyQuestSystem.js').progress(client, userId, username || data?.username, guildId, 'voice', extraMinutes).catch(() => {});
+        require('./AchievementSystem.js').checkAchievements(client, userId, username || data?.username, guildId).catch(() => {});
+    }
 
-function bootstrapVoiceTracking(client) {
-    let count = 0;
-    for (const guild of client.guilds.cache.values()) {
-        for (const state of guild.voiceStates?.cache?.values?.() || []) {
-            const member = state.member || guild.members.cache.get(state.id);
-            if (!state.channelId || !member || member.user?.bot) continue;
-            trackVoiceJoin(member.id, member.user.username, guild.id);
-            count++;
+    function bootstrapVoiceTracking(client) {
+        let count = 0;
+        for (const guild of client.guilds.cache.values()) {
+            for (const state of guild.voiceStates?.cache?.values?.() || []) {
+                const member = state.member || guild.members.cache.get(state.id);
+                if (!state.channelId || !member || member.user?.bot) continue;
+                trackVoiceJoin(member.id, member.user.username, guild.id, client);
+                count++;
+            }
+        }
+        console.log('[LevelSystem] 預載 ' + count + ' 位語音成員進入 XP 追蹤');
+        return count;
+    }
+
+    async function processVoiceXpTick(client) {
+        const active = new Set();
+        for (const guild of client.guilds.cache.values()) {
+            for (const state of guild.voiceStates?.cache?.values?.() || []) {
+                const member = state.member || guild.members.cache.get(state.id);
+                if (!state.channelId || !member || member.user?.bot) continue;
+                const key = voiceKey(member.id, guild.id);
+                active.add(key);
+                trackVoiceJoin(member.id, member.user.username, guild.id, client);
+            }
+        }
+        for (const key of [...voiceJoinTimes.keys()]) {
+            if (active.has(key)) continue;
+            const data = voiceJoinTimes.get(key);
+            if (data) trackVoiceLeave(data.userId, data.guildId, client, data.username);
+        }
+        for (const data of voiceJoinTimes.values()) {
+            const now = Date.now();
+            const minutes = Math.floor((now - data.joinedAt) / 60_000);
+            if (minutes < 1) continue;
+            data.joinedAt += minutes * 60_000;
+            const sessionMinutes = Math.max(0, Math.floor((now - data.sessionStartedAt) / 60_000));
+            const { getOrCreatePlayer, savePlayerData } = require('./PacksAndData.js');
+            const player = getOrCreatePlayer(client, data.userId, data.username);
+            player.totalVoiceMinutes = (Number(player.totalVoiceMinutes) || 0) + minutes;
+            player.currentVoiceMinutes = sessionMinutes;
+            player.longestVoiceSessionMinutes = Math.max(Number(player.longestVoiceSessionMinutes) || 0, sessionMinutes);
+            player.voiceSessionStartedAt = data.sessionStartedAt;
+            savePlayerData(client, data.userId, player);
+            require('./DailyQuestSystem.js').progress(client, data.userId, data.username, data.guildId, 'voice', minutes).catch(() => {});
+            require('./AchievementSystem.js').checkAchievements(client, data.userId, data.username, data.guildId).catch(() => {});
+            await addXp(client, data.userId, data.username, minutes * 5, data.guildId, 'voice').catch(err => console.error('[LevelSystem] 語音 XP 失敗:', err.message));
         }
     }
-    console.log(`[LevelSystem] 預載 ${count} 位語音成員進入 XP 追蹤`);
-    return count;
-}
 
-async function processVoiceXpTick(client) {
-    const active = new Set();
-    for (const guild of client.guilds.cache.values()) {
-        for (const state of guild.voiceStates?.cache?.values?.() || []) {
-            const member = state.member || guild.members.cache.get(state.id);
-            if (!state.channelId || !member || member.user?.bot) continue;
-            const key = voiceKey(member.id, guild.id);
-            active.add(key);
-            trackVoiceJoin(member.id, member.user.username, guild.id);
-        }
-    }
-    for (const key of voiceJoinTimes.keys()) if (!active.has(key)) voiceJoinTimes.delete(key);
-    for (const [key, data] of voiceJoinTimes) {
-        const minutes = Math.floor((Date.now() - data.joinedAt) / 60_000);
-        if (minutes < 1) continue;
-        voiceJoinTimes.set(key, { ...data, joinedAt: data.joinedAt + minutes * 60_000 });
-        await addXp(client, data.userId, data.username, minutes * 5, data.guildId, 'voice').catch(err => console.error('[LevelSystem] 語音 XP 失敗:', err.message));
-    }
-}
-
-function buildRankBar(xpInto, xpNeeded) {
+    function buildRankBar(xpInto, xpNeeded) {
     const pct = Math.min(1, xpInto / Math.max(1, xpNeeded));
     const filled = Math.round(pct * 10);
     return '█'.repeat(filled) + '░'.repeat(10 - filled);
