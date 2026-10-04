@@ -173,6 +173,7 @@ async function handleMessageXp(client, message) {
             const savedStart = Number(player.voiceSessionStartedAt);
             if (Number.isFinite(savedStart) && savedStart > 0 && savedStart <= now) sessionStartedAt = savedStart;
             player.voiceSessionStartedAt = sessionStartedAt;
+        player.voiceSessionGuildId = guildId;
             player.currentVoiceMinutes = Math.max(0, Math.floor((now - sessionStartedAt) / 60_000));
             savePlayerData(client, userId, player);
         }
@@ -194,6 +195,7 @@ async function handleMessageXp(client, message) {
         player.currentVoiceMinutes = 0;
         player.longestVoiceSessionMinutes = Math.max(Number(player.longestVoiceSessionMinutes) || 0, sessionMinutes);
         player.voiceSessionStartedAt = null;
+    player.voiceSessionGuildId = null;
         savePlayerData(client, userId, player);
         if (extraMinutes > 0) require('./DailyQuestSystem.js').progress(client, userId, username || data?.username, guildId, 'voice', extraMinutes).catch(() => {});
         require('./AchievementSystem.js').checkAchievements(client, userId, username || data?.username, guildId).catch(() => {});
@@ -209,7 +211,22 @@ async function handleMessageXp(client, message) {
                 count++;
             }
         }
-        console.log('[LevelSystem] 預載 ' + count + ' 位語音成員進入 XP 追蹤');
+        const { savePlayerData } = require('./PacksAndData.js');
+    try {
+        for (const file of fs.readdirSync(PLAYERS_DIR)) {
+            if (!file.endsWith('.json')) continue;
+            const userId = file.slice(0, -5);
+            const player = JSON.parse(fs.readFileSync(path.join(PLAYERS_DIR, file), 'utf8'));
+            const guildId = player.voiceSessionGuildId;
+            if (player.voiceSessionStartedAt && guildId && !voiceJoinTimes.has(voiceKey(userId, guildId))) {
+                player.voiceSessionStartedAt = null;
+                player.voiceSessionGuildId = null;
+                player.currentVoiceMinutes = 0;
+                savePlayerData(client, userId, player);
+            }
+        }
+    } catch (err) { console.error('[LevelSystem] 清理重啟前語音 session 失敗:', err.message); }
+    console.log('[LevelSystem] 預載 ' + count + ' 位語音成員進入 XP 追蹤');
         return count;
     }
 
@@ -241,6 +258,7 @@ async function handleMessageXp(client, message) {
             player.currentVoiceMinutes = sessionMinutes;
             player.longestVoiceSessionMinutes = Math.max(Number(player.longestVoiceSessionMinutes) || 0, sessionMinutes);
             player.voiceSessionStartedAt = data.sessionStartedAt;
+        player.voiceSessionGuildId = data.guildId;
             savePlayerData(client, data.userId, player);
             require('./DailyQuestSystem.js').progress(client, data.userId, data.username, data.guildId, 'voice', minutes).catch(() => {});
             require('./AchievementSystem.js').checkAchievements(client, data.userId, data.username, data.guildId).catch(() => {});
