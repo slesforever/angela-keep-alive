@@ -58,20 +58,21 @@ function statusLine(item, state) {
   if (state.unlocked.includes(item.id)) return '🎁 **可領取** — ' + item.label;
   return '🔒 ' + item.label;
 }
-function makeView(player) {
+function makeView(player, userId) {
   const state = normalize(player);
   const claimable = state.unlocked.filter(id => !state.claimed.includes(id));
   const lines = ACHIEVEMENTS.map(item => statusLine(item, state) + ' (' + item.reward[0] + ' SC / ' + item.reward[1] + ' LS)');
   const embed = new EmbedBuilder().setTitle('🏆 成就').setColor(0xf1c40f)
     .setDescription(lines.join('\n'))
     .addFields({ name: '統計', value: '訊息：' + (Number(player.totalMessages) || 0).toLocaleString() + '｜最長連續語音：' + (Number(player.longestVoiceSessionMinutes) || 0) + ' 分鐘' });
-  const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('claim_achievements:' + player.discordId).setLabel('領取所有成就獎勵').setStyle(ButtonStyle.Success).setDisabled(claimable.length === 0));
+  const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('claim_achievements:' + userId).setLabel('領取所有成就獎勵').setStyle(ButtonStyle.Success).setDisabled(claimable.length === 0));
   return { embed, row };
 }
 async function handleAchievements(client, interaction) {
   const player = getOrCreatePlayer(client, interaction.user.id, interaction.user.username);
   await checkAchievements(client, interaction.user.id, interaction.user.username, interaction.guildId);
-  const view = makeView(player);
+  const refreshed = getOrCreatePlayer(client, interaction.user.id, interaction.user.username);
+  const view = makeView(refreshed, interaction.user.id);
   return interaction.reply({ embeds: [view.embed], components: [view.row], flags: MessageFlags.Ephemeral });
 }
 async function handleClaim(client, interaction, userId) {
@@ -92,7 +93,7 @@ async function handleClaim(client, interaction, userId) {
   player.starCoins = (Number(player.starCoins) || 0) + starCoins;
   player.lightSeeds = (Number(player.lightSeeds) || 0) + lightSeeds;
   savePlayerData(client, userId, player);
-  const view = makeView(player);
+  const view = makeView(player, userId);
   return interaction.update({ embeds: [view.embed], components: [view.row], content: '已領取 ' + ids.length + ' 項成就獎勵：' + starCoins + ' StarCoins、' + lightSeeds + ' LightSeeds。' });
 }
 function init() {}
