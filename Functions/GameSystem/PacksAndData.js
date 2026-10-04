@@ -512,6 +512,7 @@ function defaultPlayer(username) {
         currentVoiceMinutes: 0,
         longestVoiceSessionMinutes: 0,
         voiceSessionStartedAt: null,
+        voiceSessionGuildId: null,
         dailyQuestStreak: 0,
         hourlyQuestCompletions: 0,
         achievements: { unlocked: [], claimed: [] },
