@@ -414,6 +414,7 @@ async function sendHelp(interaction) {
             { name: '🎲 娛樂功能',           value: '`/gayrate` — 男同指數 ｜ `/lesbianrate` — 姬圈指數' },
             { name: '🔊 語音控制',           value: '`/join` ｜ `/leave` ｜ `/status`' },
             { name: '📊 排行榜', value: '`/leaderboard` — 等級 XP 排行榜 TOP 10' },
+            { name: '🏆 成就與任務', value: '`/achievements` ｜ `/dailyquest`' },
             { name: '📰 社群檢測 (伺服器管理員)', value: '`/steam` ｜ `/tweet` ｜ `/youtube`\n`/setchannel` — 統一設定所有通知/功能頻道' },
             { name: '🛒 商城與抽獎', value: '`/shop` ｜ `/giveaway-create` ｜ `/giveaway-end`' },
             { name: '👑 最高主管特權 (Sles 專屬)', value: '`/givelightseeds` ｜ `/givefragments` ｜ `/givescrolls`\n`/givethreads` ｜ `/updaterewards` ｜ `/updatebuff`\n`/announce` — 全伺服器公告' }
