@@ -1620,6 +1620,10 @@ client.on(
                 configTypeMap[type]
             ) {
 
+                    if (type === 'ai') {
+                        AIChatSystem.setAiChannel(interaction.guild.id, targetChannel.id, 'default');
+                    }
+
                 const patch = {
                     [configTypeMap[type].key]:
                         targetChannel.id
@@ -2279,25 +2283,7 @@ client.on(
                 username
             );
 
-        } else if (
-            leftChannel !==
-            joinedChannel
-        ) {
-
-            trackVoiceLeave(
-                userId,
-                guildId,
-                client,
-                username
-            );
-
-            trackVoiceJoin(
-                userId,
-                username,
-                guildId,
-                client
-            );
-        }
+        } 
     }
 );
 
