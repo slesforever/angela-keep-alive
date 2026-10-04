@@ -68,15 +68,14 @@ function renderQuest(set) {
   return set.map(item => {
     const def = QUESTS[item.type];
     return (item.done ? '✅ ' : '▫️ ') + def.label + '：' + Math.min(item.progress, item.target) + '/' + item.target + ' ' + def.unit;
-  }).join('\n');
-}
+  }).join(String.fromCharCode(10));}
 function makeView(player, userId) {
   const state = ensureState(player);
   const streak = Number(player.dailyQuestStreak) || 0;
   const dailyReady = !state.daily.claimed && allDone(state.daily.quests);
   const hourlyReady = !state.hourly.claimed && allDone(state.hourly.quests);
   const embed = new EmbedBuilder().setTitle('📜 每日與每時任務').setColor(0x5865f2)
-    .setDescription('今日任務（台北時間 ' + state.current.date + '）\n' + renderQuest(state.daily.quests) + '\n\n本小時任務（' + state.current.hour + ':00 起）\n' + renderQuest(state.hourly.quests))
+    .setDescription('今日任務（台北時間 ' + state.current.date + '）' + String.fromCharCode(10) + renderQuest(state.daily.quests) + String.fromCharCode(10) + String.fromCharCode(10) + '本小時任務（' + state.current.hour + ':00 起）' + String.fromCharCode(10) + renderQuest(state.hourly.quests))
     .addFields({ name: '連續完成每日任務', value: streak + ' 天' }, { name: '今日完成每小時任務', value: String(state.hourly.count) + ' 組' }, { name: '獎勵', value: '每日：50 StarCoins + 10 LightSeeds；連續天數每多 1 天加 5 StarCoins（最多加 150）。每小時：10 StarCoins + 2 LightSeeds。' });
   const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('claim_quests:' + userId).setLabel('領取已完成任務獎勵').setStyle(ButtonStyle.Success).setDisabled(!dailyReady && !hourlyReady));
   return { embed, row };
