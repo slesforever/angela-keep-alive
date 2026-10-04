@@ -68,7 +68,8 @@ function renderQuest(set) {
   return set.map(item => {
     const def = QUESTS[item.type];
     return (item.done ? '✅ ' : '▫️ ') + def.label + '：' + Math.min(item.progress, item.target) + '/' + item.target + ' ' + def.unit;
-  }).join(String.fromCharCode(10));}
+  }).join(String.fromCharCode(10));
+}
 function makeView(player, userId) {
   const state = ensureState(player);
   const streak = Number(player.dailyQuestStreak) || 0;
