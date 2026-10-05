@@ -152,6 +152,8 @@ const {
 const ShopSystem = require('./GameSystem/ShopSystem.js');
 const GiveawaySystem = require('./GameSystem/GiveawayEventSystem.js');
 const AIChatSystem = require('./GameSystem/AIChatSystem.js');
+const EngagementSystem = require('./GameSystem/EngagementSystem.js');
+const ReminderSystem = require('./GameSystem/ReminderSystem.js');
 
 const {
     handleMessageXp,
@@ -327,16 +329,24 @@ const allSlashCommands = [
     // ─────────────────────────────────────
 
     new SlashCommandBuilder()
-        .setName('pack')
+        .setName('limbuscompany_pack')
         .setDescription(
-            '查看 LC 主頁式背包與資源介面'
-        ),
+            'Limbus Company 背包與資源介面'
+        )
+        .setDescriptionLocalizations({
+            'en-US': 'Limbus Company inventory and resources',
+            'zh-TW': 'Limbus Company 背包與資源介面'
+        }),
 
     new SlashCommandBuilder()
-        .setName('list')
+        .setName('limbuscompany_list')
         .setDescription(
-            '查看當前卡池機率與清單（已修正顯示完整角色名稱）'
-        ),
+            '查看 Limbus Company 卡池機率與人格清單'
+        )
+        .setDescriptionLocalizations({
+            'en-US': 'View Limbus Company extraction rates and identities',
+            'zh-TW': '查看 Limbus Company 卡池機率與人格清單'
+        }),
 
     // ─────────────────────────────────────
     // 戰鬥 / 隊伍
@@ -390,24 +400,6 @@ const allSlashCommands = [
         .setName('md')
         .setDescription(
             '開啟或查看鏡光迷宮進度'
-        ),
-
-    // ─────────────────────────────────────
-    // 等級
-    // ─────────────────────────────────────
-
-    new SlashCommandBuilder()
-        .setName('rank')
-        .setDescription(
-            '查看等級與 XP 進度'
-        )
-        .addUserOption(
-            opt =>
-                opt
-                    .setName('target')
-                    .setDescription(
-                        '查看其他玩家的等級（預設為自己）'
-                    )
         ),
 
     new SlashCommandBuilder()
@@ -759,11 +751,58 @@ const allSlashCommands = [
     
     new SlashCommandBuilder()
             .setName('achievements')
-            .setDescription('查看已解鎖與尚未解鎖的成就'),
+        .setDescription('查看成就與可領取獎勵')
+        .setDescriptionLocalizations({ 'en-US': 'View achievements and unclaimed rewards', 'zh-TW': '查看成就與可領取獎勵' }),
 
         new SlashCommandBuilder()
             .setName('dailyquest')
-            .setDescription('查看每日與本小時任務'),
+        .setDescription('查看每日與本小時任務')
+        .setDescriptionLocalizations({ 'en-US': 'View daily and hourly quests', 'zh-TW': '查看每日與本小時任務' }),
+
+    new SlashCommandBuilder()
+        .setName('checkin')
+        .setDescription('每日簽到並領取連續獎勵')
+        .setDescriptionLocalizations({ 'en-US': 'Daily check-in and streak reward', 'zh-TW': '每日簽到並領取連續獎勵' }),
+
+    new SlashCommandBuilder()
+        .setName('weekly')
+        .setDescription('查看並領取本週挑戰獎勵')
+        .setDescriptionLocalizations({ 'en-US': 'View and claim your weekly challenge', 'zh-TW': '查看並領取本週挑戰獎勵' }),
+
+    new SlashCommandBuilder()
+        .setName('profile')
+        .setDescription('查看等級與稱號檔案')
+        .setDescriptionLocalizations({ 'en-US': 'View a player profile and equip titles', 'zh-TW': '查看等級與稱號檔案' })
+        .addUserOption(o => o.setName('target').setDescription('選擇要查看的玩家').setDescriptionLocalizations({ 'en-US': 'Player to view', 'zh-TW': '選擇要查看的玩家' })),
+
+    new SlashCommandBuilder()
+        .setName('stats')
+        .setDescription('查看個人活動統計')
+        .setDescriptionLocalizations({ 'en-US': 'View activity statistics', 'zh-TW': '查看個人活動統計' })
+        .addUserOption(o => o.setName('target').setDescription('選擇要查看的玩家').setDescriptionLocalizations({ 'en-US': 'Player to view', 'zh-TW': '選擇要查看的玩家' })),
+
+    new SlashCommandBuilder()
+        .setName('whoami')
+        .setDescription('讓 Angela 回想她記得的個人事實')
+        .setDescriptionLocalizations({ 'en-US': 'Ask Angela what she remembers about you', 'zh-TW': '讓 Angela 回想她記得的個人事實' }),
+
+    new SlashCommandBuilder()
+        .setName('remind')
+        .setDescription('設定一個會在時間到時送達的提醒')
+        .setDescriptionLocalizations({ 'en-US': 'Set a reminder to be delivered later', 'zh-TW': '設定一個會在時間到時送達的提醒' })
+        .addStringOption(o => o.setName('when').setDescription('提醒時間，使用台北時間').setDescriptionLocalizations({ 'en-US': 'When to remind you (Taipei time)', 'zh-TW': '提醒時間，使用台北時間' }).setRequired(true))
+        .addStringOption(o => o.setName('message').setDescription('提醒內容').setDescriptionLocalizations({ 'en-US': 'What should I remind you about?', 'zh-TW': '提醒內容' }).setRequired(true).setMaxLength(300)),
+
+    new SlashCommandBuilder()
+        .setName('reminders')
+        .setDescription('查看目前尚未送達的提醒')
+        .setDescriptionLocalizations({ 'en-US': 'List your pending reminders', 'zh-TW': '查看目前尚未送達的提醒' }),
+
+    new SlashCommandBuilder()
+        .setName('voiceai')
+        .setDescription('設定語音停留鼓勵訊息')
+        .setDescriptionLocalizations({ 'en-US': 'Configure voice-session encouragement', 'zh-TW': '設定語音停留鼓勵訊息' })
+        .addBooleanOption(o => o.setName('enabled').setDescription('開啟或關閉 30 分鐘語音鼓勵').setDescriptionLocalizations({ 'en-US': 'Enable or disable the 30-minute voice message', 'zh-TW': '開啟或關閉 30 分鐘語音鼓勵' })),
 
         new SlashCommandBuilder()
             .setName('steam')
@@ -1033,7 +1072,6 @@ const allSlashCommands = [
                     .setRequired(true)
         ),
 
-    new SlashCommandBuilder().setName('limbusids').setDescription('查看 Limbus Company 角色 ID 與中英文名稱'),
     new SlashCommandBuilder().setName('shop').setDescription('開啟商城 UI'),
     new SlashCommandBuilder().setName('shop-add').setDescription('Sles 專屬：上架商城商品')
         .addStringOption(o => o.setName('name').setDescription('商品名稱').setRequired(true))
@@ -1277,8 +1315,13 @@ client.on(
 
         if (interaction.isButton() && interaction.customId.startsWith('marry:')) return MarriageSystem.handleMarriageButton(client, interaction);
         if (interaction.isButton() && interaction.customId.startsWith('divorce:')) return MarriageSystem.handleDivorceButton(client, interaction);
+        if (interaction.isStringSelectMenu() && interaction.customId.startsWith('profile_title:')) return EngagementSystem.handleEquipTitle(client, interaction);
             if (interaction.isButton() && interaction.customId.startsWith('claim_achievements:')) return require('./GameSystem/AchievementSystem.js').handleClaim(client, interaction, interaction.customId.slice('claim_achievements:'.length));
             if (interaction.isButton() && interaction.customId.startsWith('claim_quests:')) return require('./GameSystem/DailyQuestSystem.js').handleClaim(client, interaction, interaction.customId.slice('claim_quests:'.length));
+        if (interaction.isButton() && interaction.customId.startsWith('claim_weekly:')) {
+            const [, userId, weekStart] = interaction.customId.split(':');
+            return EngagementSystem.handleWeeklyClaim(client, interaction, userId, weekStart);
+        }
 
         if (
             !interaction.isChatInputCommand()
@@ -2293,7 +2336,11 @@ client.on(
 
 const LEGACY_SLASH_COMMAND_NAMES = new Set([
     'setaimemory',
-    'aioff'
+    'aioff',
+    'pack',
+    'list',
+    'rank',
+    'limbusids'
 ]);
 
 async function removeLegacySlashCommands(commandManager, scopeName) {
@@ -2311,7 +2358,7 @@ async function removeLegacySlashCommands(commandManager, scopeName) {
 
     if (removed > 0) {
         console.log(
-            `[Commands] 已移除 ${scopeName} 舊 AI 指令：${removed} 個`
+            `[Commands] 已移除 ${scopeName} 舊名或過時指令：${removed} 個`
         );
     }
 }
@@ -2751,6 +2798,7 @@ if (
 AIChatSystem.init(client);
 require('./GameSystem/AchievementSystem.js').init(client);
 require('./GameSystem/DailyQuestSystem.js').init(client);
+ReminderSystem.init(client);
 client.login(
     TOKEN
 );

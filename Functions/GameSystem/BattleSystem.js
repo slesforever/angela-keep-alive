@@ -250,7 +250,7 @@ async function startBattle(client, message, tier = 'normal', presetEnemy = null)
     const allies = resolveBattleRoster(player);
 
     if (!allies.length) {
-        return message.reply('❌ 隊伍是空的！先在 `!pack` → **⚔️ 出擊編成** 選好人格。');
+        return message.reply('❌ 隊伍是空的！先用 `/limbuscompany_pack` → **⚔️ 出擊編成** 選好人格。');
     }
 
     let enemy = presetEnemy || randomEnemy(tier);

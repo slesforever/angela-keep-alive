@@ -4,8 +4,9 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
-const { AttachmentBuilder, PermissionFlagsBits } = require('discord.js');
+const { AttachmentBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require('discord.js');
 const { getGuildConfig } = require('./ServerConfigStorage.js');
+const { getLanguage, pick } = require('./LanguageSystem.js');
 
 // ─── 設定 ──────────────────────────────────────────────────────
 const CONFIG_PATH     = path.join(process.cwd(), 'data', 'ai-config.json');
@@ -372,6 +373,106 @@ function likelyContainsPersonalFacts(text) {
         const data = readJson(memFile(guildId + '_' + userId + '_facts'), {});
         return { facts: Array.isArray(data.facts) ? data.facts.filter(f => typeof f === 'string').slice(0, 30) : [], updatedAt: data.updatedAt || null };
     }
+    function getUserFacts(guildId, userId) {
+        return loadUserFacts(guildId, userId).facts;
+    }
+
+    async function handleWhoami(client, interaction) {
+        const lang = getLanguage(interaction.user.id);
+        const facts = getUserFacts(interaction.guildId, interaction.user.id);
+        if (!facts.length) {
+            return interaction.reply({
+                content: pick(lang,
+                    '我目前沒有記住你的長期個人事實。你可以在 AI 頻道自然分享你的興趣、偏好或長期目標；我只會使用已儲存的事實，不會用群聊裡其他人的資料猜測你。',
+                    'I do not have any long-term facts saved about you yet. Share interests, preferences, or ongoing goals in the AI channel; I will use only facts saved for your account, not guess from other people’s chat.'),
+                flags: MessageFlags.Ephemeral,
+            });
+        }
+
+        let summary = '';
+        const apiKey = (process.env.GEMINI_API_KEY || '').trim();
+        if (apiKey && canCall()) {
+            try {
+                const models = await fetchValidModels(apiKey);
+                if (models.length) {
+                    const prompt = lang === 'en'
+                        ? `Describe this person warmly in 2–4 sentences using ONLY these saved facts. Do not infer identity, sensitive traits, or anything not stated. If facts are sparse, say so plainly.\nSaved facts:\n${facts.map(f => '- ' + f).join('\n')}`
+                        : `請只根據以下已儲存事實，用繁體中文以自然、溫暖的語氣描述這個人，限 2–4 句。不要推測身份、敏感屬性或未明說的內容；資料很少時要直接說明。\n已儲存事實：\n${facts.map(f => '- ' + f).join('\n')}`;
+                    const response = await fetchWithTimeout(
+                        `https://generativelanguage.googleapis.com/v1beta/models/${models[0]}:generateContent?key=${encodeURIComponent(apiKey)}`,
+                        {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                contents: [{ role: 'user', parts: [{ text: prompt }] }],
+                                generationConfig: { temperature: 0.35, maxOutputTokens: 400 },
+                            }),
+                        },
+                        12_000,
+                    );
+                    if (response.ok) {
+                        const data = await response.json();
+                        summary = (data?.candidates?.[0]?.content?.parts || [])
+                            .filter(part => !part.thought && typeof part.text === 'string')
+                            .map(part => part.text)
+                            .join('')
+                            .trim();
+                    }
+                }
+            } catch (error) {
+                console.warn('[AIChat] /whoami 摘要生成失敗，改顯示已儲存事實:', error.message);
+            }
+        }
+        if (!summary) {
+            summary = pick(lang, '我記得你分享過：\n', 'Here is what I remember about you:\n') +
+                facts.map(fact => `• ${fact}`).join('\n');
+        }
+        const embed = new EmbedBuilder()
+            .setColor(0x8e7dbe)
+            .setTitle(pick(lang, '🧠 Angela 記得的你', '🧠 What Angela remembers about you'))
+            .setDescription(summary.slice(0, 4000))
+            .setFooter({ text: pick(lang, `${facts.length} 項已儲存事實｜僅你可見`, `${facts.length} saved facts | Only you can see this`) });
+        return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+    }
+
+    async function generateVoicePraise(lang, minutes) {
+        const fallback = pick(lang,
+            `你已經在語音陪伴大家 ${minutes} 分鐘了，謝謝你把活力帶進頻道；記得也適時休息！`,
+            `You have spent ${minutes} minutes with the community in voice—thanks for bringing your energy. Remember to take breaks, too!`);
+        const apiKey = (process.env.GEMINI_API_KEY || '').trim();
+        if (!apiKey || !canCall()) return fallback;
+        try {
+            const models = await fetchValidModels(apiKey);
+            if (!models.length) return fallback;
+            const prompt = lang === 'en'
+                ? `Write one friendly, non-intrusive sentence thanking a Discord member for spending ${minutes} minutes in voice. Mention no personal facts and do not imply you heard or analyzed their conversation.`
+                : `用繁體中文寫一句友善、不打擾人的話，感謝 Discord 成員在語音頻道待了 ${minutes} 分鐘。不要提及個人資料，也不要暗示你聽取或分析了他們的對話。`;
+            const response = await fetchWithTimeout(
+                `https://generativelanguage.googleapis.com/v1beta/models/${models[0]}:generateContent?key=${encodeURIComponent(apiKey)}`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+                        generationConfig: { temperature: 0.7, maxOutputTokens: 100 },
+                    }),
+                },
+                8_000,
+            );
+            if (!response.ok) return fallback;
+            const data = await response.json();
+            const text = (data?.candidates?.[0]?.content?.parts || [])
+                .filter(part => !part.thought && typeof part.text === 'string')
+                .map(part => part.text)
+                .join('')
+                .trim();
+            return text ? text.slice(0, 400) : fallback;
+        } catch (error) {
+            console.warn('[AIChat] 語音鼓勵文字生成失敗，使用備用訊息:', error.message);
+            return fallback;
+        }
+    }
+
     async function updateLongTermFacts(text, guildId, userId, userName, client) {
         if (!likelyContainsPersonalFacts(text)) return false;
         const apiKey = (process.env.GEMINI_API_KEY || '').trim();
@@ -565,6 +666,14 @@ function init(client) {
         const personaId = getChannelPersona(msg.guild.id, msg.channelId);
         if (!personaId) return;
 
+        if (/(提醒我|remind\s+me)/i.test(msg.cleanContent || msg.content || '')) {
+            const handled = await require('./ReminderSystem.js').handleNaturalMessage(client, msg).catch(error => {
+                console.error('[AIChat] 自然語言提醒解析失敗:', error.message);
+                return false;
+            });
+            if (handled) return;
+        }
+
         const raw = msg.cleanContent ? msg.cleanContent.trim() : '';
         const images = [...msg.attachments.values()].filter(a =>
             (a.contentType && a.contentType.startsWith('image/')) || /\.(png|jpe?g|webp|gif)$/i.test(a.url)
@@ -626,4 +735,15 @@ function init(client) {
     console.log('[AIChat] 獨立系統已載入 (防覆蓋雙軌記憶 + 個人 + 群聊共享 + 動態 ListModels)');
 }
 
-module.exports = { init, getAiChannel, getChannelPersona, getPersonaLabel, setAiChannel, getMemoryChannel, restoreAll };
+module.exports = {
+    init,
+    getAiChannel,
+    getChannelPersona,
+    getPersonaLabel,
+    setAiChannel,
+    getMemoryChannel,
+    restoreAll,
+    getUserFacts,
+    handleWhoami,
+    generateVoicePraise,
+};

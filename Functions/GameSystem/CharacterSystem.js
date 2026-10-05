@@ -108,7 +108,7 @@ async function handleSinner(client, message) {
                     ? { name: '🔗 下次連結提升', value: `🧵 紡錘×${uptieCost}`, inline: true }
                     : { name: '🔗 連結提升', value: '已達最高 T4', inline: true },
             )
-            .setFooter({ text: '使用 !pack 的🔼人格培育升等 ｜ !uptie [罪人名] 連結提升' })
+            .setFooter({ text: '使用 /limbuscompany_pack 的🔼人格培育升等 ｜ /uptie [罪人名] 連結提升' })
             .setTimestamp()]
     });
 }
@@ -194,7 +194,7 @@ async function handleThreads(client, message) {
                 '**連結提升費用：**\nT1→T2：×20　T2→T3：×40　T3→T4：×80\n\n' +
                 '**人格升等費用（每一級）：**\nLv1-20：碎片×(等級×5)\nLv21-40：碎片×(等級×8) + 卷×1\nLv41-60：碎片×(等級×12) + 卷×3'
             )
-            .setFooter({ text: '在 !pack 的🔼人格培育介面進行升等' })
+            .setFooter({ text: '在 /limbuscompany_pack 的🔼人格培育介面進行升等' })
             .setTimestamp()]
     });
 }

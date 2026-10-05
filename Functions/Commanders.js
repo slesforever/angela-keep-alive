@@ -10,8 +10,8 @@ const CharacterSystem = require('./GameSystem/CharacterSystem.js');
 const PartySystem     = require('./GameSystem/PartySystem.js');
 const BattleSystem    = require('./GameSystem/BattleSystem.js');
 const { handleGamble, handleSc, giveStarCoins } = require('./GameSystem/GamblingSystem.js');
-const { handleRank, handleLeaderboard, handleMonthlyLeaderboard, addXp, setLevelChannel } = require('./GameSystem/LevelSystem.js');
-const { getLanguage, setLanguage, languageName } = require('./GameSystem/LanguageSystem.js');
+const { handleLeaderboard, handleMonthlyLeaderboard, addXp, setLevelChannel } = require('./GameSystem/LevelSystem.js');
+const { getLanguage, setLanguage, languageName, pick } = require('./GameSystem/LanguageSystem.js');
 const { broadcastAnnouncement, setAnnounceChannel } = require('./GameSystem/AnnounceSystem.js');
 const { handleGiveAllPlayers, handleGiveSinglePlayer } = require('./GameSystem/GiveAwaySystem.js');
 const { checkSteamUpdates, checkTwitterUpdates, checkYouTubeUpdates } = require('./LimbusNewscheck.js');
@@ -22,6 +22,9 @@ const GiveawaySystem = require('./GameSystem/GiveawayEventSystem.js');
 const MusicSystem = require('./GameSystem/MusicSystem.js');
     const AchievementSystem = require('./GameSystem/AchievementSystem.js');
     const DailyQuestSystem = require('./GameSystem/DailyQuestSystem.js');
+const EngagementSystem = require('./GameSystem/EngagementSystem.js');
+const ReminderSystem = require('./GameSystem/ReminderSystem.js');
+const AIChatSystem = require('./GameSystem/AIChatSystem.js');
 
 const SUPER_ADMIN_ID = '1330463890122735642';
 
@@ -96,13 +99,13 @@ async function handleSlashCommands(client, interaction) {
         }
 
         // ─── 背包 / 機率表 ───────────────────────────────────────
-        if (commandName === 'list') {
+        if (commandName === 'limbuscompany_list') {
             fakeMessage.content = '!list';
-            if (isOnCooldown(uid, 'list', 3000)) return interaction.reply({ content: '⏳ 清單冷卻中，請稍後再試。', flags: MessageFlags.Ephemeral });
+            if (isOnCooldown(uid, 'limbuscompany_list', 3000)) return interaction.reply({ content: '⏳ 清單冷卻中，請稍後再試。', flags: MessageFlags.Ephemeral });
             return handleList(client, fakeMessage);
         }
-        if (commandName === 'pack' || commandName === 'limbusids') {
-            fakeMessage.content = commandName === 'limbusids' ? '!limbusids' : `!${commandName}`;
+        if (commandName === 'limbuscompany_pack') {
+            fakeMessage.content = '!pack';
             if (isOnCooldown(uid, 'pack')) {
                 return interaction.reply({ content: '⏳ 指令冷卻中，請稍後再試。', flags: MessageFlags.Ephemeral });
             }
@@ -153,11 +156,6 @@ async function handleSlashCommands(client, interaction) {
         // ─── 婚姻系統 ────────────────────────────────────────────
         if (commandName === 'marry') return MarriageSystem.handleMarry(client, interaction);
         if (commandName === 'divorce') return MarriageSystem.handleDivorce(client, interaction);
-
-        // ─── 等級排名 ────────────────────────────────────────────
-        if (commandName === 'rank') {
-            return handleRank(client, interaction);
-        }
 
         // ─── Starcoins 經濟 ──────────────────────────────────────
         if (commandName === 'sc') {
@@ -377,7 +375,15 @@ async function handleSlashCommands(client, interaction) {
         }
 
         if (commandName === 'achievements') return AchievementSystem.handleAchievements(client, interaction);
-            if (commandName === 'dailyquest') return DailyQuestSystem.handleDailyQuest(client, interaction);
+        if (commandName === 'dailyquest') return DailyQuestSystem.handleDailyQuest(client, interaction);
+        if (commandName === 'checkin') return EngagementSystem.handleCheckin(client, interaction);
+        if (commandName === 'weekly') return EngagementSystem.handleWeekly(client, interaction);
+        if (commandName === 'profile') return EngagementSystem.handleProfile(client, interaction);
+        if (commandName === 'stats') return EngagementSystem.handleStats(client, interaction);
+        if (commandName === 'voiceai') return EngagementSystem.handleVoiceAi(client, interaction);
+        if (commandName === 'whoami') return AIChatSystem.handleWhoami(client, interaction);
+        if (commandName === 'remind') return ReminderSystem.handleCreate(client, interaction);
+        if (commandName === 'reminders') return ReminderSystem.handleList(client, interaction);
 
             // ─── 等級排行榜 ────────────────────────────────────────
             if (commandName === 'leaderboard') {
@@ -401,25 +407,26 @@ async function handleSlashCommands(client, interaction) {
 }
 
 async function sendHelp(interaction) {
+    const lang = getLanguage(interaction.user.id);
     const embed = new EmbedBuilder()
-        .setTitle('📋 Angela 指令清單')
+        .setTitle(pick(lang, '📋 Angela 指令清單', '📋 Angela commands'))
         .setColor(0x00b4d8)
         .addFields(
-            { name: '🎰 抽卡與背包',        value: '`/pull` — 抽卡 ｜ `/pack` — 背包 ｜ `/limbusids` — 角色名單' },
-            { name: '⚔️ 戰鬥與隊伍',        value: '`/battle` — 出戰關卡 ｜ `/party` — 隊伍管理' },
-            { name: '👤 罪人與資源',          value: '`/sinner` — 罪人全覽 ｜ `/uptie` — 提升連結\n`/equip` — 裝備人格 ｜ `/threads` — 絲線查詢' },
-            { name: '🪞 鏡光迷宮',           value: '`/md` — 鏡光迷宮系統' },
-            { name: '📊 等級系統',           value: '`/rank` — 查看等級與 XP 進度 ｜ `/leaderboard` — 等級排行榜' },
-            { name: '🎰 賭博',              value: '`/gamble <金額>` — 下注 🌱 LightSeeds，50/50 勝負' },
-            { name: '🎲 娛樂功能',           value: '`/gayrate` — 男同指數 ｜ `/lesbianrate` — 姬圈指數' },
-            { name: '🔊 語音控制',           value: '`/join` ｜ `/leave` ｜ `/status`' },
-            { name: '📊 排行榜', value: '`/leaderboard` — 等級 XP 排行榜 TOP 10' },
-            { name: '🏆 成就與任務', value: '`/achievements` ｜ `/dailyquest`' },
-            { name: '📰 社群檢測 (伺服器管理員)', value: '`/steam` ｜ `/tweet` ｜ `/youtube`\n`/setchannel` — 統一設定所有通知/功能頻道' },
-            { name: '🛒 商城與抽獎', value: '`/shop` ｜ `/giveaway-create` ｜ `/giveaway-end`' },
-            { name: '👑 最高主管特權 (Sles 專屬)', value: '`/givelightseeds` ｜ `/givefragments` ｜ `/givescrolls`\n`/givethreads` ｜ `/updaterewards` ｜ `/updatebuff`\n`/announce` — 全伺服器公告' }
+            { name: pick(lang, '🎰 Limbus Company', '🎰 Limbus Company'), value: pick(lang, '`/pull` — 抽卡 ｜ `/limbuscompany_pack` — 背包 ｜ `/limbuscompany_list` — 機率清單', '`/pull` — Pull ｜ `/limbuscompany_pack` — Inventory ｜ `/limbuscompany_list` — Rates and identities') },
+            { name: pick(lang, '⚔️ 戰鬥與隊伍', '⚔️ Combat and party'), value: pick(lang, '`/battle` — 出戰關卡 ｜ `/party` — 隊伍管理', '`/battle` — Combat ｜ `/party` — Party setup') },
+            { name: pick(lang, '👤 罪人與資源', '👤 Sinners and resources'), value: pick(lang, '`/sinner` — 罪人全覽 ｜ `/uptie` — 提升連結\n`/equip` — 裝備人格 ｜ `/threads` — 絲線查詢', '`/sinner` — Sinner index ｜ `/uptie` — Upgrade links\n`/equip` — Equip identity ｜ `/threads` — Thread count') },
+            { name: pick(lang, '🪞 鏡光迷宮', '🪞 Mirror dungeon'), value: pick(lang, '`/md` — 鏡光迷宮系統', '`/md` — Mirror dungeon') },
+            { name: pick(lang, '👤 玩家檔案', '👤 Player profile'), value: pick(lang, '`/profile` — 等級與稱號 ｜ `/stats` — 活動統計 ｜ `/leaderboard` — XP 排行', '`/profile` — Level and titles ｜ `/stats` — Activity summary ｜ `/leaderboard` — XP rankings') },
+            { name: pick(lang, '🎰 賭博', '🎰 Gambling'), value: pick(lang, '`/gamble <金額>` — 下注 🌱 LightSeeds，50/50 勝負', '`/gamble <amount>` — Wager 🌱 LightSeeds; 50/50 odds') },
+            { name: pick(lang, '🎲 娛樂功能', '🎲 Fun'), value: pick(lang, '`/gayrate` — 男同指數 ｜ `/lesbianrate` — 姬圈指數', '`/gayrate` ｜ `/lesbianrate` — For-fun compatibility meters') },
+            { name: pick(lang, '🔊 語音控制', '🔊 Voice controls'), value: '`/join` ｜ `/leave` ｜ `/status`' },
+            { name: pick(lang, '🏆 成長與任務', '🏆 Progress and quests'), value: pick(lang, '`/achievements` ｜ `/dailyquest` ｜ `/weekly` ｜ `/checkin`', '`/achievements` ｜ `/dailyquest` ｜ `/weekly` ｜ `/checkin`') },
+            { name: '🧠 Angela AI', value: pick(lang, '`/whoami` — 回想已記住的個人事實 ｜ `/remind` — 設定提醒 ｜ `/reminders` — 查看提醒 ｜ `/voiceai` — 語音鼓勵設定', '`/whoami` — Review saved facts ｜ `/remind` — Set a reminder ｜ `/reminders` — List reminders ｜ `/voiceai` — Voice encouragement settings') },
+            { name: pick(lang, '📰 社群檢測（伺服器管理員）', '📰 Community feeds (admins)'), value: pick(lang, '`/steam` ｜ `/tweet` ｜ `/youtube`\n`/setchannel` — 統一設定通知頻道', '`/steam` ｜ `/tweet` ｜ `/youtube`\n`/setchannel` — Configure notification channels') },
+            { name: pick(lang, '🛒 商城與抽獎', '🛒 Shop and giveaways'), value: '`/shop` ｜ `/giveaway-create` ｜ `/giveaway-end`' },
+            { name: pick(lang, '👑 最高主管特權（Sles 專屬）', '👑 Overseer tools (Sles only)'), value: '`/givelightseeds` ｜ `/givefragments` ｜ `/givescrolls`\n`/givethreads` ｜ `/updaterewards` ｜ `/updatebuff`\n`/announce`' }
         )
-        .setFooter({ text: '輸入 / 即可喚出選單 ｜ 所有特權指令已鎖定為 Sles 專屬' });
+        .setFooter({ text: pick(lang, '輸入 / 即可喚出選單 ｜ 特權指令僅限授權管理員', 'Type / to browse commands | Privileged commands are restricted') });
 
     return interaction.reply({ embeds: [embed] });
 }

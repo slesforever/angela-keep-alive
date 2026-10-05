@@ -12,9 +12,10 @@ const {
 const admin = PermissionFlagsBits.Administrator;
 const commands = [
     new SlashCommandBuilder().setName('pull').setDescription('開啟 LightSeeds 提取介面'),
-    new SlashCommandBuilder().setName('pack').setDescription('查看背包與資源'),
-    new SlashCommandBuilder().setName('list').setDescription('查看卡池機率與清單'),
-    new SlashCommandBuilder().setName('limbusids').setDescription('查看角色 ID 與中英文名稱'),
+    new SlashCommandBuilder().setName('limbuscompany_pack').setDescription('Limbus Company 背包與資源介面')
+        .setDescriptionLocalizations({ 'en-US': 'Limbus Company inventory and resources', 'zh-TW': 'Limbus Company 背包與資源介面' }),
+    new SlashCommandBuilder().setName('limbuscompany_list').setDescription('查看 Limbus Company 卡池機率與人格清單')
+        .setDescriptionLocalizations({ 'en-US': 'View Limbus Company extraction rates and identities', 'zh-TW': '查看 Limbus Company 卡池機率與人格清單' }),
     new SlashCommandBuilder().setName('battle').setDescription('選擇難度進入戰鬥'),
     new SlashCommandBuilder().setName('party').setDescription('查看與管理隊伍'),
     new SlashCommandBuilder().setName('sinner').setDescription('查看罪人資料'),
@@ -22,9 +23,33 @@ const commands = [
     new SlashCommandBuilder().setName('equip').setDescription('更換裝備'),
     new SlashCommandBuilder().setName('threads').setDescription('查詢絲線'),
     new SlashCommandBuilder().setName('md').setDescription('開啟鏡光迷宮'),
-    new SlashCommandBuilder().setName('rank').setDescription('查看等級與 XP').addUserOption(o => o.setName('target').setDescription('目標玩家')),
     new SlashCommandBuilder().setName('leaderboard').setDescription('查看 XP TOP 10'),
     new SlashCommandBuilder().setName('language').setDescription('選擇顯示語言').addStringOption(o => o.setName('language').setDescription('語言').setRequired(true).addChoices({ name: '繁體中文', value: 'zh' }, { name: 'English', value: 'en' })),
+    new SlashCommandBuilder().setName('achievements').setDescription('查看成就與可領取獎勵')
+        .setDescriptionLocalizations({ 'en-US': 'View achievements and unclaimed rewards', 'zh-TW': '查看成就與可領取獎勵' }),
+    new SlashCommandBuilder().setName('dailyquest').setDescription('查看每日與本小時任務')
+        .setDescriptionLocalizations({ 'en-US': 'View daily and hourly quests', 'zh-TW': '查看每日與本小時任務' }),
+    new SlashCommandBuilder().setName('checkin').setDescription('每日簽到並領取連續獎勵')
+        .setDescriptionLocalizations({ 'en-US': 'Daily check-in and streak reward', 'zh-TW': '每日簽到並領取連續獎勵' }),
+    new SlashCommandBuilder().setName('weekly').setDescription('查看並領取本週挑戰獎勵')
+        .setDescriptionLocalizations({ 'en-US': 'View and claim your weekly challenge', 'zh-TW': '查看並領取本週挑戰獎勵' }),
+    new SlashCommandBuilder().setName('profile').setDescription('查看等級與稱號檔案')
+        .setDescriptionLocalizations({ 'en-US': 'View a player profile and equip titles', 'zh-TW': '查看等級與稱號檔案' })
+        .addUserOption(o => o.setName('target').setDescription('選擇要查看的玩家').setDescriptionLocalizations({ 'en-US': 'Player to view', 'zh-TW': '選擇要查看的玩家' })),
+    new SlashCommandBuilder().setName('stats').setDescription('查看個人活動統計')
+        .setDescriptionLocalizations({ 'en-US': 'View activity statistics', 'zh-TW': '查看個人活動統計' })
+        .addUserOption(o => o.setName('target').setDescription('選擇要查看的玩家').setDescriptionLocalizations({ 'en-US': 'Player to view', 'zh-TW': '選擇要查看的玩家' })),
+    new SlashCommandBuilder().setName('whoami').setDescription('讓 Angela 回想她記得的個人事實')
+        .setDescriptionLocalizations({ 'en-US': 'Ask Angela what she remembers about you', 'zh-TW': '讓 Angela 回想她記得的個人事實' }),
+    new SlashCommandBuilder().setName('remind').setDescription('設定一個會在時間到時送達的提醒')
+        .setDescriptionLocalizations({ 'en-US': 'Set a reminder to be delivered later', 'zh-TW': '設定一個會在時間到時送達的提醒' })
+        .addStringOption(o => o.setName('when').setDescription('提醒時間，使用台北時間').setDescriptionLocalizations({ 'en-US': 'When to remind you (Taipei time)', 'zh-TW': '提醒時間，使用台北時間' }).setRequired(true))
+        .addStringOption(o => o.setName('message').setDescription('提醒內容').setDescriptionLocalizations({ 'en-US': 'What should I remind you about?', 'zh-TW': '提醒內容' }).setRequired(true).setMaxLength(300)),
+    new SlashCommandBuilder().setName('reminders').setDescription('查看目前尚未送達的提醒')
+        .setDescriptionLocalizations({ 'en-US': 'List your pending reminders', 'zh-TW': '查看目前尚未送達的提醒' }),
+    new SlashCommandBuilder().setName('voiceai').setDescription('設定語音停留鼓勵訊息')
+        .setDescriptionLocalizations({ 'en-US': 'Configure voice-session encouragement', 'zh-TW': '設定語音停留鼓勵訊息' })
+        .addBooleanOption(o => o.setName('enabled').setDescription('開啟或關閉 30 分鐘語音鼓勵').setDescriptionLocalizations({ 'en-US': 'Enable or disable the 30-minute voice message', 'zh-TW': '開啟或關閉 30 分鐘語音鼓勵' })),
     new SlashCommandBuilder().setName('sc').setDescription('Starcoins 經濟系統')
         .addSubcommand(s => s.setName('pay').setDescription('支付 Starcoins').addUserOption(o => o.setName('target').setDescription('收款玩家').setRequired(true)).addIntegerOption(o => o.setName('amount').setDescription('金額').setRequired(true).setMinValue(1)))
         .addSubcommand(s => s.setName('work').setDescription('工作取得 Starcoins'))

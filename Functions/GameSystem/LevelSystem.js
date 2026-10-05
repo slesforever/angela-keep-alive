@@ -88,7 +88,7 @@ async function announceLevelUp(client, userId, username, newLevel, guildId, rewa
             .setTitle('⬆️ 等級提升！')
             .setColor(0xf1c40f)
             .setDescription(`🎉 <@${userId}> 升到了 **Lv.${newLevel}**！\n\n獲得等級獎勵：${rewardText}\n\n> 「繼續前進，主管。這條路沒有盡頭。」`)
-            .setFooter({ text: '使用 /rank 查看詳細資料，/leaderboard 查看排行榜' })
+    .setFooter({ text: '使用 /profile 查看等級檔案，/stats 查看活動統計' })
             .setTimestamp()] });
     } catch (err) { console.error('[LevelSystem] 升級公告失敗:', err.message); }
 }
@@ -173,7 +173,11 @@ async function handleMessageXp(client, message) {
             const savedStart = Number(player.voiceSessionStartedAt);
             if (Number.isFinite(savedStart) && savedStart > 0 && savedStart <= now) sessionStartedAt = savedStart;
             player.voiceSessionStartedAt = sessionStartedAt;
-        player.voiceSessionGuildId = guildId;
+            player.voiceSessionGuildId = guildId;
+            if (player.voicePraiseSessionId !== String(sessionStartedAt)) {
+                player.voicePraiseSessionId = String(sessionStartedAt);
+                player.voicePraiseSentForSession = false;
+            }
             player.currentVoiceMinutes = Math.max(0, Math.floor((now - sessionStartedAt) / 60_000));
             savePlayerData(client, userId, player);
         }
@@ -259,41 +263,17 @@ async function handleMessageXp(client, message) {
             player.currentVoiceMinutes = sessionMinutes;
             player.longestVoiceSessionMinutes = Math.max(Number(player.longestVoiceSessionMinutes) || 0, sessionMinutes);
             player.voiceSessionStartedAt = data.sessionStartedAt;
-        player.voiceSessionGuildId = data.guildId;
+            player.voiceSessionGuildId = data.guildId;
+            const voiceActivity = require('./EngagementSystem.js').processVoiceActivity(
+                client, data.userId, data.username, data.guildId, sessionMinutes, minutes, player
+            );
             savePlayerData(client, data.userId, player);
             require('./DailyQuestSystem.js').progress(client, data.userId, data.username, data.guildId, 'voice', minutes).catch(() => {});
             require('./AchievementSystem.js').checkAchievements(client, data.userId, data.username, data.guildId).catch(() => {});
+            voiceActivity.catch(err => console.error('[LevelSystem] 語音互動獎勵失敗:', err.message));
             await addXp(client, data.userId, data.username, minutes * 5, data.guildId, 'voice').catch(err => console.error('[LevelSystem] 語音 XP 失敗:', err.message));
         }
     }
-
-    function buildRankBar(xpInto, xpNeeded) {
-    const pct = Math.min(1, xpInto / Math.max(1, xpNeeded));
-    const filled = Math.round(pct * 10);
-    return '█'.repeat(filled) + '░'.repeat(10 - filled);
-}
-
-async function handleRank(client, interaction) {
-    const target = interaction.options?.getUser('target') || interaction.user;
-    const { getOrCreatePlayer } = require('./PacksAndData.js');
-    const player = getOrCreatePlayer(client, target.id, target.username);
-    const xp = getPlayerTotalXp(player);
-    const { level, xpIntoLevel, xpNeeded } = getLevelFromXp(xp);
-    const pct = Math.floor((xpIntoLevel / Math.max(1, xpNeeded)) * 100);
-    return interaction.reply({ embeds: [new EmbedBuilder()
-        .setTitle(`📊 ${target.username} 的等級資料`)
-        .setColor(0x00b4d8)
-        .setThumbnail(target.displayAvatarURL({ dynamic: true }))
-        .addFields(
-            { name: '等級', value: `**Lv.${level}**`, inline: true },
-            { name: '總 XP', value: `${xp.toLocaleString()} XP`, inline: true },
-            { name: '貨幣', value: `🌟 ${(player.starCoins || 0).toLocaleString()} Starcoins\n🌱 ${(player.lightSeeds || 0).toLocaleString()} LightSeeds`, inline: true },
-            { name: `進度到下一級 (${xpIntoLevel} / ${xpNeeded} XP)`, value: `\`[${buildRankBar(xpIntoLevel, xpNeeded)}]\` ${pct}%`, inline: false },
-            { name: 'XP 來源', value: Object.entries(player.xpSources || {}).filter(([, value]) => Number(value) > 0).map(([key, value]) => ({ message: '打字', voice: '語音', battle: '戰鬥', mirror: '鏡牢', command: '指令遊戲', other: '其他' }[key] || key) + ': ' + Number(value).toLocaleString() + ' XP').join('\n') || '尚無紀錄', inline: false },
-        )
-        .setFooter({ text: '打字 +2 XP｜語音每分鐘 +5 XP｜戰鬥/關卡/鏡牢也可獲得 XP' })
-        .setTimestamp()] });
-}
 
 async function getMonthlyEntries(month = monthKey()) { const entries = []; if (!fs.existsSync(PLAYERS_DIR)) return entries; for (const file of fs.readdirSync(PLAYERS_DIR)) { if (!file.endsWith('.json')) continue; try { const p = JSON.parse(fs.readFileSync(path.join(PLAYERS_DIR, file), 'utf8')); const xp = Math.max(0, Number(p.monthlyXp?.[month]) || 0); if (xp > 0) entries.push({ id: file.slice(0, -5), username: p.username || 'Player', xp }); } catch {} } return entries.sort((a, b) => b.xp - a.xp); }
 async function handleMonthlyLeaderboard(client, interaction) { const entries = await getMonthlyEntries(); if (!entries.length) return interaction.reply({ content: '本月還沒有 XP 紀錄。', ephemeral: true }); const lines = entries.slice(0, 10).map((e, i) => (['🥇', '🥈', '🥉'][i] || '#' + (i + 1)) + ' <@' + e.id + '> — **' + e.xp.toLocaleString() + ' XP**'); return interaction.reply({ embeds: [new EmbedBuilder().setTitle('🏆 本月 XP 排行榜').setColor(0xf1c40f).setDescription(lines.join('\n')).setFooter({ text: '月份：' + monthKey() }).setTimestamp()] }); }
@@ -329,7 +309,6 @@ module.exports = {
     addXp,
     setPlayerXp,
     handleMessageXp,
-    handleRank,
     handleLeaderboard,
     handleMonthlyLeaderboard,
     announceMonthlyLeaderboard,

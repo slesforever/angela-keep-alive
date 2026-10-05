@@ -516,6 +516,16 @@ function defaultPlayer(username) {
         dailyQuestStreak: 0,
         hourlyQuestCompletions: 0,
         achievements: { unlocked: [], claimed: [] },
+        achievementTitles: [],
+        equippedTitle: null,
+        checkInStreak: 0,
+        checkInLastDate: null,
+        totalCheckIns: 0,
+        weeklyChallenge: null,
+        reminders: [],
+        voiceAiEnabled: true,
+        voicePraiseSentForSession: false,
+        voiceGiftMinuteRemainder: 0,
     };
 }
 
@@ -573,6 +583,18 @@ function getOrCreatePlayer(client, userId, username) {
         needsSave = true;
     }
     p.xp             ??= 0;
+    p.totalMessages  ??= 0;
+    p.totalVoiceMinutes ??= 0;
+    p.longestVoiceSessionMinutes ??= 0;
+    p.dailyQuestStreak ??= 0;
+    p.hourlyQuestCompletions ??= 0;
+    p.achievementTitles ??= [];
+    p.reminders ??= [];
+    p.checkInStreak ??= 0;
+    p.totalCheckIns ??= 0;
+    p.voiceGiftMinuteRemainder ??= 0;
+    p.voiceAiEnabled ??= true;
+    p.achievements ??= { unlocked: [], claimed: [] };
     const normalizedLevel = getPlayerLevelFromXp(
         Math.max(Number(p.xp) || 0, Number(p.exp) || 0)
     );
@@ -1030,7 +1052,7 @@ async function showList(message) {
 // ─── 主路由 ───────────────────────────────────────────────────
 async function handleInventory(client, message) {
     const raw = message.content.trim();
-    if (raw === '!list' || raw === '!limbusids' || raw === '!rate' || raw === '!rates') {
+    if (raw === '!list' || raw === '!rate' || raw === '!rates') {
         return showList(message);
     }
     if (raw === '!pack' || raw === '!p' || raw === '!inv' || raw === '!inventory') {
