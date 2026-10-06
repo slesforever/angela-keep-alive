@@ -1555,124 +1555,127 @@ client.on(
                 const persisted = await saveGuildConfigToDiscord(client, interaction.guild.id, patch);
                 return interaction.reply({ content: '已將 ' + channel + ' 設為 ' + AIChatSystem.getPersonaLabel(persona) + ' AI 頻道。' + (persisted ? '' : '（提醒：尚未設定 Discord 儲存頻道。）'), flags: MessageFlags.Ephemeral });
             }
-
             // ═════════════════════════════════════
             // /setchannel
-        // ═════════════════════════════════════
-        if (
-            interaction.commandName ===
-            'setchannel'
-        ) {
-
-            const isGuildAdmin =
-                interaction.memberPermissions?.has(
-                    PermissionFlagsBits.Administrator
-                );
-
-            if (!isGuildAdmin) {
-                return interaction.reply({
-                    content:
-                        '❌ 此指令僅限伺服器管理員使用。',
-                    flags:
-                        MessageFlags.Ephemeral
-                });
-            }
-
-            const type =
-                interaction.options.getString(
-                    'type'
-                );
-
-            const targetChannel =
-                interaction.options.getChannel(
-                    'target_channel'
-                );
-
-            // 各類型對應的設定 key 與顯示名稱
-            const channelKeyMap = {
-                notify: { key: 'notifyChannelId', label: '系統上線通知頻道' },
-                rateup: { key: 'rateUpChannelId', label: 'Rate Up 公告頻道' },
-                news: { key: 'newsChannelId', label: '新聞與社群動態頻道' },
-                ai: { key: 'aiChannelId', label: 'AI 自動回覆頻道' },
-                'ai-memory': { key: 'aiMemoryChannelId', label: 'AI 記憶庫頻道' },
-                level: { key: 'levelChannelId', label: '升級公告頻道' },
-                announce: { key: 'announceChannelId', label: 'Sles 公告接收頻道' },
-                starboard: { key: 'starboardChannelId', label: '星星榜頻道' },
-                audit: { key: 'auditChannelId', label: '紀錄頻道' },
-                'translate-output': { key: 'translationOutputChannelId', label: '翻譯輸出頻道' }
-            };
-
-            // 判斷是否為「取消設定」：再次指定同一頻道即取消
-            const currentConfig =
-                getGuildConfig(
-                    interaction.guild.id
-                );
-
-            const meta =
-                channelKeyMap[type];
-
-            const isUnset =
-                meta &&
-                currentConfig[meta.key] ===
-                    targetChannel.id;
-
-            // ──────────────────────────────────────────
-            // notify / rateup / news / ai / ai-memory
-            // ──────────────────────────────────────────
-
+            // ═════════════════════════════════════
             if (
-                    type === 'ai'
-                ) {
-                    const _persona =
-                        newId &&
-                        AIChatSystem.getChannelPersona(
-                            interaction.guild.id,
-                            newId
-                        );
+                interaction.commandName ===
+                'setchannel'
+            ) {
 
-                    AIChatSystem.setAiChannel(
-                        interaction.guild.id,
-                        newId,
-                        _persona || 'default'
+                const isGuildAdmin =
+                    interaction.memberPermissions?.has(
+                        PermissionFlagsBits.Administrator
                     );
 
-                const patch = {
-                    [meta.key]: newId
-                };
-
-                saveConfig(
-                    patch
-                );
-
-                if (
-                    meta.key ===
-                    'notifyChannelId'
-                ) {
-                    setNotifyChannel(
-                        newId
-                    );
+                if (!isGuildAdmin) {
+                    return interaction.reply({
+                        content:
+                            '❌ 此指令僅限伺服器管理員使用。',
+                        flags:
+                            MessageFlags.Ephemeral
+                    });
                 }
 
-                const persisted =
-                    await saveGuildConfigToDiscord(
-                        client,
-                        interaction.guild.id,
+                const type =
+                    interaction.options.getString(
+                        'type'
+                    );
+
+                const targetChannel =
+                    interaction.options.getChannel(
+                        'target_channel'
+                    );
+
+                // 各類型對應的設定 key 與顯示名稱
+                const channelKeyMap = {
+                    notify: { key: 'notifyChannelId', label: '系統上線通知頻道' },
+                    rateup: { key: 'rateUpChannelId', label: 'Rate Up 公告頻道' },
+                    news: { key: 'newsChannelId', label: '新聞與社群動態頻道' },
+                    ai: { key: 'aiChannelId', label: 'AI 自動回覆頻道' },
+                    'ai-memory': { key: 'aiMemoryChannelId', label: 'AI 記憶庫頻道' },
+                    level: { key: 'levelChannelId', label: '升級公告頻道' },
+                    announce: { key: 'announceChannelId', label: 'Sles 公告接收頻道' },
+                    starboard: { key: 'starboardChannelId', label: '星星榜頻道' },
+                    audit: { key: 'auditChannelId', label: '紀錄頻道' },
+                    'translate-output': { key: 'translationOutputChannelId', label: '翻譯輸出頻道' }
+                };
+
+                // 判斷是否為「取消設定」：再次指定同一頻道即取消
+                const currentConfig =
+                    getGuildConfig(
+                        interaction.guild.id
+                    );
+
+                const meta =
+                    channelKeyMap[type];
+
+                const isUnset =
+                    meta &&
+                    currentConfig[meta.key] ===
+                        targetChannel.id;
+
+                // ──────────────────────────────────────────
+                // AI 自動回覆頻道
+                // ──────────────────────────────────────────
+
+                if (
+                        type === 'ai'
+                    ) {
+                        // ★ 修復：原本這裡沒有宣告 newId，會爆 ReferenceError
+                        const newId =
+                            isUnset ? '' : targetChannel.id;
+
+                        const _persona =
+                            newId &&
+                            AIChatSystem.getChannelPersona(
+                                interaction.guild.id,
+                                newId
+                            );
+
+                        AIChatSystem.setAiChannel(
+                            interaction.guild.id,
+                            newId,
+                            _persona || 'default'
+                        );
+
+                    const patch = {
+                        [meta.key]: newId
+                    };
+
+                    saveConfig(
                         patch
                     );
 
-                return interaction.reply({
-                    content: isUnset
-                        ? `✅ ${meta.label}已取消設定。`
-                        : `「主管，${meta.label}已重定向至 ${targetChannel}。」` +
-                            (
-                                persisted
-                                    ? ''
-                                    : '（提醒：尚未設定 Discord 儲存頻道，請先使用 /setstoragechannel。）'
-                            ),
-                    flags:
-                        MessageFlags.Ephemeral
-                });
-            }
+                    if (
+                        meta.key ===
+                        'notifyChannelId'
+                    ) {
+                        setNotifyChannel(
+                            newId
+                        );
+                    }
+
+                    const persisted =
+                        await saveGuildConfigToDiscord(
+                            client,
+                            interaction.guild.id,
+                            patch
+                        );
+
+                    return interaction.reply({
+                        content: isUnset
+                            ? `✅ ${meta.label}已取消設定。`
+                            : `「主管，${meta.label}已重定向至 ${targetChannel}。」` +
+                                (
+                                    persisted
+                                        ? ''
+                                        : '（提醒：尚未設定 Discord 儲存頻道，請先使用 /setstoragechannel。）'
+                                ),
+                        flags:
+                            MessageFlags.Ephemeral
+                    });
+                }
 
             // ──────────────────────────────────────────
             // Level
