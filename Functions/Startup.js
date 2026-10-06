@@ -1589,28 +1589,49 @@ client.on(
                     'target_channel'
                 );
 
+            const persona =
+                interaction.options.getString(
+                    'persona'
+                ) || 'default';
+
+            if (
+                type === 'ai'
+            ) {
+                try {
+                    const {
+                        setAiChannel,
+                        PERSONAS
+                    } = require('./GameSystem/AIChatSystem.js');
+
+                    if (
+                        !PERSONAS[persona]
+                    ) {
+                        return interaction.reply(
+                            {
+                                content:
+                                    '❌ 找不到此 AI 人格。',
+                                flags:
+                                    MessageFlags.Ephemeral
+                            }
+                        );
+                    }
+
+                    setAiChannel(
+                        interaction.guildId,
+                        targetChannel.id,
+                        persona
+                    );
+                } catch (
+                    err
+                ) {
+                    console.error(
+                        'setchannel(ai) 失敗:',
+                        err.message
+                    );
+                }
+            }
+
             const configTypeMap = {
-
-                notify: {
-                    key:
-                        'notifyChannelId',
-                    label:
-                        '系統上線通知頻道'
-                },
-
-                rateup: {
-                    key:
-                        'rateUpChannelId',
-                    label:
-                        'Rate Up 公告頻道'
-                },
-
-                news: {
-                    key: 'newsChannelId', label: '新聞與社群動態頻道'
-                },
-                ai: { key: 'aiChannelId', label: 'AI 自動回覆頻道' },
-                'ai-memory': { key: 'aiMemoryChannelId', label: 'AI 記憶庫頻道' }
-            };
 
             // ─────────────────────────────
             // notify / rateup / news
