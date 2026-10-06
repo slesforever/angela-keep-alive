@@ -1560,57 +1560,379 @@ client.on(
             // /setchannel
         // ═════════════════════════════════════
 
-         if (
-        interaction.commandName ===
-        'setchannel'
-    ) {
+         // ──────────────────────────────────────────
+        // /setchannel
+        // ──────────────────────────────────────────
 
-        const isGuildAdmin =
-            interaction.memberPermissions?.has(
-                PermissionFlagsBits.Administrator
-            );
+        if (
+            interaction.commandName ===
+            'setchannel'
+        ) {
 
-        if (!isGuildAdmin) {
-            return interaction.reply({
-                content:
-                    '❌ 此指令僅限伺服器管理員使用。',
-                flags:
-                    MessageFlags.Ephemeral
-            });
+            const isGuildAdmin =
+                interaction.memberPermissions?.has(
+                    PermissionFlagsBits.Administrator
+                );
+
+            if (!isGuildAdmin) {
+                return interaction.reply({
+                    content:
+                        '❌ 此指令僅限伺服器管理員使用。',
+                    flags:
+                        MessageFlags.Ephemeral
+                });
+            }
+
+            const type =
+                interaction.options.getString(
+                    'type'
+                );
+
+            const targetChannel =
+                interaction.options.getChannel(
+                    'target_channel'
+                );
+
+            // 各類型對應的設定 key 與顯示名稱
+            const channelKeyMap = {
+                notify: { key: 'notifyChannelId', label: '系統上線通知頻道' },
+                rateup: { key: 'rateUpChannelId', label: 'Rate Up 公告頻道' },
+                news: { key: 'newsChannelId', label: '新聞與社群動態頻道' },
+                ai: { key: 'aiChannelId', label: 'AI 自動回覆頻道' },
+                'ai-memory': { key: 'aiMemoryChannelId', label: 'AI 記憶庫頻道' },
+                level: { key: 'levelChannelId', label: '升級公告頻道' },
+                announce: { key: 'announceChannelId', label: 'Sles 公告接收頻道' },
+                starboard: { key: 'starboardChannelId', label: '星星榜頻道' },
+                audit: { key: 'auditChannelId', label: '紀錄頻道' },
+                'translate-output': { key: 'translationOutputChannelId', label: '翻譯輸出頻道' }
+            };
+
+            // 判斷是否為「取消設定」：再次指定同一頻道即取消
+            const currentConfig =
+                getGuildConfig(
+                    interaction.guild.id
+                );
+
+            const meta =
+                channelKeyMap[type];
+
+            const isUnset =
+                meta &&
+                currentConfig[meta.key] ===
+                    targetChannel.id;
+
+            // ──────────────────────────────────────────
+            // notify / rateup / news / ai / ai-memory
+            // ──────────────────────────────────────────
+
+            if (
+                [
+                    'notify',
+                    'rateup',
+                    'news',
+                    'ai',
+                    'ai-memory'
+                ].includes(
+                    type
+                )
+            ) {
+                const newId = isUnset ? '' : targetChannel.id;
+
+                if (
+                    type === 'ai'
+                ) {
+                    AIChatSystem.setAiChannel(
+                        interaction.guild.id,
+                        newId,
+                        'default'
+                    );
+                }
+
+                const patch = {
+                    [meta.key]: newId
+                };
+
+                saveConfig(
+                    patch
+                );
+
+                if (
+                    meta.key ===
+                    'notifyChannelId'
+                ) {
+                    setNotifyChannel(
+                        newId
+                    );
+                }
+
+                const persisted =
+                    await saveGuildConfigToDiscord(
+                        client,
+                        interaction.guild.id,
+                        patch
+                    );
+
+                return interaction.reply({
+                    content: isUnset
+                        ? `✅ ${meta.label}已取消設定。`
+                        : `「主管，${meta.label}已重定向至 ${targetChannel}。」` +
+                            (
+                                persisted
+                                    ? ''
+                                    : '（提醒：尚未設定 Discord 儲存頻道，請先使用 /setstoragechannel。）'
+                            ),
+                    flags:
+                        MessageFlags.Ephemeral
+                });
+            }
+
+            // ──────────────────────────────────────────
+            // Level
+            // ──────────────────────────────────────────
+
+            if (
+                type === 'level'
+            ) {
+                const {
+                    setLevelChannel:
+                        _setLvCh
+                } = require(
+                    './GameSystem/LevelSystem.js'
+                );
+
+                const newId = isUnset ? '' : targetChannel.id;
+
+                _setLvCh(
+                    interaction.guild.id,
+                    newId
+                );
+
+                const persisted =
+                    await saveGuildConfigToDiscord(
+                        client,
+                        interaction.guild.id,
+                        {
+                            levelChannelId:
+                                newId
+                        }
+                    );
+
+                return interaction.reply({
+                    content: isUnset
+                        ? `✅ 升級公告頻道已取消設定。`
+                        : `✅ 升級公告頻道已設定至 ${targetChannel}。` +
+                            (
+                                persisted
+                                    ? ''
+                                    : '（請先使用 /setstoragechannel 才能跨重啟保存。）'
+                            ),
+                    flags:
+                        MessageFlags.Ephemeral
+                });
+            }
+
+            // ──────────────────────────────────────────
+            // Announce
+            // ──────────────────────────────────────────
+
+            if (
+                type === 'announce'
+            ) {
+                const {
+                    setAnnounceChannel:
+                        _setAnnCh
+                } = require(
+                    './GameSystem/AnnounceSystem.js'
+                );
+
+                const newId = isUnset ? '' : targetChannel.id;
+
+                _setAnnCh(
+                    interaction.guild.id,
+                    newId
+                );
+
+                const persisted =
+                    await saveGuildConfigToDiscord(
+                        client,
+                        interaction.guild.id,
+                        {
+                            announceChannelId:
+                                newId
+                        }
+                    );
+
+                return interaction.reply({
+                    content: isUnset
+                        ? `✅ Sles 公告接收頻道已取消設定。`
+                        : `✅ Sles 公告接收頻道已設定至 ${targetChannel}。` +
+                            (
+                                persisted
+                                    ? ''
+                                    : '（請先使用 /setstoragechannel 才能跨重啟保存。）'
+                            ),
+                    flags:
+                        MessageFlags.Ephemeral
+                });
+            }
+
+            // ──────────────────────────────────────────
+            // Starboard
+            // ──────────────────────────────────────────
+
+            if (
+                type === 'starboard'
+            ) {
+                const newId = isUnset ? '' : targetChannel.id;
+
+                _setStarboard(
+                    interaction.guild.id,
+                    newId
+                );
+
+                const persisted =
+                    await saveGuildConfigToDiscord(
+                        client,
+                        interaction.guild.id,
+                        {
+                            starboardChannelId:
+                                newId
+                        }
+                    );
+
+                return interaction.reply({
+                    content: isUnset
+                        ? `✅ 星星榜頻道已取消設定。`
+                        : `✅ 星星榜頻道已設定至 ${targetChannel}。達到 3 顆 ⭐ 的訊息將自動轉發。` +
+                            (
+                                persisted
+                                    ? ''
+                                    : '（請先使用 /setstoragechannel 才能跨重啟保存。）'
+                            ),
+                    flags:
+                        MessageFlags.Ephemeral
+                });
+            }
+
+            // ──────────────────────────────────────────
+            // Audit
+            // ──────────────────────────────────────────
+
+            if (
+                type === 'audit'
+            ) {
+                const newId = isUnset ? '' : targetChannel.id;
+
+                setAuditChannel(
+                    interaction.guild.id,
+                    newId
+                );
+
+                const persisted =
+                    await saveGuildConfigToDiscord(
+                        client,
+                        interaction.guild.id,
+                        {
+                            auditChannelId:
+                                newId
+                        }
+                    );
+
+                return interaction.reply({
+                    content: isUnset
+                        ? `✅ 紀錄頻道已取消設定。`
+                        : `✅ 紀錄頻道已設定至 ${targetChannel}。` +
+                            (
+                                persisted
+                                    ? ''
+                                    : '（請先使用 /setstoragechannel 才能跨重啟保存。）'
+                            ),
+                    flags:
+                        MessageFlags.Ephemeral
+                });
+            }
+
+            // ──────────────────────────────────────────
+            // Translation Output
+            // ──────────────────────────────────────────
+
+            if (
+                type ===
+                'translate-output'
+            ) {
+                const newId = isUnset ? '' : targetChannel.id;
+
+                setTranslationOutput(
+                    interaction.guild.id,
+                    newId
+                );
+
+                const persisted =
+                    await saveGuildConfigToDiscord(
+                        client,
+                        interaction.guild.id,
+                        {
+                            translationOutputChannelId:
+                                newId
+                        }
+                    );
+
+                return interaction.reply({
+                    content: isUnset
+                        ? `✅ 翻譯輸出頻道已取消設定。`
+                        : `✅ 翻譯輸出頻道已設定為 ${targetChannel}。` +
+                            (
+                                persisted
+                                    ? ''
+                                    : '（請先使用 /setstoragechannel 才能跨重啟保存。）'
+                            ),
+                    flags:
+                        MessageFlags.Ephemeral
+                });
+            }
+
+            // ──────────────────────────────────────────
+            // Translation Source（本身即 toggle，維持原邏輯）
+            // ──────────────────────────────────────────
+
+            if (
+                type ===
+                'translate-source'
+            ) {
+                const enabled =
+                    toggleTranslationSource(
+                        interaction.guild.id,
+                        targetChannel.id
+                    );
+
+                const translationConfig =
+                    getTranslationConfig(
+                        interaction.guild.id
+                    );
+
+                const persisted =
+                    await saveGuildConfigToDiscord(
+                        client,
+                        interaction.guild.id,
+                        {
+                            translationSourceChannelIds:
+                                translationConfig.sources
+                        }
+                    );
+
+                return interaction.reply({
+                    content:
+                        `✅ 已${enabled ? '加入' : '移除'}翻譯來源頻道：${targetChannel}。` +
+                        (
+                            persisted
+                                ? ''
+                                : '（請先使用 /setstoragechannel 才能跨重啟保存。）'
+                        ),
+                    flags:
+                        MessageFlags.Ephemeral
+                });
+            }
         }
-
-        const type =
-            interaction.options.getString(
-                'type'
-            );
-
-        const targetChannel =
-            interaction.options.getChannel(
-                'target_channel'
-            );
-
-        const configTypeMap = {
-
-            notify: {
-                key:
-                    'notifyChannelId',
-                label:
-                    '系統上線通知頻道'
-            },
-
-            rateup: {
-                key:
-                    'rateUpChannelId',
-                label:
-                    'Rate Up 公告頻道'
-            },
-
-            news: {
-                key: 'newsChannelId', label: '新聞與社群動態頻道'
-            },
-            ai: { key: 'aiChannelId', label: 'AI 自動回覆頻道' },
-            'ai-memory': { key: 'aiMemoryChannelId', label: 'AI 記憶庫頻道' }
-        };
             // ─────────────────────────────
             // notify / rateup / news
             // ─────────────────────────────
