@@ -152,7 +152,7 @@ const {
 const ShopSystem = require('./GameSystem/ShopSystem.js');
 const GiveawaySystem = require('./GameSystem/GiveawayEventSystem.js');
 const AIChatSystem = require('./GameSystem/AIChatSystem.js');
-
+const { PERSONAS } = AIChatSystem;
 const {
     handleMessageXp,
     startVoiceXpTimer,
