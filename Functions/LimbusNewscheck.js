@@ -34,11 +34,11 @@ const STEAM_CLAN_IMAGE_BASE = 'https://steamcdn-a.akamaihd.net/steamcommunity/pu
 const YOUTUBE_HANDLE = (process.env.YOUTUBE_HANDLE || 'ProjectMoonOfficial').replace(/^@/, '');
 const YOUTUBE_PAGE_URL = process.env.YOUTUBE_PAGE_URL || `https://www.youtube.com/@${YOUTUBE_HANDLE}`;
 
-// X 已關閉公開 syndication timeline。改用標準 RSS 來源（RSSHub / Nitter 等）。
+// X 已關閉公開 syndication timeline。改用仍存活、且支援 RSS 的 Nitter 實例。
 // 以 {user} 代表帳號名稱，多個來源用逗號分隔（全部並行，任一成功即可）。
-// 例：X_TIMELINE_ENDPOINTS=https://rsshub.app/twitter/user/{user},https://nitter.net/{user}/rss
+// 2026-10-06 實測：meowing.monster 與 thepixora.com 對這兩個帳號皆正常回 20 則。
 const TIMELINE_ENDPOINTS = (process.env.X_TIMELINE_ENDPOINTS ||
-    'https://rsshub.app/twitter/user/{user},https://nitter.poast.org/{user}/rss,https://nitter.net/{user}/rss')
+    'https://nitter.meowing.monster/{user}/rss,https://shitter.thepixora.com/{user}/rss,https://nitter.netbub.com/{user}/rss')
     .split(',')
     .map(s => s.trim())
     .filter(Boolean);
