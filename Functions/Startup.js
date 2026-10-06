@@ -1626,25 +1626,19 @@ client.on(
             // ──────────────────────────────────────────
 
             if (
-                [
-                    'notify',
-                    'rateup',
-                    'news',
-                    'ai',
-                    'ai-memory'
-                ].includes(
-                    type
-                )
-            ) {
-                const newId = isUnset ? '' : targetChannel.id;
-
-                if (
                     type === 'ai'
                 ) {
+                    const _persona =
+                        newId &&
+                        AIChatSystem.getChannelPersona(
+                            interaction.guild.id,
+                            newId
+                        );
+
                     AIChatSystem.setAiChannel(
                         interaction.guild.id,
                         newId,
-                        'default'
+                        _persona || 'default'
                     );
                 }
 
