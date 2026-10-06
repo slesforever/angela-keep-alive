@@ -9,6 +9,9 @@ const {
     ChannelType
 } = require('discord.js');
 
+const { PERSONAS } = require('./GameSystem/AIChatSystem.js');
+const personaChoices = Object.entries(PERSONAS).map(([key, p]) => ({ name: p.name, value: key }));
+
 const admin = PermissionFlagsBits.Administrator;
 const commands = [
     new SlashCommandBuilder().setName('pull').setDescription('開啟 LightSeeds 提取介面'),
@@ -41,11 +44,13 @@ const commands = [
     new SlashCommandBuilder().setName('divorce').setDescription('離婚；不選對象會顯示可選配偶').addUserOption(o => o.setName('target').setDescription('選擇要離婚的配偶')),
     new SlashCommandBuilder().setName('status').setDescription('查看狀態'),
     new SlashCommandBuilder().setName('setchannel').setDescription('設定系統頻道').setDefaultMemberPermissions(admin)
-        .addStringOption(o => o.setName('type').setDescription('頻道類型').setRequired(true).addChoices(
-            { name: '系統通知', value: 'notify' }, { name: 'Rate Up', value: 'rateup' }, { name: '新聞', value: 'news' },
-            { name: '升級公告', value: 'level' }, { name: 'Sles公告', value: 'announce' }, { name: '星星榜', value: 'starboard' },
-            { name: '紀錄', value: 'audit' }, { name: '翻譯輸出', value: 'translate-output' }, { name: '切換翻譯來源', value: 'translate-source' }, { name: 'AI 自動回覆', value: 'ai' }, { name: 'AI 記憶庫', value: 'ai-memory' }))
-        .addChannelOption(o => o.setName('target_channel').setDescription('目標文字頻道').addChannelTypes(ChannelType.GuildText).setRequired(true)),
+    .addStringOption(o => o.setName('type').setDescription('頻道類型').setRequired(true).addChoices(
+        { name: '系統通知', value: 'notify' }, { name: 'Rate Up', value: 'rateup' }, { name: '新聞', value: 'news' },
+        { name: '升級公告', value: 'level' }, { name: 'Sles公告', value: 'announce' }, { name: '星星榜', value: 'starboard' },
+        { name: '紀錄', value: 'audit' }, { name: '翻譯輸出', value: 'translate-output' }, { name: '切換翻譯來源', value: 'translate-source' }, { name: 'AI 自動回覆', value: 'ai' }, { name: 'AI 記憶庫', value: 'ai-memory' }))
+    .addChannelOption(o => o.setName('target_channel').setDescription('目標文字頻道').addChannelTypes(ChannelType.GuildText).setRequired(true))
+    .addStringOption(o => o.setName('persona').setDescription('AI 人格（僅 type=AI 自動回覆 時生效）').setRequired(false).addChoices(...personaChoices)),
+    
     new SlashCommandBuilder().setName('setlevelchannel').setDescription('設定升級公告頻道').setDefaultMemberPermissions(admin).addChannelOption(o => o.setName('target_channel').setDescription('頻道').addChannelTypes(ChannelType.GuildText).setRequired(true)),
     new SlashCommandBuilder().setName('setannouncechannel').setDescription('設定全域公告頻道').setDefaultMemberPermissions(admin).addChannelOption(o => o.setName('target_channel').setDescription('頻道').addChannelTypes(ChannelType.GuildText).setRequired(true)),
     new SlashCommandBuilder().setName('givestarcoins').setDescription('Sles專屬：發放 Starcoins').setDefaultMemberPermissions(admin).addIntegerOption(o => o.setName('amount').setDescription('數量').setRequired(true).setMinValue(1)).addUserOption(o => o.setName('target').setDescription('目標').setRequired(true)),
