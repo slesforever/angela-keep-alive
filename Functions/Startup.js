@@ -706,16 +706,16 @@ const allSlashCommands = [
         ),
 
     new SlashCommandBuilder()
-            .setName('setaichannel')
-            .setDescription('將 AI 人格綁定至一個文字頻道')
-            .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-            .addStringOption(o => o.setName('persona').setDescription('此頻道使用的人格').setRequired(true).addChoices(
-                { name: 'Angela — 冷靜的圖書館 AI 主管', value: 'default' },
-                { name: '安潔菈 — 傲嬌但關心人', value: 'tsundere' },
-                { name: '博士 — 博學詳盡', value: 'scholar' },
-                { name: '小安 — 輕鬆像朋友', value: 'buddy' }
-            ))
-            .addChannelOption(o => o.setName('channel').setDescription('目標頻道（不選則使用目前頻道）').addChannelTypes(ChannelType.GuildText)),
+    .setName('setaichannel')
+    .setDescription('將 AI 人格綁定至一個文字頻道')
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addStringOption(o => o.setName('persona').setDescription('此頻道使用的人格').setRequired(true).addChoices(
+        ...Object.entries(PERSONAS).map(([key, value]) => ({
+            name: `${value.name} — ${value.trait.slice(0, 20)}`,
+            value: key
+        }))
+    ))
+    .addChannelOption(o => o.setName('channel').setDescription('目標頻道（不選則使用目前頻道）').addChannelTypes(ChannelType.GuildText))
 
         new SlashCommandBuilder()
             .setName('setstoragechannel')
@@ -1559,11 +1559,6 @@ client.on(
             // ═════════════════════════════════════
             // /setchannel
         // ═════════════════════════════════════
-
-       // ──────────────────────────────────────────
-        // /setchannel
-        // ──────────────────────────────────────────
-
         if (
             interaction.commandName ===
             'setchannel'
@@ -1640,7 +1635,6 @@ client.on(
                         newId,
                         _persona || 'default'
                     );
-                }
 
                 const patch = {
                     [meta.key]: newId
