@@ -715,7 +715,7 @@ const allSlashCommands = [
             value: key
         }))
     ))
-    .addChannelOption(o => o.setName('channel').setDescription('目標頻道（不選則使用目前頻道）').addChannelTypes(ChannelType.GuildText))
+    .addChannelOption(o => o.setName('channel').setDescription('目標頻道（不選則使用目前頻道）').addChannelTypes(ChannelType.GuildText)),
 
         new SlashCommandBuilder()
             .setName('setstoragechannel')
