@@ -1560,79 +1560,57 @@ client.on(
             // /setchannel
         // ═════════════════════════════════════
 
-        if (
-            interaction.commandName ===
-            'setchannel'
-        ) {
+         if (
+        interaction.commandName ===
+        'setchannel'
+    ) {
 
-            const isGuildAdmin =
-                interaction.memberPermissions?.has(
-                    PermissionFlagsBits.Administrator
-                );
+        const isGuildAdmin =
+            interaction.memberPermissions?.has(
+                PermissionFlagsBits.Administrator
+            );
 
-            if (!isGuildAdmin) {
-                return interaction.reply({
-                    content:
-                        '❌ 此指令僅限伺服器管理員使用。',
-                    flags:
-                        MessageFlags.Ephemeral
-                });
-            }
+        if (!isGuildAdmin) {
+            return interaction.reply({
+                content:
+                    '❌ 此指令僅限伺服器管理員使用。',
+                flags:
+                    MessageFlags.Ephemeral
+            });
+        }
 
-            const type =
-                interaction.options.getString(
-                    'type'
-                );
+        const type =
+            interaction.options.getString(
+                'type'
+            );
 
-            const targetChannel =
-                interaction.options.getChannel(
-                    'target_channel'
-                );
+        const targetChannel =
+            interaction.options.getChannel(
+                'target_channel'
+            );
 
-            const persona =
-                interaction.options.getString(
-                    'persona'
-                ) || 'default';
+        const configTypeMap = {
 
-            if (
-                type === 'ai'
-            ) {
-                try {
-                    const {
-                        setAiChannel,
-                        PERSONAS
-                    } = require('./GameSystem/AIChatSystem.js');
+            notify: {
+                key:
+                    'notifyChannelId',
+                label:
+                    '系統上線通知頻道'
+            },
 
-                    if (
-                        !PERSONAS[persona]
-                    ) {
-                        return interaction.reply(
-                            {
-                                content:
-                                    '❌ 找不到此 AI 人格。',
-                                flags:
-                                    MessageFlags.Ephemeral
-                            }
-                        );
-                    }
+            rateup: {
+                key:
+                    'rateUpChannelId',
+                label:
+                    'Rate Up 公告頻道'
+            },
 
-                    setAiChannel(
-                        interaction.guildId,
-                        targetChannel.id,
-                        persona
-                    );
-                } catch (
-                    err
-                ) {
-                    console.error(
-                        'setchannel(ai) 失敗:',
-                        err.message
-                    );
-                }
-            }
-
-            const configTypeMap = {
-
+            news: {
+                key: 'newsChannelId', label: '新聞與社群動態頻道'
+            },
+            ai: { key: 'aiChannelId', label: 'AI 自動回覆頻道' },
+            'ai-memory': { key: 'aiMemoryChannelId', label: 'AI 記憶庫頻道' }
+        };
             // ─────────────────────────────
             // notify / rateup / news
             // ─────────────────────────────
