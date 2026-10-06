@@ -82,7 +82,8 @@ function createDefaultConfig() {
 
         storageChannelId: '',
         aiChannelId: '',
-        aiMemoryChannelId: ''
+        aiMemoryChannelId: '',
+        aiPersonas: {}
     };
 }
 
@@ -92,6 +93,24 @@ function normalizeConfig(config = {}) {
     return {
         ...base,
         ...config,
+
+        aiPersonas:
+            config.aiPersonas &&
+            typeof config.aiPersonas === 'object' &&
+            !Array.isArray(config.aiPersonas)
+                ? Object.fromEntries(
+                    Object.entries(config.aiPersonas)
+                        .filter(([channelId, persona]) =>
+                            Boolean(channelId) &&
+                            typeof persona === 'string' &&
+                            Boolean(persona.trim())
+                        )
+                        .map(([channelId, persona]) => [
+                            String(channelId),
+                            persona.trim()
+                        ])
+                )
+                : {},
 
         translationSourceChannelIds:
             Array.isArray(config.translationSourceChannelIds)

@@ -6,7 +6,11 @@
 const fs = require('fs');
 const path = require('path');
 const { AttachmentBuilder, PermissionFlagsBits } = require('discord.js');
-const { getGuildConfig } = require('./ServerConfigStorage.js');
+const {
+    getGuildConfig,
+    setGuildConfig,
+    saveGuildConfigToDiscord
+} = require('./ServerConfigStorage.js');
 
 // ─── 設定 ──────────────────────────────────────────────────────
 const CONFIG_PATH     = path.join(process.cwd(), 'data', 'ai-config.json');
@@ -98,6 +102,8 @@ function getMemoryChannel(g) {
 }
 function setAiChannel(g, c, persona = 'default') {
     cfg[g] = cfg[g] || {};
+    const serverConfig = getGuildConfig(g);
+    const aiPersonas = { ...(serverConfig.aiPersonas || {}) };
     if (!c) {
         for (const id of Object.keys(cfg[g].channels || {})) delete aiChannels[id];
         delete cfg[g].channels;
@@ -109,16 +115,60 @@ function setAiChannel(g, c, persona = 'default') {
         cfg[g].channels = cfg[g].channels || {};
         cfg[g].channels[c] = true;
         aiChannels[c] = PERSONAS[persona] ? persona : 'default';
+        aiPersonas[c] = aiChannels[c];
     }
+    setGuildConfig(g, { ...serverConfig, aiPersonas });
     saveCfg();
     saveAiChannels();
 }
 function getChannelPersona(g, channelId) {
+    const isConfigured =
+        Boolean(cfg[g]?.channels?.[channelId]) ||
+        getAiChannel(g) === channelId;
+    if (!isConfigured) return null;
+
+    const persistedPersona = getGuildConfig(g)?.aiPersonas?.[channelId];
+    if (PERSONAS[persistedPersona]) return persistedPersona;
     if (cfg[g]?.channels?.[channelId] && PERSONAS[aiChannels[channelId]]) return aiChannels[channelId];
     return getAiChannel(g) === channelId ? (PERSONAS[aiChannels[channelId]] ? aiChannels[channelId] : 'default') : null;
 }
 function getPersonaLabel(persona) { return (PERSONAS[persona] || PERSONAS.default).name; }
 function setMemoryChannel(g, c) { cfg[g] = cfg[g] || {}; c ? cfg[g].memory = c : delete cfg[g].memory; saveCfg(); }
+
+async function persistLegacyPersonas(client) {
+    if (!client?.guilds?.cache) return 0;
+    let migrated = 0;
+
+    for (const guild of client.guilds.cache.values()) {
+        const serverConfig = getGuildConfig(guild.id);
+        const aiPersonas = { ...(serverConfig.aiPersonas || {}) };
+        const legacyConfig = cfg[guild.id] || {};
+        const channelIds = new Set([
+            ...Object.keys(legacyConfig.channels || {}),
+            legacyConfig.channel,
+            serverConfig.aiChannelId
+        ].filter(Boolean));
+        let changed = false;
+
+        for (const channelId of channelIds) {
+            if (PERSONAS[aiPersonas[channelId]]) continue;
+            const legacyPersona = aiChannels[channelId];
+            if (!PERSONAS[legacyPersona]) continue;
+            aiPersonas[channelId] = legacyPersona;
+            changed = true;
+        }
+
+        if (!changed) continue;
+        setGuildConfig(guild.id, { ...serverConfig, aiPersonas });
+        const saved = await saveGuildConfigToDiscord(client, guild.id, { aiPersonas });
+        if (saved) migrated++;
+    }
+
+    if (migrated) {
+        console.log(`[AIChat] 已將 ${migrated} 個伺服器的舊人格設定遷移至持久化設定`);
+    }
+    return migrated;
+}
 
 // ─── 超時控制 Fetch ───────────────────────────────────────────
 async function fetchWithTimeout(url, options = {}, timeoutMs = 20000) {
@@ -337,6 +387,7 @@ async function restoreGuild(client, g) {
     return n;
 }
 async function restoreAll(client) {
+    await persistLegacyPersonas(client);
     let t = 0;
     const guilds = new Set(Object.keys(cfg));
     if (client?.guilds?.cache) for (const g of client.guilds.cache.keys()) guilds.add(g);
@@ -586,6 +637,13 @@ function init(client) {
         const persona = personaTokens[1];
         if (isAdmin && personaTokens.length === 2 && personaTokens[0] === '!!aipersona' && PERSONAS[persona]) {
             setAiChannel(msg.guild.id, msg.channel.id, persona);
+            const saved = await saveGuildConfigToDiscord(client, msg.guild.id, {
+                aiChannelId: msg.channel.id,
+                aiPersonas: getGuildConfig(msg.guild.id).aiPersonas
+            });
+            if (!saved) {
+                return msg.reply('⚠️ 人格已在此執行個體設定，但尚未寫入 Discord 持久化設定；請先設定 `/setstoragechannel`。').catch(() => {});
+            }
             return msg.reply('✅ 此頻道 AI 人格已切換為 ' + getPersonaLabel(persona) + '。').catch(() => {});
         }
 
@@ -593,8 +651,12 @@ function init(client) {
             const cmd = rawCommand.toLowerCase();
             if (cmd === '!!setaichannel') {
                 setAiChannel(msg.guild.id, msg.channel.id);
+                const saved = await saveGuildConfigToDiscord(client, msg.guild.id, {
+                    aiChannelId: msg.channel.id,
+                    aiPersonas: getGuildConfig(msg.guild.id).aiPersonas
+                });
                 console.log(`[AIChat] 伺服器 ${msg.guild.id} 綁定 AI 頻道: ${msg.channel.id}`);
-                return msg.reply(`✅ 此頻道已設為 AI 自動回覆頻道。在此頻道發言 Angela 就會回覆。`).catch(() => {});
+                return msg.reply(`✅ 此頻道已設為 AI 自動回覆頻道。在此頻道發言 Angela 就會回覆。${saved ? '' : '（提醒：尚未寫入 Discord 持久化設定，請先設定 /setstoragechannel。）'}`).catch(() => {});
             }
             if (cmd === '!!setaimemory') {
                 setMemoryChannel(msg.guild.id, msg.channel.id);
@@ -604,6 +666,10 @@ function init(client) {
             if (cmd === '!!aioff') {
                 setAiChannel(msg.guild.id, null);
                 setMemoryChannel(msg.guild.id, null);
+                await saveGuildConfigToDiscord(client, msg.guild.id, {
+                    aiChannelId: '',
+                    aiMemoryChannelId: ''
+                });
                 console.log(`[AIChat] 伺服器 ${msg.guild.id} 已關閉 AI 功能`);
                 return msg.reply(`✅ 已關閉此伺服器的 AI 回覆與記憶庫。`).catch(() => {});
             }
@@ -663,13 +729,9 @@ function init(client) {
             const models = await fetchValidModels(apiKey);
             if (!models.length) console.error('[AIChat] 啟動時沒有取得任何可用 Gemini 模型。');
         }
-        try {
-            const n = await restoreAll(client);
-            if (n > 0) console.log(`🧠 [AIChat] 共還原 ${n} 個缺少的記憶檔`);
-        } catch (e) { console.error('[AIChat] 還原失敗:', e.message); }
     });
 
     console.log('[AIChat] 獨立系統已載入 (多人格 extra 規則 + 防覆蓋雙軌記憶 + 個人 + 群聊共享 + 動態 ListModels)');
 }
 
-module.exports = { init, getAiChannel, getChannelPersona, getPersonaLabel, setAiChannel, getMemoryChannel, restoreAll, PERSONAS };
+module.exports = { init, getAiChannel, getChannelPersona, getPersonaLabel, setAiChannel, getMemoryChannel, restoreAll, persistLegacyPersonas, PERSONAS };
