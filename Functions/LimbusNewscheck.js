@@ -34,12 +34,13 @@ const STEAM_CLAN_IMAGE_BASE = 'https://steamcdn-a.akamaihd.net/steamcommunity/pu
 const YOUTUBE_HANDLE = (process.env.YOUTUBE_HANDLE || 'ProjectMoonOfficial').replace(/^@/, '');
 const YOUTUBE_PAGE_URL = process.env.YOUTUBE_PAGE_URL || `https://www.youtube.com/@${YOUTUBE_HANDLE}`;
 
-// X 公開 syndication timeline。Nitter 已大規模停止服務，改用 X 自己提供的公開時間線端點。
-// 可用 X_TIMELINE_ENDPOINTS 以逗號分隔覆寫，方便未來切換自架 proxy。
+// X 已關閉公開 syndication timeline。改用標準 RSS 來源（RSSHub / Nitter 等）。
+// 以 {user} 代表帳號名稱，多個來源用逗號分隔（全部並行，任一成功即可）。
+// 例：X_TIMELINE_ENDPOINTS=https://rsshub.app/twitter/user/{user},https://nitter.net/{user}/rss
 const TIMELINE_ENDPOINTS = (process.env.X_TIMELINE_ENDPOINTS ||
-    'https://syndication.twitter.com/srv/timeline-profile/screen-name')
+    'https://rsshub.app/twitter/user/{user},https://nitter.poast.org/{user}/rss,https://nitter.net/{user}/rss')
     .split(',')
-    .map(s => s.trim().replace(/\/$/, ''))
+    .map(s => s.trim())
     .filter(Boolean);
 
 const STATE_FILE = path.join(process.cwd(), 'data', 'newscheck-state.json');
@@ -482,31 +483,45 @@ function extractJsonObjectsByMarker(html, marker) {
     return objects;
 }
 
-function parseSyndicationTimeline(raw, fallbackUserId) {
-    const marker = '{"type":"tweet","entry_id":"tweet-';
-    const entries = extractJsonObjectsByMarker(String(raw || ''), marker);
+function parseTwitterRss(raw, fallbackUserId) {
+    const xml = String(raw || '');
+    const blocks = [...extractBlock(xml, 'item'), ...extractBlock(xml, 'entry')];
     const seen = new Set();
 
-    return entries
-        .map(entry => entry?.content?.tweet)
-        .filter(tweet => tweet?.id_str)
-        .map(tweet => {
-            const id = String(tweet.id_str);
-            const screenName = tweet.user?.screen_name || fallbackUserId;
-            const text = decodeXmlEntities(tweet.full_text || tweet.text || '').trim();
+    return blocks.map(block => {
+        const link = (extractTag(block, 'link') || extractTag(block, 'guid') || '').trim();
+        if (!link) return null;
 
-            return {
-                id,
-                link: `https://x.com/${screenName}/status/${id}`,
-                title: text || `@${screenName} 發布了新訊息`,
-                createdAt: tweet.created_at || null,
-            };
-        })
-        .filter(item => {
-            if (seen.has(item.id)) return false;
-            seen.add(item.id);
-            return true;
-        });
+        const cleanLink = link.split('#')[0].split('?')[0];
+        const id = extractTweetKey(cleanLink);
+        if (!id || seen.has(id)) return null;
+        seen.add(id);
+
+        const screenName = (cleanLink.match(/(?:twitter|x|nitter)[^/]*\/([^/]+)\/status\//i) || [])[1] || fallbackUserId;
+        const description = extractTag(block, 'description') || '';
+        const rawTitle = extractTag(block, 'title');
+        const title = decodeXmlEntities(stripHtml(rawTitle || '')) || `@${screenName} 發布了新訊息`;
+        const pubDate = extractTag(block, 'pubDate') || extractTag(block, 'dc:date') || extractTag(block, 'updated');
+
+        const item = {
+            id: String(id),
+            link: `https://x.com/${screenName}/status/${id}`,
+            title,
+            createdAt: pubDate ? new Date(pubDate).toUTCString() : null,
+        };
+
+        const mediaUrl = extractAttr(block, 'enclosure', 'url')
+            || description.match(/<source[^>]*src="([^"]+\.mp4[^"]*)"/i)?.[1]
+            || description.match(/<video[^>]*src="([^"]+\.mp4[^"]*)"/i)?.[1]
+            || extractAttr(block, 'media:content', 'url');
+
+        if (mediaUrl && /\.mp4(\?|#|$)/i.test(mediaUrl)) {
+            item.videoUrl = decodeXmlEntities(mediaUrl);
+            item.videoVariants = [{ url: item.videoUrl, bitrate: 0 }];
+        }
+
+        return item;
+    }).filter(Boolean);
 }
 
 function decodeXEmbeddedString(value) {
@@ -626,34 +641,12 @@ async function downloadTweetVideo(item) {
     }
 }
 
-async function fetchTweetItemsFromXPage(userId) {
-    const url = `https://x.com/${encodeURIComponent(userId)}?f=live&fresh=${Date.now()}`;
-    const result = await execFileAsync('curl', [
-        '--silent',
-        '--show-error',
-        '--location',
-        '--compressed',
-        '--connect-timeout', '4',
-        '--max-time', '7',
-        '--user-agent', 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131 Safari/537.36',
-        '--header', 'Accept: text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
-        url,
-    ], {
-        maxBuffer: 4 * 1024 * 1024,
-        timeout: 8000,
-        killSignal: 'SIGKILL',
-    });
-    const items = parseXProfilePage(result.stdout, userId);
-    if (!items.length) throw new Error('x.com 頁面沒有可解析的最新推文');
-    return items;
-}
 
-async function fetchTweetItemsFromNode(nodeUrl, userId) {
-    const url = `${nodeUrl}/${encodeURIComponent(userId)}?format=html&dnt=true&fresh=${Date.now()}`;
+async function fetchTweetItemsFromRss(nodeTemplate, userId) {
+    const url = nodeTemplate.replace('{user}', encodeURIComponent(userId));
     const errors = [];
 
-    // 先使用 curl。X syndication 對 Node HTTP client 較容易回 429，
-    // 但同一個公開端點透過 curl 可以正常取得內容。
+    // 先使用 curl：RSSHub / Nitter 對 Node HTTP client 較容易回 429。
     try {
         const result = await execFileAsync('curl', [
             '--silent',
@@ -663,14 +656,14 @@ async function fetchTweetItemsFromNode(nodeUrl, userId) {
             '--connect-timeout', '4',
             '--max-time', '7',
             '--user-agent', 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131 Safari/537.36',
-            '--header', 'Accept: text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
+            '--header', 'Accept: application/rss+xml,application/atom+xml,application/xml;q=0.9,*/*;q=0.8',
             url,
         ], {
-            maxBuffer: 3 * 1024 * 1024,
+            maxBuffer: 4 * 1024 * 1024,
         });
-        const items = parseSyndicationTimeline(result.stdout, userId);
+        const items = parseTwitterRss(result.stdout, userId);
         if (items.length) return items;
-        errors.push('curl 回應沒有可解析的推文');
+        errors.push('curl 回應沒有可解析的 RSS 項目');
     } catch (error) {
         const detail = error.stderr ? String(error.stderr).trim().slice(0, 180) : error.message;
         errors.push(`curl ${detail}`);
@@ -680,7 +673,7 @@ async function fetchTweetItemsFromNode(nodeUrl, userId) {
     try {
         const response = await fetchWithTimeout(url, {
             headers: {
-                Accept: 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
+                Accept: 'application/rss+xml,application/atom+xml,application/xml;q=0.9,*/*;q=0.8',
             },
         }, 4500);
 
@@ -688,43 +681,28 @@ async function fetchTweetItemsFromNode(nodeUrl, userId) {
             errors.push(`node-fetch HTTP ${response.status}`);
         } else {
             const text = await response.text();
-            const items = parseSyndicationTimeline(text, userId);
+            const items = parseTwitterRss(text, userId);
             if (items.length) return items;
-            errors.push('node-fetch 回應沒有可解析的推文');
+            errors.push('node-fetch 回應沒有可解析的 RSS 項目');
         }
     } catch (error) {
         errors.push(`node-fetch ${error.message}`);
     }
 
-    throw new Error(`${nodeUrl}：${errors.join('；')}`);
+    throw new Error(`${url}：${errors.join('；')}`);
 }
 
 async function fetchTweetItemsFromAllNodes(userId) {
-    const sourceErrors = [];
-
-    // x.com 個人頁面是主來源：它包含最新的 4 則貼文，
-    // syndication endpoint 有時會停留在數月前的舊快取。
-    try {
-        const currentItems = await withTimeout(
-            fetchTweetItemsFromXPage(userId),
-            10000,
-            `@${userId} x.com page`
-        );
-        if (currentItems.length) return currentItems;
-    } catch (error) {
-        sourceErrors.push(`x.com：${error.message}`);
-    }
-
     const results = await Promise.allSettled(
-        TIMELINE_ENDPOINTS.map(async (nodeUrl) => ({
-            nodeUrl,
-            items: await fetchTweetItemsFromNode(nodeUrl, userId)
+        TIMELINE_ENDPOINTS.map(async (nodeTemplate) => ({
+            nodeTemplate,
+            items: await fetchTweetItemsFromRss(nodeTemplate, userId)
         }))
     );
 
     const merged = [];
     const seen = new Set();
-    const failures = [...sourceErrors];
+    const failures = [];
 
     for (const result of results) {
         if (result.status !== 'fulfilled') {
@@ -741,7 +719,7 @@ async function fetchTweetItemsFromAllNodes(userId) {
     }
 
     if (!merged.length) {
-        throw new Error(`所有 X timeline 來源都失敗：${failures.join(' | ') || '沒有有效回應'}`);
+        throw new Error(`所有 Twitter RSS 來源都失敗：${failures.join(' | ') || '沒有有效回應'}`);
     }
 
     merged.sort(compareTweetFreshness);
@@ -760,14 +738,21 @@ async function resolveYouTubeChannelId(pageUrl = YOUTUBE_PAGE_URL) {
         /"channelId\\":\\"(UC[^\\"]+)\\"/,
         /"externalId":"(UC[^"]+)"/,
         /"browseId":"(UC[^"]+)"/,
+        /<meta property="og:url" content="https:\/\/www\.youtube\.com\/channel\/(UC[\w-]+)"/,
+        /<link rel="canonical" href__="https:\/\/www\.youtube\.com\/channel\/(UC[\w-]+)"/,
         /https:\/\/www\.youtube\.com\/channel\/(UC[\w-]+)/,
-        /canonical" href="https:\/\/www\.youtube\.com\/channel\/(UC[\w-]+)"/,
         /itemprop="identifier" content="(UC[\w-]+)"/
     ];
 
+    const headers = {
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Cookie': 'PREF=f4=4000000&tz=UTC; CONSENT=YES+cb.20210328-17-p0.en-GB+FX',
+    };
+
     for (const targetUrl of candidates) {
         try {
-            const response = await fetchWithTimeout(targetUrl, {}, 12000);
+            const response = await fetchWithTimeout(targetUrl, { headers }, 12000);
             if (!response.ok) continue;
 
             const html = await response.text();
