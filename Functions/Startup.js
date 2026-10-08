@@ -1,0 +1,2808 @@
+// Functions/Startup.js
+'use strict';
+
+const {
+    Client,
+    GatewayIntentBits,
+    EmbedBuilder,
+    ActivityType,
+    Events,
+    SlashCommandBuilder,
+    PermissionFlagsBits,
+    ChannelType,
+    MessageFlags,
+    Collection,
+    ModalBuilder,
+    TextInputBuilder,
+    TextInputStyle,
+    ActionRowBuilder
+} = require('discord.js');
+
+const express = require('express');
+const fs      = require('fs');
+const path    = require('path');
+
+// ─── 確保資料目錄與設定檔存在 ─────────────────────────────────
+
+const BASE_DATA_DIR = path.join(
+    process.cwd(),
+    'data'
+);
+
+const PLAYERS_DIR = path.resolve(
+    process.env.PLAYER_DATA_DIR || path.join(BASE_DATA_DIR, 'players')
+);
+
+const CONFIG_PATH = path.join(
+    BASE_DATA_DIR,
+    'config.json'
+);
+
+try {
+    fs.mkdirSync(
+        PLAYERS_DIR,
+        {
+            recursive: true
+        }
+    );
+} catch {}
+
+// ─────────────────────────────────────────────
+// 預設設定
+// ─────────────────────────────────────────────
+
+const defaultConfig = {
+    notifyChannelId:
+        process.env.NOTIFY_CHANNEL_ID || '',
+
+    rateUpChannelId:
+        process.env.RATEUP_ANNOUNCE_CHANNEL || '',
+
+    newsChannelId:
+        process.env.NEWS_CHANNEL_ID || '',
+
+    backupChannelId:
+        process.env.PLAYER_BACKUP_CHANNEL_ID || '',
+};
+
+function getConfig() {
+    try {
+        if (
+            fs.existsSync(
+                CONFIG_PATH
+            )
+        ) {
+            const data =
+                fs.readFileSync(
+                    CONFIG_PATH,
+                    'utf8'
+                );
+
+            return {
+                ...defaultConfig,
+                ...JSON.parse(data)
+            };
+        }
+    } catch (err) {
+        console.error(
+            '⚠️ 讀取 config.json 失敗，使用預設值:',
+            err.message
+        );
+    }
+
+    return {
+        ...defaultConfig
+    };
+}
+
+function saveConfig(newConfig) {
+    try {
+        const current =
+            getConfig();
+
+        const updated = {
+            ...current,
+            ...newConfig
+        };
+
+        fs.writeFileSync(
+            CONFIG_PATH,
+            JSON.stringify(
+                updated,
+                null,
+                2
+            ),
+            'utf8'
+        );
+
+        return updated;
+
+    } catch (err) {
+        console.error(
+            '❌ 儲存 config.json 失敗:',
+            err.message
+        );
+
+        return null;
+    }
+}
+
+// ─────────────────────────────────────────────
+// 載入各系統
+// ─────────────────────────────────────────────
+
+const identitiesData =
+    require(
+        './GameSystem/Pulls/identitiesData.js'
+    );
+
+const {
+    startNewsCheckLoop,
+    setNotifyChannel
+} = require(
+    './LimbusNewscheck.js'
+);
+
+const {
+    handleCommands
+} = require(
+    './Commanders.js'
+);
+
+const ShopSystem = require('./GameSystem/ShopSystem.js');
+const GiveawaySystem = require('./GameSystem/GiveawayEventSystem.js');
+const AIChatSystem = require('./GameSystem/AIChatSystem.js');
+const ProfileSystem = require('./GameSystem/ProfileSystem.js');
+const CheckInSystem = require('./GameSystem/CheckInSystem.js');
+const WatchdogSystem = require('./GameSystem/WatchdogSystem.js');
+const NewYearSystem = require('./GameSystem/NewYearSystem.js');
+const MarriageSystem = require('./GameSystem/MarriageSystem.js');
+
+const {
+    handleMessageXp,
+    startVoiceXpTimer,
+    announceMonthlyLeaderboard,
+    trackVoiceJoin,
+    trackVoiceLeave,
+    bootstrapVoiceTracking
+} = require(
+    './GameSystem/LevelSystem.js'
+);
+
+const {
+    handleStarboardReaction,
+    scanAllGuildForums,
+    setStarboardChannel: _setStarboard
+} = require(
+    './GameSystem/StarboardSystem.js'
+);
+
+const {
+    setAuditChannel,
+    logMessageDelete,
+    logVoiceChange,
+    logMemberChange,
+    logGuildChange
+} = require(
+    './GameSystem/AuditSystem.js'
+);
+
+const {
+    setTranslationOutput,
+    setTranslationConfig,
+    toggleTranslationSource,
+    getTranslationConfig,
+    handleTranslationMessage
+} = require(
+    './GameSystem/TranslationSystem.js'
+);
+
+const {
+    localizeInteraction
+} = require(
+    './GameSystem/LanguageSystem.js'
+);
+
+const {
+    restoreFromBackupChannel
+} = require(
+    './GameSystem/PacksAndData.js'
+);
+
+const {
+    getGuildConfig,
+    saveGuildConfigToDiscord,
+    restoreAllGuildConfigs,
+    setStorageChannel
+} = require(
+    './GameSystem/ServerConfigStorage.js'
+);
+
+// ─────────────────────────────────────────────
+// 常數
+// ─────────────────────────────────────────────
+
+const SUPER_ADMIN_ID =
+    '1330463890122735642';
+
+const PORT =
+    process.env.PORT || 3000;
+
+// ─────────────────────────────────────────────
+// Keep-alive HTTP server
+// ─────────────────────────────────────────────
+
+const app =
+    express();
+
+app.get(
+    '/',
+    (_, res) =>
+        res.send(
+            'Angela is online.'
+        )
+);
+
+app.get(
+    '/health',
+    (_, res) =>
+        res.json({
+            status: 'ok',
+            uptime: process.uptime()
+        })
+);
+
+app.listen(
+    PORT,
+    () =>
+        console.log(
+            `🌐 HTTP server 已啟動 port ${PORT}`
+        )
+);
+
+// ─────────────────────────────────────────────
+// Discord Client
+// ─────────────────────────────────────────────
+
+const client =
+    new Client({
+        intents: [
+            GatewayIntentBits.Guilds,
+            GatewayIntentBits.GuildMessages,
+            GatewayIntentBits.MessageContent,
+            GatewayIntentBits.GuildMembers,
+            GatewayIntentBits.GuildVoiceStates,
+            GatewayIntentBits.GuildMessageReactions,
+        ],
+    });
+
+// ─────────────────────────────────────────────
+// 載入指令模組
+// ─────────────────────────────────────────────
+
+client.commands =
+    new Collection();
+
+try {
+    const pullCmd =
+        require(
+            './pullmenu.js'
+        );
+
+    if (
+        pullCmd?.data &&
+        typeof pullCmd?.execute ===
+            'function'
+    ) {
+        client.commands.set(
+            pullCmd.data.name,
+            pullCmd
+        );
+
+        console.log(
+            `[Startup] ✅ 載入指令: /${pullCmd.data.name}`
+        );
+    }
+
+} catch (err) {
+    console.error(
+        '[Startup] pullmenu.js 載入失敗:',
+        err.message
+    );
+}
+
+// ─────────────────────────────────────────────
+// Slash Commands
+// ─────────────────────────────────────────────
+
+const allSlashCommands = [
+
+    // ─────────────────────────────────────
+    // 抽卡
+    // ─────────────────────────────────────
+
+    new SlashCommandBuilder()
+        .setName('pull_limbuscompany')
+        .setDescription(
+            '開啟 LightSeeds 提取介面'
+        ),
+
+    // ─────────────────────────────────────
+    // 背包 / 機率
+    // ─────────────────────────────────────
+
+    new SlashCommandBuilder()
+        .setName('pack_limbuscompany')
+        .setDescription(
+            '查看 LC 主頁式背包與資源介面'
+        ),
+
+    new SlashCommandBuilder()
+        .setName('list_limbuscompany')
+        .setDescription(
+            '查看當前卡池機率與清單（已修正顯示完整角色名稱）'
+        ),
+
+    // ─────────────────────────────────────
+    // 戰鬥 / 隊伍
+    // ─────────────────────────────────────
+
+    new SlashCommandBuilder()
+        .setName('battle')
+        .setDescription(
+            '選擇難度進入戰鬥並獲取 LightSeeds'
+        ),
+
+    new SlashCommandBuilder()
+        .setName('party')
+        .setDescription(
+            '查看與管理出戰隊伍陣容'
+        ),
+
+    // ─────────────────────────────────────
+    // 罪人
+    // ─────────────────────────────────────
+
+    new SlashCommandBuilder()
+        .setName('sinner')
+        .setDescription(
+            '查看罪人詳細資料與清單'
+        ),
+
+    new SlashCommandBuilder()
+        .setName('uptie')
+        .setDescription(
+            '進行罪人人格/E.G.O 連結提升'
+        ),
+
+    new SlashCommandBuilder()
+        .setName('equip')
+        .setDescription(
+            '更換罪人裝備與人格'
+        ),
+
+    new SlashCommandBuilder()
+        .setName('threads')
+        .setDescription(
+            '查詢當前持有絲線與資源'
+        ),
+
+    // ─────────────────────────────────────
+    // 鏡光迷宮
+    // ─────────────────────────────────────
+
+    new SlashCommandBuilder()
+        .setName('md')
+        .setDescription(
+            '開啟或查看鏡光迷宮進度'
+        ),
+
+    // ─────────────────────────────────────
+    // 等級
+    // ─────────────────────────────────────
+
+    new SlashCommandBuilder()
+        .setName('rank')
+        .setDescription(
+            '查看等級與 XP 進度'
+        )
+        .addUserOption(
+            opt =>
+                opt
+                    .setName('target')
+                    .setDescription(
+                        '查看其他玩家的等級（預設為自己）'
+                    )
+        ),
+
+    new SlashCommandBuilder()
+        .setName('language')
+        .setDescription(
+            '選擇指令顯示語言'
+        )
+        .addStringOption(
+            opt =>
+                opt
+                    .setName('language')
+                    .setDescription(
+                        '語言'
+                    )
+                    .setRequired(true)
+                    .addChoices(
+                        {
+                            name: '繁體中文',
+                            value: 'zh'
+                        },
+                        {
+                            name: 'English',
+                            value: 'en'
+                        }
+                    )
+        ),
+
+    // ─────────────────────────────────────
+    // Starcoins
+    // ─────────────────────────────────────
+
+    new SlashCommandBuilder()
+        .setName('sc')
+        .setDescription(
+            '🌟 Starcoins 經濟系統'
+        )
+        .addSubcommand(
+            sub =>
+                sub
+                    .setName('pay')
+                    .setDescription(
+                        '支付 Starcoins 給其他玩家'
+                    )
+                    .addUserOption(
+                        opt =>
+                            opt
+                                .setName('target')
+                                .setDescription(
+                                    '收款玩家'
+                                )
+                                .setRequired(true)
+                    )
+                    .addIntegerOption(
+                        opt =>
+                            opt
+                                .setName('amount')
+                                .setDescription(
+                                    '支付金額'
+                                )
+                                .setRequired(true)
+                                .setMinValue(1)
+                    )
+        )
+        .addSubcommand(
+            sub =>
+                sub
+                    .setName('work')
+                    .setDescription(
+                        '工作取得 Starcoins'
+                    )
+        )
+        .addSubcommand(
+            sub =>
+                sub
+                    .setName('bank')
+                    .setDescription(
+                        '存入、提出或查看銀行 Starcoins'
+                    )
+                    .addStringOption(
+                        opt =>
+                            opt
+                                .setName('action')
+                                .setDescription(
+                                    '銀行操作'
+                                )
+                                .setRequired(true)
+                                .addChoices(
+                                    {
+                                        name: '存錢',
+                                        value: 'deposit'
+                                    },
+                                    {
+                                        name: '拿錢',
+                                        value: 'withdraw'
+                                    },
+                                    {
+                                        name: '查看餘額',
+                                        value: 'balance'
+                                    }
+                                )
+                    )
+                    .addIntegerOption(
+                        opt =>
+                            opt
+                                .setName('amount')
+                                .setDescription(
+                                    '金額（存錢/拿錢時需要）'
+                                )
+                                .setMinValue(1)
+                    )
+        ),
+
+    new SlashCommandBuilder()
+        .setName('gamble')
+        .setDescription(
+            '使用 Starcoins 進行 50/50 賭博'
+        )
+        .addIntegerOption(
+            opt =>
+                opt
+                    .setName('amount')
+                    .setDescription(
+                        '下注金額（10–50000）'
+                    )
+                    .setRequired(true)
+                    .setMinValue(10)
+                    .setMaxValue(50000)
+        ),
+
+    // ─────────────────────────────────────
+    // 娛樂
+    // ─────────────────────────────────────
+
+    new SlashCommandBuilder()
+        .setName('gayrate')
+        .setDescription(
+            '測量目標的男同指數'
+        )
+        .addUserOption(
+            opt =>
+                opt
+                    .setName('target')
+                    .setDescription(
+                        '要測試的目標對象（預設為自己）'
+                    )
+        ),
+
+    new SlashCommandBuilder()
+        .setName('lesbianrate')
+        .setDescription(
+            '測量目標的女同指數'
+        )
+        .addUserOption(
+            opt =>
+                opt
+                    .setName('target')
+                    .setDescription(
+                        '要測試的目標對象（預設為自己）'
+                    )
+        ),
+
+    // ─────────────────────────────────────
+    // 語音
+    // ─────────────────────────────────────
+
+    new SlashCommandBuilder()
+        .setName('join')
+        .setDescription(
+            '讓機器人加入你目前所在的語音頻道'
+        ),
+
+    new SlashCommandBuilder()
+        .setName('play')
+        .setDescription('播放 YouTube 或 SoundCloud 音樂（支援播放清單）')
+        .addStringOption(option => option.setName('musiclink').setDescription('音樂或播放清單連結').setRequired(true)),
+
+    new SlashCommandBuilder()
+        .setName('leave')
+        .setDescription(
+            '讓機器人離開目前所在的語音頻道'
+        ),
+
+    new SlashCommandBuilder()
+        .setName('marry')
+        .setDescription('查看婚姻狀態或發送結婚請求')
+        .addSubcommand(o =>
+            o
+                .setName('status')
+                .setDescription('查看自己的婚姻狀態與配偶')
+        )
+        .addSubcommand(o =>
+            o
+                .setName('request')
+                .setDescription('向指定使用者發送結婚請求')
+                .addUserOption(user =>
+                    user
+                        .setName('target')
+                        .setDescription('選擇要結婚的使用者')
+                        .setRequired(true)
+                )
+        ),
+
+    new SlashCommandBuilder()
+        .setName('divorce')
+        .setDescription('離婚；不選對象會顯示可選配偶')
+        .addUserOption(o => o.setName('target').setDescription('選擇要離婚的配偶').setRequired(false)),
+
+    new SlashCommandBuilder()
+        .setName('status')
+        .setDescription(
+            '查看機器人目前的運行狀態'
+        ),
+
+    // ─────────────────────────────────────
+    // Help
+    // ─────────────────────────────────────
+
+    new SlashCommandBuilder()
+        .setName('help')
+        .setDescription(
+            '顯示 Angela 系統全部斜線指令選單'
+        ),
+
+    // ─────────────────────────────────────
+    // 伺服器管理員
+    // ─────────────────────────────────────
+
+    new SlashCommandBuilder()
+        .setName('setchannel')
+        .setDescription(
+            '伺服器管理員 設定 Angela 系統各項通知頻道'
+        )
+        .setDefaultMemberPermissions(
+            PermissionFlagsBits.Administrator
+        )
+        .addStringOption(
+            option =>
+                option
+                    .setName('type')
+                    .setDescription(
+                        '請選擇要設定的頻道類型'
+                    )
+                    .setRequired(true)
+                    .addChoices(
+                        {
+                            name: '🟢 系統上線通知頻道',
+                            value: 'notify'
+                        },
+                        {
+                            name: '📢 Rate Up 抽卡公告頻道',
+                            value: 'rateup'
+                        },
+                        {
+                            name: '📰 新聞與社群動態頻道',
+                            value: 'news'
+                        },
+                        {
+                            name: '⬆️ 升級公告頻道',
+                            value: 'level'
+                        },
+                        {
+                            name: '📣 Sles 公告接收頻道',
+                            value: 'announce'
+                        },
+                        {
+                            name: '⭐ 星星榜頻道',
+                            value: 'starboard'
+                        },
+                        {
+                            name: '📚 紀錄頻道',
+                            value: 'audit'
+                        },
+                        {
+                            name: '🌐 翻譯輸出頻道',
+                            value: 'translate-output'
+                        },
+                        {
+                            name: '🌐 切換翻譯來源頻道',
+                            value: 'translate-source'
+                        },
+                        { name: '🤖 AI 自動回覆頻道', value: 'ai' },
+                        { name: '🧠 AI 記憶庫頻道', value: 'ai-memory' }
+                    )
+        )
+        .addChannelOption(
+            option =>
+                option
+                    .setName('target_channel')
+                    .setDescription(
+                        '選擇目標文字頻道'
+                    )
+                    .addChannelTypes(
+                        ChannelType.GuildText
+                    )
+                    .setRequired(true)
+        ),
+
+    new SlashCommandBuilder()
+            .setName('setaichannel')
+            .setDescription('將 AI 人格綁定至一個文字頻道')
+            .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+            // 人格選項直接取自 AIChatSystem 的 PERSONAS，不再另外維護清單。
+            .addStringOption(o => o.setName('persona').setDescription('此頻道使用的人格').setRequired(true).addChoices(...AIChatSystem.getPersonaChoices()))
+            .addChannelOption(o => o.setName('channel').setDescription('目標頻道（不選則使用目前頻道）').addChannelTypes(ChannelType.GuildText)),
+    
+        new SlashCommandBuilder()
+            .setName('setstoragechannel')
+        .setDescription(
+            '伺服器管理員 設定 Angela 設定資料的永久儲存頻道'
+        )
+        .setDefaultMemberPermissions(
+            PermissionFlagsBits.Administrator
+        )
+        .addChannelOption(
+            option =>
+                option
+                    .setName(
+                        'target_channel'
+                    )
+                    .setDescription(
+                        '選擇一個只有管理員與 Angela 可見的文字頻道'
+                    )
+                    .addChannelTypes(
+                        ChannelType.GuildText
+                    )
+                    .setRequired(true)
+        ),
+
+    new SlashCommandBuilder()
+        .setName('serverconfig')
+        .setDescription(
+            '伺服器管理員 查看 Angela 目前儲存的頻道設定'
+        )
+        .setDefaultMemberPermissions(
+            PermissionFlagsBits.Administrator
+        ),
+
+     new SlashCommandBuilder()
+        .setName('leaderboard')
+        .setDescription(
+            '查看等級排行榜 TOP 10'
+        )
+        // period=month 可查看本月 XP 排行
+        .addStringOption(o => o.setName('period').setDescription('排行榜期間').addChoices({ name: '全部', value: 'all' }, { name: '本月', value: 'month' })),
+    
+    new SlashCommandBuilder()
+            .setName('achievements')
+            .setDescription('查看已解鎖與尚未解鎖的成就'),
+
+        new SlashCommandBuilder()
+            .setName('dailyquest')
+            .setDescription('查看每日與本小時任務'),
+
+        new SlashCommandBuilder()
+            .setName('steam')
+        .setDescription(
+            '伺服器管理員 手動觸發 Steam 最新更新檢測'
+        )
+        .setDefaultMemberPermissions(
+            PermissionFlagsBits.Administrator
+        ),
+
+    new SlashCommandBuilder()
+        .setName('tweet')
+        .setDescription(
+            '伺服器管理員 手動觸發 Twitter 最新推文檢測'
+        )
+        .setDefaultMemberPermissions(
+            PermissionFlagsBits.Administrator
+        ),
+
+    new SlashCommandBuilder()
+        .setName('youtube')
+        .setDescription(
+            '伺服器管理員 手動觸發 YouTube 最新影片檢測'
+        )
+        .setDefaultMemberPermissions(
+            PermissionFlagsBits.Administrator
+        ),
+
+    // ─────────────────────────────────────
+    // Sles 專屬
+    // ─────────────────────────────────────
+
+    new SlashCommandBuilder()
+        .setName('announce')
+        .setDescription(
+            '👑 Sles 專屬 向所有設定公告頻道的伺服器發送全域公告'
+        )
+        .setDefaultMemberPermissions(
+            PermissionFlagsBits.Administrator
+        ),
+
+    new SlashCommandBuilder()
+        .setName('givestarcoins')
+        .setDescription(
+            '👑 Sles 專屬 發放 Starcoins'
+        )
+        .setDefaultMemberPermissions(
+            PermissionFlagsBits.Administrator
+        )
+        .addIntegerOption(
+            opt =>
+                opt
+                    .setName('amount')
+                    .setDescription(
+                        '發放數量'
+                    )
+                    .setRequired(true)
+                    .setMinValue(1)
+        )
+        .addUserOption(
+            opt =>
+                opt
+                    .setName('target')
+                    .setDescription(
+                        '指定目標玩家'
+                    )
+                    .setRequired(true)
+        ),
+
+    new SlashCommandBuilder()
+        .setName('takelightseeds')
+        .setDescription(
+            '👑 Sles 專屬 扣除玩家 LightSeeds'
+        )
+        .setDefaultMemberPermissions(
+            PermissionFlagsBits.Administrator
+        )
+        .addIntegerOption(
+            opt =>
+                opt
+                    .setName('amount')
+                    .setDescription(
+                        '扣除數量'
+                    )
+                    .setRequired(true)
+                    .setMinValue(1)
+        )
+        .addUserOption(
+            opt =>
+                opt
+                    .setName('target')
+                    .setDescription(
+                        '指定目標玩家'
+                    )
+                    .setRequired(true)
+        ),
+
+    new SlashCommandBuilder()
+        .setName('givelightseeds')
+        .setDescription(
+            '👑 Sles 專屬 發放 LightSeeds（可給個人或全伺服器）'
+        )
+        .setDefaultMemberPermissions(
+            PermissionFlagsBits.Administrator
+        )
+        .addIntegerOption(
+            opt =>
+                opt
+                    .setName('amount')
+                    .setDescription(
+                        '發放數量'
+                    )
+                    .setRequired(true)
+        )
+        .addUserOption(
+            opt =>
+                opt
+                    .setName('target')
+                    .setDescription(
+                        '指定目標玩家（若發給全服可留空）'
+                    )
+        )
+        .addBooleanOption(
+            opt =>
+                opt
+                    .setName('all')
+                    .setDescription(
+                        '是否發放給伺服器所有玩家（預設 False）'
+                    )
+        ),
+
+    new SlashCommandBuilder()
+        .setName('givefragments')
+        .setDescription(
+            '👑 Sles 專屬 發放人格碎片（可給個人或全伺服器）'
+        )
+        .setDefaultMemberPermissions(
+            PermissionFlagsBits.Administrator
+        )
+        .addIntegerOption(
+            opt =>
+                opt
+                    .setName('amount')
+                    .setDescription(
+                        '發放數量'
+                    )
+                    .setRequired(true)
+        )
+        .addUserOption(
+            opt =>
+                opt
+                    .setName('target')
+                    .setDescription(
+                        '指定目標玩家（若發給全服可留空）'
+                    )
+        )
+        .addBooleanOption(
+            opt =>
+                opt
+                    .setName('all')
+                    .setDescription(
+                        '是否發放給伺服器所有玩家（預設 False）'
+                    )
+        ),
+
+    new SlashCommandBuilder()
+        .setName('givescrolls')
+        .setDescription(
+            '👑 Sles 專屬 發放抽卡券（可給個人或全伺服器）'
+        )
+        .setDefaultMemberPermissions(
+            PermissionFlagsBits.Administrator
+        )
+        .addIntegerOption(
+            opt =>
+                opt
+                    .setName('amount')
+                    .setDescription(
+                        '發放數量'
+                    )
+                    .setRequired(true)
+        )
+        .addUserOption(
+            opt =>
+                opt
+                    .setName('target')
+                    .setDescription(
+                        '指定目標玩家（若發給全服可留空）'
+                    )
+        )
+        .addBooleanOption(
+            opt =>
+                opt
+                    .setName('all')
+                    .setDescription(
+                        '是否發放給伺服器所有玩家（預設 False）'
+                    )
+        ),
+
+    new SlashCommandBuilder()
+        .setName('givethreads')
+        .setDescription(
+            '👑 Sles 專屬 發放絲線（可給個人或全伺服器）'
+        )
+        .setDefaultMemberPermissions(
+            PermissionFlagsBits.Administrator
+        )
+        .addIntegerOption(
+            opt =>
+                opt
+                    .setName('amount')
+                    .setDescription(
+                        '發放數量'
+                    )
+                    .setRequired(true)
+        )
+        .addUserOption(
+            opt =>
+                opt
+                    .setName('target')
+                    .setDescription(
+                        '指定目標玩家（若發給全服可留空）'
+                    )
+        )
+        .addBooleanOption(
+            opt =>
+                opt
+                    .setName('all')
+                    .setDescription(
+                        '是否發放給伺服器所有玩家（預設 False）'
+                    )
+        ),
+
+    new SlashCommandBuilder()
+        .setName('updaterewards')
+        .setDescription(
+            '👑 Sles 專屬 更新全服獎勵設置'
+        )
+        .setDefaultMemberPermissions(
+            PermissionFlagsBits.Administrator
+        )
+        .addIntegerOption(
+            opt =>
+                opt
+                    .setName('amount')
+                    .setDescription(
+                        '發放數量'
+                    )
+                    .setRequired(true)
+        ),
+
+    new SlashCommandBuilder()
+        .setName('updatebuff')
+        .setDescription(
+            '👑 Sles 專屬 更新關卡獎勵倍率 Buff'
+        )
+        .setDefaultMemberPermissions(
+            PermissionFlagsBits.Administrator
+        )
+        .addNumberOption(
+            opt =>
+                opt
+                    .setName('multiplier')
+                    .setDescription(
+                        '倍率（例如 2 = 雙倍）'
+                    )
+                    .setRequired(true)
+        ),
+
+    new SlashCommandBuilder().setName('shop').setDescription('開啟商城 UI'),
+    new SlashCommandBuilder().setName('shop-add').setDescription('Sles 專屬：上架商城商品')
+        .addStringOption(o => o.setName('name').setDescription('商品名稱').setRequired(true))
+        .addStringOption(o => o.setName('info').setDescription('商品資訊'))
+        .addIntegerOption(o => o.setName('lightseeds').setDescription('LightSeeds 價格').setMinValue(0))
+        .addIntegerOption(o => o.setName('starcoins').setDescription('StarCoins 價格').setMinValue(0))
+        .addIntegerOption(o => o.setName('minlevel').setDescription('最低等級').setMinValue(0))
+        .addIntegerOption(o => o.setName('stock').setDescription('庫存，不填代表無限').setMinValue(1))
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+    new SlashCommandBuilder().setName('shop-remove').setDescription('Sles 專屬：下架商城商品')
+        .addStringOption(o => o.setName('item_id').setDescription('商品 ID').setRequired(true))
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+    new SlashCommandBuilder().setName('shop-confirm').setDescription('Sles 專屬：確認商城序號已交付')
+        .addStringOption(o => o.setName('code').setDescription('購買序號').setRequired(true))
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+    new SlashCommandBuilder().setName('giveaway-create').setDescription('建立抽獎活動')
+        .addStringOption(o => o.setName('prize_name').setDescription('獎品名稱').setRequired(true))
+        .addIntegerOption(o => o.setName('winners').setDescription('抽出人數').setRequired(true).setMinValue(1).setMaxValue(20))
+        .addStringOption(o => o.setName('prize_info').setDescription('獎品資訊'))
+        .addIntegerOption(o => o.setName('max_participants').setDescription('最多參加人數').setMinValue(1).setMaxValue(10000))
+        .addIntegerOption(o => o.setName('min_level').setDescription('最低等級').setMinValue(0).setMaxValue(100))
+        .addIntegerOption(o => o.setName('entry_lightseeds').setDescription('參加扣除 LightSeeds').setMinValue(0))
+        .addIntegerOption(o => o.setName('entry_starcoins').setDescription('參加扣除 StarCoins').setMinValue(0))
+        .addIntegerOption(o => o.setName('prize_lightseeds').setDescription('得獎發放 LightSeeds').setMinValue(0))
+        .addIntegerOption(o => o.setName('prize_starcoins').setDescription('得獎發放 StarCoins').setMinValue(0))
+        .addIntegerOption(o => o.setName('duration').setDescription('持續分鐘').setMinValue(1).setMaxValue(10080))
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+    new SlashCommandBuilder()
+        .setName('giveaway-end')
+        .setDescription('提前結束抽獎')
+        .addStringOption(o => o.setName('id').setDescription('抽獎 ID').setRequired(true))
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+    // ─────────────────────────────────────
+    // 個人資料系統
+    // ─────────────────────────────────────
+
+    new SlashCommandBuilder()
+        .setName('profile')
+        .setDescription('查看個人的完整資料（等級、統計、婚姻、稱號、自我介紹）')
+        .addUserOption(o => o.setName('target').setDescription('查看其他玩家的資料（預設為自己）')),
+
+    new SlashCommandBuilder()
+        .setName('updateprofile')
+        .setDescription('編輯你的個人資料（每天最多 2 次）')
+        .addStringOption(o => o.setName('bio').setDescription('自我介紹（最多 500 字）').setMaxLength(500))
+        .addStringOption(o => o.setName('origin').setDescription('經驗來源 — 你玩過什麼、從哪來（最多 300 字）').setMaxLength(300))
+        .addStringOption(o => o.setName('image_url').setDescription('背景圖片網址（banner，http/https 開頭）'))
+        .addStringOption(o => o.setName('title').setDescription('裝備稱號（留空卸下）')),
+
+    new SlashCommandBuilder()
+        .setName('title')
+        .setDescription('查看或裝備你的稱號')
+        .addStringOption(o => o.setName('action').setDescription('操作').setRequired(true).addChoices(
+            { name: '查看稱號列表', value: 'list' },
+            { name: '裝備稱號', value: 'equip' },
+            { name: '卸下稱號', value: 'unequip' },
+        ))
+        .addStringOption(o => o.setName('name').setDescription('要裝備的稱號名稱')),
+
+    // ─────────────────────────────────────
+    // 每日簽到
+    // ─────────────────────────────────────
+
+    new SlashCommandBuilder()
+        .setName('checkin')
+        .setDescription('每日簽到，連續天數越多獎勵越豐厚'),
+
+];
+
+// ─────────────────────────────────────────────
+// 工具
+// ─────────────────────────────────────────────
+
+function rarityLabel(rarity) {
+    return ({
+        'Color Fixer':
+            '👑 Color Fixer',
+
+        'Special':
+            '🌀 Special',
+
+        '0000':
+            '✨ ★★★★',
+
+        'Egos':
+            '🔮 E.G.O',
+
+        '000':
+            '★★★',
+
+        '00':
+            '★★',
+
+        '0':
+            '★'
+    })[rarity] || rarity;
+}
+
+// ─────────────────────────────────────────────
+// Rate Up 啟動公告
+// ─────────────────────────────────────────────
+
+async function announceCurrentRateUps(botClient) {
+    const config = getConfig();
+    if (!config.rateUpChannelId) return;
+
+    const aliases = {
+        'Color Fixer': ['Color Fixer', 'COLOR_FIXER', 'ColorFixer'],
+        'Special': ['Special', 'SPECIAL'],
+        '0000': ['0000', 'S4'],
+        'Egos': ['Egos', 'EGOS'],
+        '000': ['000', 'S3'],
+        '00': ['00', 'S2'],
+        '0': ['0', 'S1'],
+    };
+    const labels = {
+        'Color Fixer': '👑 Color Fixer',
+        'Special': '🌀 Special',
+        '0000': '✨ ★★★★',
+        'Egos': '🔮 E.G.O',
+        '000': '✨ ★★★',
+        '00': '⭐ ★★',
+        '0': '★',
+    };
+
+    const readRateUp = rateUp => Object.entries(aliases)
+        .map(([canonical, keys]) => ({
+            canonical,
+            values: [...new Set(keys.flatMap(key =>
+                Array.isArray(rateUp?.[key]) ? rateUp[key].filter(Boolean) : []
+            ))],
+        }))
+        .filter(group => group.values.length);
+
+    try {
+        const channel = await botClient.channels.fetch(config.rateUpChannelId);
+        if (!channel) return;
+
+        const banners = Object.entries(identitiesData.BANNERS || {})
+            .map(([key, banner]) => ({ key, banner, groups: readRateUp(banner?.rateUp) }))
+            .filter(({ groups }) => groups.length);
+
+        if (!banners.length) {
+            const legacyGroups = readRateUp(identitiesData.upTargets || {});
+            if (legacyGroups.length) {
+                banners.push({ key: 'legacy', banner: { name: '目前設定' }, groups: legacyGroups });
+            }
+        }
+
+        const fields = banners.slice(0, 25).map(({ key, banner, groups }) => ({
+            name: `🎯 ${banner.name || key}`.slice(0, 256),
+            value: groups.map(({ canonical, values }) =>
+                `**${labels[canonical] || canonical} UP**\n${values.map(value => `• ${value}`).join('\n')}`
+            ).join('\n\n').slice(0, 1024),
+            inline: false,
+        }));
+
+        const embed = new EmbedBuilder()
+            .setColor(0xffd166)
+            .setTitle('📢 Rate Up 人格與 E.G.O 機率資料已成功載入')
+            .setDescription(fields.length
+                ? '以下內容直接來自目前 BANNERS 卡池設定，會同時列出人格與 E.G.O。'
+                : '目前沒有任何卡池設定 Rate Up 對象。')
+            .setFooter({ text: '資料來源：Functions/GameSystem/Pulls/identitiesData.js' })
+            .setTimestamp();
+
+        if (fields.length) embed.addFields(fields);
+        await channel.send({ embeds: [embed] });
+    } catch (err) {
+        console.error('❌ Rate Up 公告發送失敗:', err.message);
+    }
+}
+
+// ─────────────────────────────────────────────
+// InteractionCreate
+// ─────────────────────────────────────────────
+
+client.on(
+    Events.InteractionCreate,
+    async interaction => {
+
+        // ═════════════════════════════════════
+        // /announce Modal Submit
+        // ═════════════════════════════════════
+
+        if (
+            interaction.isModalSubmit() &&
+            interaction.customId ===
+                'announce_modal'
+        ) {
+            try {
+
+                // 只有 Sles
+                if (
+                    interaction.user.id !==
+                    SUPER_ADMIN_ID
+                ) {
+                    return interaction.reply({
+                        content:
+                            '❌ 只有 Angela 系統最高主管可以使用公告功能。',
+                        flags:
+                            MessageFlags.Ephemeral
+                    });
+                }
+
+                const messageText =
+                    interaction.fields.getTextInputValue(
+                        'announce_content'
+                    );
+
+                if (
+                    !messageText ||
+                    !messageText.trim()
+                ) {
+                    return interaction.reply({
+                        content:
+                            '❌ 公告內容不能為空。',
+                        flags:
+                            MessageFlags.Ephemeral
+                    });
+                }
+
+                const {
+                    broadcastAnnouncement
+                } = require(
+                    './GameSystem/AnnounceSystem.js'
+                );
+
+                await broadcastAnnouncement(
+                    client,
+                    interaction,
+                    messageText
+                );
+
+            } catch (err) {
+                console.error(
+                    '[Announce] Modal 執行失敗:',
+                    err
+                );
+
+                if (
+                    interaction.deferred ||
+                    interaction.replied
+                ) {
+                    await interaction
+                        .editReply({
+                            content:
+                                `❌ 公告發送失敗：${err.message}`
+                        })
+                        .catch(
+                            () => {}
+                        );
+
+                } else {
+                    await interaction
+                        .reply({
+                            content:
+                                `❌ 公告發送失敗：${err.message}`,
+                            flags:
+                                MessageFlags.Ephemeral
+                        })
+                        .catch(
+                            () => {}
+                        );
+                }
+            }
+
+            return;
+        }
+
+        // ═════════════════════════════════════
+        // 其他非 Slash Command interaction
+        // ═════════════════════════════════════
+
+        if (interaction.isButton() && interaction.customId.startsWith('giveaway_join:')) {
+            return GiveawaySystem.joinGiveaway(client, interaction, interaction.customId.slice('giveaway_join:'.length));
+        }
+
+        if (interaction.isButton() && interaction.customId.startsWith('marry:')) return MarriageSystem.handleMarriageButton(client, interaction);
+        if (interaction.isButton() && interaction.customId.startsWith('divorce:')) return MarriageSystem.handleDivorceButton(client, interaction);
+            if (interaction.isButton() && interaction.customId.startsWith('claim_achievements:')) return require('./GameSystem/AchievementSystem.js').handleClaim(client, interaction, interaction.customId.slice('claim_achievements:'.length));
+            if (interaction.isButton() && interaction.customId.startsWith('claim_quests:')) return require('./GameSystem/DailyQuestSystem.js').handleClaim(client, interaction, interaction.customId.slice('claim_quests:'.length));
+
+        if (
+            !interaction.isChatInputCommand()
+        ) {
+            return;
+        }
+
+        localizeInteraction(
+            interaction
+        );
+
+        // ═════════════════════════════════════
+        // /announce
+        // ═════════════════════════════════════
+
+        if (
+            interaction.commandName ===
+            'announce'
+        ) {
+
+            if (
+                interaction.user.id !==
+                SUPER_ADMIN_ID
+            ) {
+                return interaction.reply({
+                    content:
+                        '❌ 只有 Angela 系統最高主管可以使用公告功能。',
+                    flags:
+                        MessageFlags.Ephemeral
+                });
+            }
+
+            const modal =
+                new ModalBuilder()
+                    .setCustomId(
+                        'announce_modal'
+                    )
+                    .setTitle(
+                        '📢 Angela 系統公告'
+                    );
+
+            const announcementInput =
+                new TextInputBuilder()
+                    .setCustomId(
+                        'announce_content'
+                    )
+                    .setLabel(
+                        '公告內容'
+                    )
+                    .setStyle(
+                        TextInputStyle.Paragraph
+                    )
+                    .setPlaceholder(
+                        '輸入公告內容，可以直接換行……'
+                    )
+                    .setRequired(true)
+                    .setMaxLength(4000);
+
+            const row =
+                new ActionRowBuilder()
+                    .addComponents(
+                        announcementInput
+                    );
+
+            modal.addComponents(
+                row
+            );
+
+            return interaction.showModal(
+                modal
+            );
+        }
+
+        // ═════════════════════════════════════
+        // /setstoragechannel
+        // ═════════════════════════════════════
+
+        if (
+            interaction.commandName ===
+            'setstoragechannel'
+        ) {
+
+            const isGuildAdmin =
+                interaction.memberPermissions?.has(
+                    PermissionFlagsBits.Administrator
+                );
+
+            if (!isGuildAdmin) {
+                return interaction.reply({
+                    content:
+                        '❌ 此指令僅限伺服器管理員使用。',
+                    flags:
+                        MessageFlags.Ephemeral
+                });
+            }
+
+            const targetChannel =
+                interaction.options.getChannel(
+                    'target_channel'
+                );
+
+            const saved =
+                await setStorageChannel(
+                    client,
+                    interaction.guild,
+                    targetChannel.id
+                );
+
+            if (!saved) {
+                return interaction.reply({
+                    content:
+                        '❌ 設定頻道失敗。請確認 Angela 能查看、讀取歷史訊息、發送訊息與嵌入連結。',
+                    flags:
+                        MessageFlags.Ephemeral
+                });
+            }
+
+            // ─────────────────────────────
+            // 第一次啟用 Discord Storage 時
+            // 把舊設定搬進去
+            // ─────────────────────────────
+
+            const legacy =
+                getConfig();
+
+            const {
+                getLevelChannel
+            } = require(
+                './GameSystem/LevelSystem.js'
+            );
+
+            const {
+                getAnnounceConfig
+            } = require(
+                './GameSystem/AnnounceSystem.js'
+            );
+
+            const {
+                getStarboardChannel
+            } = require(
+                './GameSystem/StarboardSystem.js'
+            );
+
+            const {
+                getAuditChannel
+            } = require(
+                './GameSystem/AuditSystem.js'
+            );
+
+            const translation =
+                getTranslationConfig(
+                    interaction.guild.id
+                );
+
+            const legacyPatch = {
+                notifyChannelId:
+                    legacy.notifyChannelId || '',
+
+                rateUpChannelId:
+                    legacy.rateUpChannelId || '',
+
+                newsChannelId:
+                    legacy.newsChannelId || '',
+
+                levelChannelId:
+                    getLevelChannel(
+                        interaction.guild.id
+                    ) || '',
+
+                announceChannelId:
+                    getAnnounceConfig()[
+                        interaction.guild.id
+                    ] || '',
+
+                starboardChannelId:
+                    getStarboardChannel(
+                        interaction.guild.id
+                    ) || '',
+
+                auditChannelId:
+                    getAuditChannel(
+                        interaction.guild.id
+                    ) || '',
+
+                translationOutputChannelId:
+                    translation.output || '',
+
+                translationSourceChannelIds:
+                    translation.sources || []
+            };
+
+            await saveGuildConfigToDiscord(
+                client,
+                interaction.guild.id,
+                legacyPatch
+            );
+
+            return interaction.reply({
+                content:
+                    `✅ 設定儲存頻道為 ${targetChannel}。\n` +
+                    '之後頻道設定會寫入 Discord，重啟後會自動恢復。',
+                flags:
+                    MessageFlags.Ephemeral
+            });
+        }
+
+        // ═════════════════════════════════════
+        // /serverconfig
+        // ═════════════════════════════════════
+
+        if (
+            interaction.commandName ===
+            'serverconfig'
+        ) {
+
+            const config =
+                getGuildConfig(
+                    interaction.guild?.id
+                );
+
+            const channel =
+                id =>
+                    id
+                        ? `<#${id}>`
+                        : '未設定';
+
+            const sourceChannels =
+                config
+                    .translationSourceChannelIds
+                    .length
+                    ? config
+                        .translationSourceChannelIds
+                        .map(
+                            id =>
+                                `<#${id}>`
+                        )
+                        .join(', ')
+                    : '未設定';
+
+            return interaction.reply({
+                content: [
+                    '**Angela 伺服器頻道設定**',
+                    `儲存頻道：${channel(config.storageChannelId)}`,
+                    `系統上線：${channel(config.notifyChannelId)}`,
+                    `Rate Up 公告：${channel(config.rateUpChannelId)}`,
+                    `新聞動態：${channel(config.newsChannelId)}`,
+                    `升級公告：${channel(config.levelChannelId)}`,
+                    `Sles 公告：${channel(config.announceChannelId)}`,
+                    `星星榜：${channel(config.starboardChannelId)}`,
+                    `紀錄：${channel(config.auditChannelId)}`,
+                    `翻譯輸出：${channel(config.translationOutputChannelId)}`,
+                    `翻譯來源：${sourceChannels}`,
+                    `AI 回覆：${channel(config.aiChannelId)}`,
+                    `AI 記憶庫：${channel(config.aiMemoryChannelId)}`
+                ].join('\n'),
+
+                flags:
+                    MessageFlags.Ephemeral
+            });
+        }
+
+        if (interaction.commandName === 'setaichannel') {
+                if (!interaction.guild || !interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+                    return interaction.reply({ content: '此指令僅限伺服器管理員使用。', flags: MessageFlags.Ephemeral });
+                }
+                const channel = interaction.options.getChannel('channel') || interaction.channel;
+                if (!channel || channel.type !== ChannelType.GuildText) {
+                    return interaction.reply({ content: '請在伺服器文字頻道執行，或選擇文字頻道。', flags: MessageFlags.Ephemeral });
+                }
+                const persona = interaction.options.getString('persona');
+                AIChatSystem.setAiChannel(interaction.guild.id, channel.id, persona);
+                const patch = { aiChannelId: channel.id };
+                saveConfig(patch);
+                const persisted = await saveGuildConfigToDiscord(client, interaction.guild.id, patch);
+                return interaction.reply({ content: '已將 ' + channel + ' 設為 ' + AIChatSystem.getPersonaLabel(persona) + ' AI 頻道。' + (persisted ? '' : '（提醒：尚未設定 Discord 儲存頻道。）'), flags: MessageFlags.Ephemeral });
+            }
+
+            // ═════════════════════════════════════
+            // /setchannel
+        // ═════════════════════════════════════
+
+        if (
+            interaction.commandName ===
+            'setchannel'
+        ) {
+
+            const isGuildAdmin =
+                interaction.memberPermissions?.has(
+                    PermissionFlagsBits.Administrator
+                );
+
+            if (!isGuildAdmin) {
+                return interaction.reply({
+                    content:
+                        '❌ 此指令僅限伺服器管理員使用。',
+                    flags:
+                        MessageFlags.Ephemeral
+                });
+            }
+
+            const type =
+                interaction.options.getString(
+                    'type'
+                );
+
+            const targetChannel =
+                interaction.options.getChannel(
+                    'target_channel'
+                );
+
+            const configTypeMap = {
+
+                notify: {
+                    key:
+                        'notifyChannelId',
+                    label:
+                        '系統上線通知頻道'
+                },
+
+                rateup: {
+                    key:
+                        'rateUpChannelId',
+                    label:
+                        'Rate Up 公告頻道'
+                },
+
+                news: {
+                    key: 'newsChannelId', label: '新聞與社群動態頻道'
+                },
+                ai: { key: 'aiChannelId', label: 'AI 自動回覆頻道' },
+                'ai-memory': { key: 'aiMemoryChannelId', label: 'AI 記憶庫頻道' }
+            };
+
+            // ─────────────────────────────
+            // notify / rateup / news
+            // ─────────────────────────────
+
+            if (
+                configTypeMap[type]
+            ) {
+
+                    if (type === 'ai') {
+                        AIChatSystem.setAiChannel(interaction.guild.id, targetChannel.id, 'default');
+                    }
+
+                const patch = {
+                    [configTypeMap[type].key]:
+                        targetChannel.id
+                };
+
+                // 原本本機 config
+                saveConfig(
+                    patch
+                );
+
+                // Newscheck notify 同步
+                if (
+                    configTypeMap[type].key ===
+                    'notifyChannelId'
+                ) {
+                    setNotifyChannel(
+                        targetChannel.id
+                    );
+                }
+
+                // Discord 永久設定
+                const persisted =
+                    await saveGuildConfigToDiscord(
+                        client,
+                        interaction.guild.id,
+                        patch
+                    );
+
+                return interaction.reply({
+                    content:
+                        `「主管，${configTypeMap[type].label}已重定向至 ${targetChannel}。」` +
+                        (
+                            persisted
+                                ? ''
+                                : '（提醒：尚未設定 Discord 儲存頻道，請先使用 /setstoragechannel。）'
+                        ),
+
+                    flags:
+                        MessageFlags.Ephemeral
+                });
+            }
+
+            // ─────────────────────────────
+            // Level
+            // ─────────────────────────────
+
+            const {
+                setLevelChannel:
+                    _setLvCh
+            } = require(
+                './GameSystem/LevelSystem.js'
+            );
+
+            const {
+                setAnnounceChannel:
+                    _setAnnCh
+            } = require(
+                './GameSystem/AnnounceSystem.js'
+            );
+
+            if (
+                type === 'level'
+            ) {
+
+                _setLvCh(
+                    interaction.guild.id,
+                    targetChannel.id
+                );
+
+                const persisted =
+                    await saveGuildConfigToDiscord(
+                        client,
+                        interaction.guild.id,
+                        {
+                            levelChannelId:
+                                targetChannel.id
+                        }
+                    );
+
+                return interaction.reply({
+                    content:
+                        `✅ 升級公告頻道已設定至 ${targetChannel}。` +
+                        (
+                            persisted
+                                ? ''
+                                : '（請先使用 /setstoragechannel 才能跨重啟保存。）'
+                        ),
+
+                    flags:
+                        MessageFlags.Ephemeral
+                });
+            }
+
+            // ─────────────────────────────
+            // Announce
+            // ─────────────────────────────
+
+            if (
+                type === 'announce'
+            ) {
+
+                _setAnnCh(
+                    interaction.guild.id,
+                    targetChannel.id
+                );
+
+                const persisted =
+                    await saveGuildConfigToDiscord(
+                        client,
+                        interaction.guild.id,
+                        {
+                            announceChannelId:
+                                targetChannel.id
+                        }
+                    );
+
+                return interaction.reply({
+                    content:
+                        `✅ Sles 公告接收頻道已設定至 ${targetChannel}。` +
+                        (
+                            persisted
+                                ? ''
+                                : '（請先使用 /setstoragechannel 才能跨重啟保存。）'
+                        ),
+
+                    flags:
+                        MessageFlags.Ephemeral
+                });
+            }
+
+            // ─────────────────────────────
+            // Starboard
+            // ─────────────────────────────
+
+            if (
+                type === 'starboard'
+            ) {
+
+                _setStarboard(
+                    interaction.guild.id,
+                    targetChannel.id
+                );
+
+                const persisted =
+                    await saveGuildConfigToDiscord(
+                        client,
+                        interaction.guild.id,
+                        {
+                            starboardChannelId:
+                                targetChannel.id
+                        }
+                    );
+
+                return interaction.reply({
+                    content:
+                        `✅ 星星榜頻道已設定至 ${targetChannel}。達到 3 顆 ⭐ 的訊息將自動轉發。` +
+                        (
+                            persisted
+                                ? ''
+                                : '（請先使用 /setstoragechannel 才能跨重啟保存。）'
+                        ),
+
+                    flags:
+                        MessageFlags.Ephemeral
+                });
+            }
+
+            // ─────────────────────────────
+            // Audit
+            // ─────────────────────────────
+
+            if (
+                type === 'audit'
+            ) {
+
+                setAuditChannel(
+                    interaction.guild.id,
+                    targetChannel.id
+                );
+
+                const persisted =
+                    await saveGuildConfigToDiscord(
+                        client,
+                        interaction.guild.id,
+                        {
+                            auditChannelId:
+                                targetChannel.id
+                        }
+                    );
+
+                return interaction.reply({
+                    content:
+                        `✅ 紀錄頻道已設定至 ${targetChannel}。` +
+                        (
+                            persisted
+                                ? ''
+                                : '（請先使用 /setstoragechannel 才能跨重啟保存。）'
+                        ),
+
+                    flags:
+                        MessageFlags.Ephemeral
+                });
+            }
+
+            // ─────────────────────────────
+            // Translation Output
+            // ─────────────────────────────
+
+            if (
+                type ===
+                'translate-output'
+            ) {
+
+                setTranslationOutput(
+                    interaction.guild.id,
+                    targetChannel.id
+                );
+
+                const persisted =
+                    await saveGuildConfigToDiscord(
+                        client,
+                        interaction.guild.id,
+                        {
+                            translationOutputChannelId:
+                                targetChannel.id
+                        }
+                    );
+
+                return interaction.reply({
+                    content:
+                        `✅ 翻譯輸出頻道已設定為 ${targetChannel}。` +
+                        (
+                            persisted
+                                ? ''
+                                : '（請先使用 /setstoragechannel 才能跨重啟保存。）'
+                        ),
+
+                    flags:
+                        MessageFlags.Ephemeral
+                });
+            }
+
+            // ─────────────────────────────
+            // Translation Source
+            // ─────────────────────────────
+
+            if (
+                type ===
+                'translate-source'
+            ) {
+
+                const enabled =
+                    toggleTranslationSource(
+                        interaction.guild.id,
+                        targetChannel.id
+                    );
+
+                const translationConfig =
+                    getTranslationConfig(
+                        interaction.guild.id
+                    );
+
+                const persisted =
+                    await saveGuildConfigToDiscord(
+                        client,
+                        interaction.guild.id,
+                        {
+                            translationSourceChannelIds:
+                                translationConfig.sources
+                        }
+                    );
+
+                return interaction.reply({
+                    content:
+                        `✅ 已${enabled ? '加入' : '移除'}翻譯來源頻道：${targetChannel}。` +
+                        (
+                            persisted
+                                ? ''
+                                : '（請先使用 /setstoragechannel 才能跨重啟保存。）'
+                        ),
+
+                    flags:
+                        MessageFlags.Ephemeral
+                });
+            }
+        }
+
+        // ═════════════════════════════════════
+        // 其他指令
+        // ═════════════════════════════════════
+
+        try {
+
+            const adminCommands = [
+                'setchannel',
+                'setstoragechannel',
+                'serverconfig',
+                'setlevelchannel',
+                'setannouncechannel',
+                'givelightseeds',
+                'givestarcoins',
+                'takelightseeds',
+                'givefragments',
+                'givescrolls',
+                'givethreads',
+                'updaterewards',
+                'updatebuff',
+                'announce'
+            ];
+
+            if (
+                interaction.guild &&
+                adminCommands.includes(
+                    interaction.commandName
+                )
+            ) {
+
+                const {
+                    logAudit
+                } = require(
+                    './GameSystem/AuditSystem.js'
+                );
+
+                logAudit(
+                    client,
+                    interaction.guild.id,
+                    '🛡️ 管理操作',
+                    `<@${interaction.user.id}> 執行 /${interaction.commandName}`,
+                    {
+                        color:
+                            0xfee75c
+                    }
+                ).catch(
+                    () => {}
+                );
+            }
+
+            await handleCommands(
+                client,
+                interaction
+            );
+
+        } catch (err) {
+
+            console.error(
+                '❌ 斜線指令執行錯誤:',
+                err.stack ||
+                err.message
+            );
+
+            const errorMsg = {
+                content:
+                    `「系統錯誤：${err.message}」`,
+                flags:
+                    MessageFlags.Ephemeral
+            };
+
+            if (
+                interaction.deferred ||
+                interaction.replied
+            ) {
+
+                await interaction
+                    .followUp(
+                        errorMsg
+                    )
+                    .catch(
+                        () => {}
+                    );
+
+            } else {
+
+                await interaction
+                    .reply(
+                        errorMsg
+                    )
+                    .catch(
+                        () => {}
+                    );
+            }
+        }
+    }
+);
+
+// ─────────────────────────────────────────────
+// messageCreate
+// ─────────────────────────────────────────────
+
+client.on(
+    Events.MessageCreate,
+    async message => {
+
+        if (
+            message.author?.bot
+        ) {
+            return;
+        }
+
+        handleMessageXp(
+            client,
+            message
+        ).catch(
+            () => {}
+        );
+
+        if (message.content?.trim().toLowerCase() === '!list') {
+            require('./GameSystem/Pulls/ListSystem.js').handleList(client, message).catch(err => console.error('[List] 執行失敗:', err.message));
+            return;
+        }
+
+        handleTranslationMessage(
+            client,
+            message
+        ).catch(
+            () => {}
+        );
+    }
+);
+
+// ─────────────────────────────────────────────
+// Reaction
+// ─────────────────────────────────────────────
+
+client.on(
+    Events.MessageReactionAdd,
+    async (
+        reaction,
+        user
+    ) => {
+
+        if (user.bot) {
+            return;
+        }
+
+        handleStarboardReaction(
+            client,
+            reaction,
+            user
+        ).catch(
+            () => {}
+        );
+    }
+);
+
+client.on(
+    Events.MessageReactionRemove,
+    async (
+        reaction,
+        user
+    ) => {
+
+        if (user.bot) {
+            return;
+        }
+
+        handleStarboardReaction(
+            client,
+            reaction,
+            user
+        ).catch(
+            () => {}
+        );
+    }
+);
+
+// ─────────────────────────────────────────────
+// Audit
+// ─────────────────────────────────────────────
+
+client.on(
+    Events.MessageDelete,
+    message =>
+        logMessageDelete(
+            client,
+            message
+        ).catch(
+            () => {}
+        )
+);
+
+client.on(
+    Events.GuildMemberAdd,
+    member =>
+        logMemberChange(
+            client,
+            member,
+            true
+        ).catch(
+            () => {}
+        )
+);
+
+client.on(
+    Events.GuildMemberRemove,
+    member =>
+        logMemberChange(
+            client,
+            member,
+            false
+        ).catch(
+            () => {}
+        )
+);
+
+client.on(
+    Events.ChannelCreate,
+    channel =>
+        logGuildChange(
+            client,
+            null,
+            channel,
+            '頻道建立'
+        ).catch(
+            () => {}
+        )
+);
+
+client.on(
+    Events.ChannelDelete,
+    channel =>
+        logGuildChange(
+            client,
+            channel,
+            null,
+            '頻道刪除'
+        ).catch(
+            () => {}
+        )
+);
+
+client.on(
+    Events.ChannelUpdate,
+    (
+        oldChannel,
+        newChannel
+    ) =>
+        logGuildChange(
+            client,
+            oldChannel,
+            newChannel,
+            '頻道'
+        ).catch(
+            () => {}
+        )
+);
+
+client.on(
+    Events.RoleCreate,
+    role =>
+        logGuildChange(
+            client,
+            null,
+            role,
+            '身分組建立'
+        ).catch(
+            () => {}
+        )
+);
+
+client.on(
+    Events.RoleDelete,
+    role =>
+        logGuildChange(
+            client,
+            role,
+            null,
+            '身分組刪除'
+        ).catch(
+            () => {}
+        )
+);
+
+client.on(
+    Events.RoleUpdate,
+    (
+        oldRole,
+        newRole
+    ) =>
+        logGuildChange(
+            client,
+            oldRole,
+            newRole,
+            '身分組'
+        ).catch(
+            () => {}
+        )
+);
+
+
+// ─────────────────────────────────────────────
+// Voice State
+// ─────────────────────────────────────────────
+
+client.on(
+    Events.VoiceStateUpdate,
+    async (
+        oldState,
+        newState
+    ) => {
+
+        const userId =
+            newState.member?.user?.id ||
+            oldState.member?.user?.id;
+
+        const username =
+            newState.member?.user?.username ||
+            oldState.member?.user?.username;
+
+        const guildId =
+            newState.guild?.id ||
+            oldState.guild?.id;
+
+        if (
+            !userId ||
+            newState.member?.user?.bot
+        ) {
+            return;
+        }
+
+        logVoiceChange(
+            client,
+            oldState,
+            newState
+        ).catch(
+            () => {}
+        );
+
+        const joinedChannel =
+            newState.channelId;
+
+        const leftChannel =
+            oldState.channelId;
+
+        if (
+            !leftChannel &&
+            joinedChannel
+        ) {
+
+            trackVoiceJoin(
+                userId,
+                username,
+                guildId,
+                client
+            );
+
+        } else if (
+            leftChannel &&
+            !joinedChannel
+        ) {
+
+            trackVoiceLeave(
+                userId,
+                guildId,
+                client,
+                username
+            );
+
+        } 
+    }
+);
+
+// ─────────────────────────────────────────────
+// Client Ready
+// ─────────────────────────────────────────────
+
+const LEGACY_SLASH_COMMAND_NAMES = new Set([
+    'setaimemory',
+    'aioff'
+]);
+
+async function removeLegacySlashCommands(commandManager, scopeName) {
+    const registered = await commandManager.fetch();
+    let removed = 0;
+
+    for (const command of registered.values()) {
+        if (!LEGACY_SLASH_COMMAND_NAMES.has(command.name)) {
+            continue;
+        }
+
+        await commandManager.delete(command.id);
+        removed++;
+    }
+
+    if (removed > 0) {
+        console.log(
+            `[Commands] 已移除 ${scopeName} 舊 AI 指令：${removed} 個`
+        );
+    }
+}
+
+client.once(
+    Events.ClientReady,
+    async () => {
+
+        console.log(
+            `🤖 Angela 系統脈衝對齊。已激活：${client.user.tag}`
+        );
+
+        // ─────────────────────────────────────
+        // 重新註冊 Slash Commands
+        // ─────────────────────────────────────
+
+        const commandData =
+            allSlashCommands.map(
+                cmd =>
+                    cmd.toJSON()
+            );
+
+        // 舊指令清理失敗不能阻斷新指令註冊。
+        try {
+            await removeLegacySlashCommands(
+                client.application.commands,
+                '全域'
+            );
+        } catch (err) {
+            console.warn(
+                '[Commands] 清理全域舊指令失敗，繼續註冊目前指令:',
+                err.message
+            );
+        }
+
+        try {
+            await client.application.commands.set([]);
+        } catch (err) {
+            console.warn(
+                '[Commands] 清空全域指令失敗，繼續註冊 Guild 指令:',
+                err.message
+            );
+        }
+
+        let registeredGuilds = 0;
+        for (const guild of client.guilds.cache.values()) {
+            try {
+                try {
+                    await removeLegacySlashCommands(
+                        guild.commands,
+                        `Guild ${guild.id}`
+                    );
+                } catch (err) {
+                    console.warn(
+                        `[Commands] Guild ${guild.id} 舊指令清理失敗，仍繼續覆寫指令:`,
+                        err.message
+                    );
+                }
+
+                await guild.commands.set(commandData);
+                registeredGuilds++;
+            } catch (err) {
+                console.error(
+                    `[Commands] Guild ${guild.id} 指令註冊失敗:`,
+                    err.message
+                );
+            }
+        }
+
+        console.log(
+            `✅ 已註冊目前 Slash Commands：${registeredGuilds}/${client.guilds.cache.size} 個 Guild`
+        );
+
+        // ─────────────────────────────────────
+        // Presence
+        // ─────────────────────────────────────
+
+        client.user.setPresence({
+            status: 'idle',
+
+            activities: [
+                {
+                    name:
+                        'customstatus',
+
+                    type:
+                        ActivityType.Custom,
+
+                    state:
+                        '羅蘭。我不能在這裡停下。哪怕這是一條沒有盡頭的荊棘之路，哪怕最後只能迎來毫無意義的毀滅……我也要親手為這長達百年的悲劇畫上句號'
+                }
+            ]
+        });
+
+        // ─────────────────────────────────────
+        // Discord 伺服器設定還原
+        // ─────────────────────────────────────
+
+        try {
+
+            await restoreAllGuildConfigs(
+                client
+            );
+            await AIChatSystem.restoreAll(
+                client
+            );
+
+            const {
+                setLevelChannel
+            } = require(
+                './GameSystem/LevelSystem.js'
+            );
+
+            const {
+                setAnnounceChannel
+            } = require(
+                './GameSystem/AnnounceSystem.js'
+            );
+
+            for (
+                const guild
+                of client.guilds.cache.values()
+            ) {
+
+                const stored =
+                    getGuildConfig(
+                        guild.id
+                    );
+
+                const localPatch = {};
+
+                if (
+                    stored.notifyChannelId
+                ) {
+
+                    localPatch
+                        .notifyChannelId =
+                            stored.notifyChannelId;
+
+                    setNotifyChannel(
+                        stored.notifyChannelId
+                    );
+                }
+
+                if (
+                    stored.rateUpChannelId
+                ) {
+                    localPatch
+                        .rateUpChannelId =
+                            stored.rateUpChannelId;
+                }
+
+                if (
+                    stored.newsChannelId
+                ) {
+                    localPatch
+                        .newsChannelId =
+                            stored.newsChannelId;
+                }
+
+                if (
+                    Object.keys(
+                        localPatch
+                    ).length
+                ) {
+
+                    saveConfig(
+                        localPatch
+                    );
+                }
+
+                if (
+                    stored.levelChannelId
+                ) {
+
+                    setLevelChannel(
+                        guild.id,
+                        stored.levelChannelId
+                    );
+                }
+
+                if (
+                    stored.announceChannelId
+                ) {
+
+                    setAnnounceChannel(
+                        guild.id,
+                        stored.announceChannelId
+                    );
+                }
+
+                if (
+                    stored.starboardChannelId
+                ) {
+
+                    _setStarboard(
+                        guild.id,
+                        stored.starboardChannelId
+                    );
+                }
+
+                if (
+                    stored.auditChannelId
+                ) {
+
+                    setAuditChannel(
+                        guild.id,
+                        stored.auditChannelId
+                    );
+                }
+
+                if (
+                    stored.translationOutputChannelId ||
+                    stored.translationSourceChannelIds.length
+                ) {
+
+                    setTranslationConfig(
+                        guild.id,
+                        {
+                            output:
+                                stored.translationOutputChannelId,
+
+                            sources:
+                                stored.translationSourceChannelIds
+                        }
+                    );
+                }
+            }
+
+        } catch (err) {
+
+            console.error(
+                '[Startup] Discord 伺服器設定還原失敗:',
+                err.message
+            );
+        }
+
+        // ─────────────────────────────────────
+        // Legacy config
+        // ─────────────────────────────────────
+
+        const config =
+            getConfig();
+
+        if (
+            config.notifyChannelId
+        ) {
+
+            setNotifyChannel(
+                config.notifyChannelId
+            );
+        }
+
+        if (
+            config.notifyChannelId
+        ) {
+
+            try {
+
+                const channel =
+                    await client.channels
+                        .fetch(
+                            config.notifyChannelId
+                        );
+
+                if (channel) {
+
+                    await channel.send({
+                        embeds: [
+                            new EmbedBuilder()
+                                .setTitle(
+                                    '🟢 系統連線：AI 助理 Angela 已重新上線'
+                                )
+                                .setColor(
+                                    0x00b4d8
+                                )
+                                .setDescription(
+                                    '「主管，精神脈衝已重新對齊。\n全域舊指令已抹除，特權與新聞檢測模組已完美校正。」'
+                                )
+                                .setTimestamp()
+                        ]
+                    });
+                }
+
+            } catch (err) {
+
+                console.error(
+                    '❌ 上線報告發送失敗:',
+                    err.message
+                );
+            }
+        }
+
+        // ─────────────────────────────────────
+        // 玩家資料備份還原
+        // ─────────────────────────────────────
+
+        try {
+
+            const restored =
+                await restoreFromBackupChannel(
+                    client
+                );
+
+            if (
+                restored > 0
+            ) {
+
+                console.log(
+                    `📂 [Startup] 從備份頻道還原了 ${restored} 位玩家的資料`
+                );
+            }
+
+        } catch (e) {
+
+            console.error(
+                '[Startup] 備份還原失敗（忽略）:',
+                e.message
+            );
+        }
+
+        // ─────────────────────────────────────
+        // Rate Up
+        // ─────────────────────────────────────
+
+        await announceCurrentRateUps(
+            client
+        );
+
+        // ─────────────────────────────────────
+        // Newscheck
+        // ─────────────────────────────────────
+
+        startNewsCheckLoop(
+            client
+        );
+
+        // 論壇文章可能在機器人啟動後才因新 ⭐ 達到門檻，
+        // 而封存 Thread 不一定會穩定送出 reaction event。
+        // 啟動時先掃一次，之後定期補掃，避免舊文章永遠漏掉。
+        const scanForums = () =>
+            scanAllGuildForums(client).catch(err =>
+                console.error('[Starboard] 舊論壇補掃失敗:', err.message)
+            );
+
+        void scanForums();
+        if (!globalThis.__STARBOARD_FORUM_SCAN_STARTED__) {
+            globalThis.__STARBOARD_FORUM_SCAN_STARTED__ = true;
+            setInterval(scanForums, 10 * 60 * 1000);
+        }
+
+        // ─────────────────────────────────────
+        // Voice
+        // ─────────────────────────────────────
+
+        bootstrapVoiceTracking(
+            client
+        );
+
+        startVoiceXpTimer(
+            client
+        );
+
+        // monthly leaderboard is idempotent and checks Asia/Taipei midnight
+        const monthlyLeaderboardTimer = setInterval(() => announceMonthlyLeaderboard(client).catch(err => console.error('[LevelSystem] 月榜公告失敗:', err.message)), 60_000);
+        announceMonthlyLeaderboard(client).catch(err => console.error('[LevelSystem] 月榜公告失敗:', err.message));
+
+        GiveawaySystem.resumeGiveaways(client);
+
+        // ─────────────────────────────────────
+        // 婚姻週年紀念檢查
+        // ─────────────────────────────────────
+        setInterval(() => MarriageSystem.checkAnniversaries(client).catch(err => console.error('[Marriage] 週年檢查失敗:', err.message)), 60_000);
+
+        // ─────────────────────────────────────
+        // 新年公告
+        // ─────────────────────────────────────
+        NewYearSystem.startNewYearTimer(client);
+
+        // ─────────────────────────────────────
+        // 心跳看門狗
+        // ─────────────────────────────────────
+        WatchdogSystem.start(client, () => client.login(process.env.DISCORD_TOKEN));
+        setInterval(() => WatchdogSystem.beat(), 10_000);
+
+        console.log(
+            '📡 [排程] Newscheck / 語音 XP 計時器已啟動'
+        );
+    }
+);
+
+// ─────────────────────────────────────────────
+// 錯誤保護
+// ─────────────────────────────────────────────
+
+client.on('shardReconnecting', () => console.warn('[Discord] 正在重新連線…'));
+    client.on('shardResume', () => console.log('[Discord] 連線已恢復'));
+    client.on('shardDisconnect', () => console.error('[Discord] 連線中斷'));
+    client.on('invalidated', () => { console.error('[Discord] Session 已失效，交給 Render 重啟'); process.exit(1); });
+
+    client.on(
+    'error',
+    err =>
+        console.error(
+            'Discord 客戶端錯誤:',
+            err.message
+        )
+);
+
+process.on(
+    'unhandledRejection',
+    err =>
+        console.error(
+            '未捕捉的 Promise 拒絕:',
+            err?.message || err
+        )
+);
+
+process.on('uncaughtException', err => {
+      console.error('未捕捉的例外錯誤，將由 Render 重新啟動:', err?.stack || err);
+      process.exitCode = 1;
+      setTimeout(() => process.exit(1), 100);
+    });
+
+// ─────────────────────────────────────────────
+// Export
+// ─────────────────────────────────────────────
+
+module.exports = {
+    getConfig,
+    saveConfig
+};
+
+// ─────────────────────────────────────────────
+// Login
+// ─────────────────────────────────────────────
+
+const TOKEN =
+    process.env.DISCORD_TOKEN;
+
+if (
+    !TOKEN ||
+    TOKEN ===
+        'DISCORD_TOKEN'
+) {
+
+    console.error(
+        '❌ 請設定環境變數 DISCORD_TOKEN'
+    );
+
+    process.exit(1);
+}
+AIChatSystem.init(client);
+require('./GameSystem/AchievementSystem.js').init(client);
+require('./GameSystem/DailyQuestSystem.js').init(client);
+client.login(
+    TOKEN
+);

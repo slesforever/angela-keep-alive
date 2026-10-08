@@ -1,0 +1,1 @@
+- [GitHub connector pushes](github-connector-pushes.md) — use the authenticated connector API for repository writes when local token auth is unavailable.
