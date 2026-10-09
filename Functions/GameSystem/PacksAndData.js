@@ -18,7 +18,9 @@ const DATA_DIR = path.resolve(process.env.PLAYER_DATA_DIR || path.join(process.c
 const PERSISTENT_DATA_DIR = path.join(process.cwd(), 'data');
 const SHOP_ITEMS_PATH = path.join(PERSISTENT_DATA_DIR, 'shop-items.json');
 const SHOP_SALES_PATH = path.join(PERSISTENT_DATA_DIR, 'shop-sales.json');
-const { getLanguage } = require('./LanguageSystem.js');
+const MARRIAGES_PATH = path.join(PERSISTENT_DATA_DIR, 'marriages.json');
+const ANNIVERSARY_STATE_PATH = path.join(PERSISTENT_DATA_DIR, 'anniversary-state.json');
+const { getLanguage, pick } = require('./LanguageSystem.js');
 // ─── SinnersData（供 getIdentitySinnerKey 使用）─────────────────
 const { SINNERS, SINNER_NAMES, UPTIE_COSTS, getSkillList } = require('./Data/SinnersData.js');
 try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch {}
@@ -215,10 +217,12 @@ function buildAllPlayersBackupText() {
 
     const sections = [header + blocks.join('\n')];
 
-    // 商城資料不在 data/players/，一併放進玩家快照，避免重啟或部署後商品消失。
+    // 商城 & 婚姻資料不在 data/players/，一併放進玩家快照，避免重啟或部署後消失。
     for (const [label, file] of [
         ['SHOP_ITEMS', SHOP_ITEMS_PATH],
         ['SHOP_SALES', SHOP_SALES_PATH],
+        ['MARRIAGES', MARRIAGES_PATH],
+        ['ANNIVERSARY_STATE', ANNIVERSARY_STATE_PATH],
     ]) {
         if (!fs.existsSync(file)) continue;
         try {
@@ -454,10 +458,12 @@ async function restoreFromBackupChannel(client) {
     }
 
     // 還原商城商品與訂單。這些檔案位於 data/，不是玩家資料目錄。
-    let restoredShopFiles = 0;
+    let restoredExtraFiles = 0;
     for (const [label, file] of [
         ['SHOP_ITEMS', SHOP_ITEMS_PATH],
         ['SHOP_SALES', SHOP_SALES_PATH],
+        ['MARRIAGES', MARRIAGES_PATH],
+        ['ANNIVERSARY_STATE', ANNIVERSARY_STATE_PATH],
     ]) {
         const sectionPattern = new RegExp(
             `# ${label}_JSON_BEGIN\\s*([\\s\\S]*?)\\s*# ${label}_JSON_END`
@@ -467,18 +473,17 @@ async function restoreFromBackupChannel(client) {
 
         try {
             const value = JSON.parse(section[1].trim());
-            if (!Array.isArray(value)) throw new Error('備份內容不是陣列');
             fs.mkdirSync(path.dirname(file), { recursive: true });
             fs.writeFileSync(file, JSON.stringify(value, null, 2), 'utf8');
-            restoredShopFiles++;
+            restoredExtraFiles++;
         } catch (err) {
             console.error(`[Pack] 還原 ${label} 失敗:`, err.message);
         }
     }
 
     console.log(`✅ [Pack] 從備份頻道還原了 ${restored} 位玩家資料`);
-    if (restoredShopFiles > 0) {
-        console.log(`✅ [Pack] 同步還原了 ${restoredShopFiles} 份商城資料`);
+    if (restoredExtraFiles > 0) {
+        console.log(`✅ [Pack] 同步還原了 ${restoredExtraFiles} 份額外資料（商城/婚姻等）`);
     }
     return restored;
 }
@@ -602,64 +607,78 @@ function saveUserInventory(client, userId, items) {
 }
 
 // ─── UI 元件 ──────────────────────────────────────────────────
-function lobbyEmbed(player) {
+function lobbyEmbed(player, lang) {
+    const en = lang !== 'zh';
     const team = player.team.length
-        ? player.team.map(n => `• **${getShortName(n)}** Lv.${player.identityLevels[n] || 1}`).join('\n')
-        : '（尚未編成）';
+        ? player.team.map((n, i) => `${i + 1}. **${getShortName(n)}** Lv.${player.identityLevels[n] || 1}`).join('\n')
+        : pick(lang, '_(尚未編成)_', '_(Not set up)_');
 
     return new EmbedBuilder()
-        .setTitle('🚂 腦葉公司邊獄巴士 — 管理員主控台')
+        .setTitle(pick(lang, '\u200b🚂 LCB Manager Console\u200b', '\u200b🚂 LCB Manager Console\u200b'))
         .setColor(0x1a1a2e)
-        .addFields(
-            { name: '👤 主管',     value: player.username, inline: true },
-            { name: '⭐ 等級',     value: `Lv.${player.level}`, inline: true },
-            { name: '🎰 提取次數', value: `${player.totalPulls || 0} 次`, inline: true },
-            { name: '🌱 LightSeeds', value: `${player.lightSeeds}`, inline: true },
-            { name: '🌟 Starcoins', value: `${player.starCoins || 0}`, inline: true },
-            { name: '🏦 銀行 Starcoins', value: `${player.bankStarCoins || 0}`, inline: true },
-            { name: '🧵 紡錘',     value: `${player.thread}`, inline: true },
-            { name: '\u200b',      value: '\u200b', inline: true },
-            { name: '📦 人格碎片', value: `${player.fragments}`, inline: true },
-            { name: '📜 經驗卷',   value: `${player.expScrolls}`, inline: true },
-            { name: '\u200b',      value: '\u200b', inline: true },
-            { name: `⚔️ 出擊編成 (${player.team.length}/6)`, value: team, inline: false },
+        .setDescription(
+            `### ${player.username}\n` +
+            `${pick(lang, `Lv.**${player.level}** ｜ Pulls: **${player.totalPulls || 0}** ｜ IDs: **${player.identities.length}** ｜ EGO: **${player.egos.length}**`,
+                        `Lv.**${player.level}** ｜ Pulls: **${player.totalPulls || 0}** ｜ IDs: **${player.identities.length}** ｜ EGO: **${player.egos.length}**`)}`
         )
-        .setFooter({ text: `持有人格：${player.identities.length} 件 ／ E.G.O：${player.egos.length} 件` })
+        .addFields(
+            { name: '\u200b', value:
+                `🌱 **LightSeeds**: ${Number(player.lightSeeds || 0).toLocaleString()}\n` +
+                `🧵 **${pick(lang, '紡錘', 'Threads')}**: ${Number(player.thread || 0).toLocaleString()}\n` +
+                `📦 **${pick(lang, '人格碎片', 'Fragments')}**: ${Number(player.fragments || 0).toLocaleString()}\n` +
+                `📜 **${pick(lang, '經驗卷', 'Exp Scrolls')}**: ${Number(player.expScrolls || 0).toLocaleString()}`,
+                inline: true },
+            { name: '\u200b', value:
+                `🌟 **StarCoins**: ${Number(player.starCoins || 0).toLocaleString()}\n` +
+                `🏦 **${pick(lang, '銀行', 'Bank')}**: ${Number(player.bankStarCoins || 0).toLocaleString()}\n` +
+                `\u200b\n\u200b`,
+                inline: true },
+            { name: `\u200b⚔️ ${pick(lang, '出擊編成', 'Battle Party')} (${player.team.length}/6)`, value: team, inline: false },
+        )
+        .setFooter({ text: pick(lang, '點擊下方按鈕操作', 'Click a button below to navigate') })
         .setTimestamp();
 }
 
-function lobbyRows() {
+function lobbyRows(lang) {
     return [
         new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('pk_lib').setLabel('📋 人格庫').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('pk_form').setLabel('⚔️ 出擊編成').setStyle(ButtonStyle.Success),
-            new ButtonBuilder().setCustomId('pk_cult').setLabel('🔼 人格培育').setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId('pk_ego').setLabel('🔮 E.G.O').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('pk_lib').setLabel(pick(lang, '📋 人格庫', '📋 Identity Library')).setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('pk_form').setLabel(pick(lang, '⚔️ 出擊編成', '⚔️ Battle Party')).setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId('pk_cult').setLabel(pick(lang, '🔼 人格培育', '🔼 Cultivation')).setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('pk_ego').setLabel(pick(lang, '🔮 E.G.O', '🔮 E.G.O')).setStyle(ButtonStyle.Secondary),
         ),
         new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('pk_sinner').setLabel('👤 罪人總覽').setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId('pk_uptie').setLabel('🔗 連結提升').setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId('pk_equip').setLabel('🔧 裝備人格').setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId('pk_threads').setLabel('🧵 資源查詢').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('pk_sinner').setLabel(pick(lang, '👤 罪人總覽', '👤 Sinners')).setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('pk_uptie').setLabel(pick(lang, '🔗 連結提升', '🔗 Uptie')).setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('pk_equip').setLabel(pick(lang, '🔧 裝備人格', '🔧 Equip')).setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('pk_threads').setLabel(pick(lang, '🧵 資源查詢', '🧵 Resources')).setStyle(ButtonStyle.Secondary),
         ),
     ];
 }
 
-function backToLobbyRow() {
+function backToLobbyRow(lang) {
     return new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('pk_home').setLabel('🏠 返回主頁').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId('pk_home').setLabel(pick(lang, '🏠 返回主頁', '🏠 Home')).setStyle(ButtonStyle.Danger),
     );
+}
+
+function navRow(buttons, lang) {
+    const row = new ActionRowBuilder();
+    for (const btn of buttons) row.addComponents(btn);
+    row.addComponents(backToLobbyRow(lang).components[0]);
+    return row;
 }
 
 // ─── !pack 主路由 ──────────────────────────────────────────────
 async function showPack(client, message) {
+    const lang = getLanguage(message.author.id);
     const player = getOrCreatePlayer(client, message.author.id, message.author.username);
-    const reply  = await message.reply({ embeds: [lobbyEmbed(player)], components: lobbyRows() });
+    const reply  = await message.reply({ embeds: [lobbyEmbed(player, lang)], components: lobbyRows(lang) });
 
     const col = reply.createMessageComponentCollector({
         filter: i => {
             if (i.user.id !== message.author.id) {
-                i.reply({ content: '❌ 這不是您的控制台。', ephemeral: true });
+                i.reply({ content: pick(lang, '❌ 這不是您的控制台。', '❌ This is not your console.'), ephemeral: true });
                 return false;
             }
             return true;
@@ -671,40 +690,45 @@ async function showPack(client, message) {
         return getOrCreatePlayer(client, message.author.id, message.author.username);
     }
     function save(p) { savePlayerData(client, message.author.id, p); }
+    function curLang() { return getLanguage(message.author.id); }
 
     col.on('collect', async ix => {
         const id = ix.customId;
+        const l = curLang();
 
         if (id === 'pk_home') {
             const p = refresh();
-            return ix.update({ embeds: [lobbyEmbed(p)], components: lobbyRows() });
+            return ix.update({ embeds: [lobbyEmbed(p, l)], components: lobbyRows(l) });
         }
 
+        // ─── Identity Library ───────────────────────────────
         if (id === 'pk_lib') {
             const p = refresh();
-            const ownedSinners = getOwnedSinners(p);
             const sinnerOpts = SINNER_NAMES.map(sinnerName => {
                 const ownedForSinner = (p.identities || []).filter(name => getIdentitySinnerKey(name) === sinnerName);
                 return {
-                    label: `${sinnerName} (${ownedForSinner.length}件)`,
-                    description: ownedForSinner.length ? ownedForSinner.map(n => getShortName(n)).slice(0, 3).join(', ') : '尚未持有',
+                    label: `${sinnerName} (${ownedForSinner.length})`,
+                    description: ownedForSinner.length ? ownedForSinner.map(n => getShortName(n)).slice(0, 3).join(', ') : pick(l, '尚未持有', 'None owned'),
                     value: sinnerName,
                 };
-            }).filter(opt => opt !== null);
+            });
 
             const menu = new StringSelectMenuBuilder()
                 .setCustomId('pk_lib_sinner')
-                .setPlaceholder('🔍 選擇罪人查看持有的人格...')
+                .setPlaceholder(pick(l, '🔍 選擇罪人查看持有的人格...', '🔍 Select a sinner to view identities...'))
                 .addOptions(sinnerOpts.slice(0, 25));
 
             return ix.update({
                 embeds: [new EmbedBuilder()
-                    .setTitle('📋 人格庫 — 罪人選擇')
+                    .setTitle(pick(l, '📋 人格庫 — 罪人選擇', '📋 Identity Library — Select Sinner'))
                     .setColor(0x3a0ca3)
-                    .setDescription(`請選擇罪人，查看你持有的該罪人人格。\n目前持有 **${p.identities.length}** 件人格。`)],
+                    .setDescription(
+                        `${pick(l, '目前持有', 'You own')} **${p.identities.length}** ${pick(l, '件人格', 'identities')}\n\n` +
+                        pick(l, '選擇罪人查看你持有的該罪人人格。', 'Select a sinner to view your identities for that character.')
+                    )],
                 components: [
                     new ActionRowBuilder().addComponents(menu),
-                    new ActionRowBuilder().addComponents(backToLobbyRow().components),
+                    navRow([], l),
                 ],
             });
         }
@@ -717,15 +741,12 @@ async function showPack(client, message) {
             if (!ownedForSinner.length) {
                 return ix.update({
                     embeds: [new EmbedBuilder()
-                        .setTitle(`📋 ${sinnerName} — 未持有人格`)
+                        .setTitle(pick(l, `📋 ${sinnerName} — 未持有人格`, `📋 ${sinnerName} — No Identities`))
                         .setColor(0x57606f)
-                        .setDescription('你尚未持有此罪人的人格。透過抽卡來獲取吧！')],
-                    components: [
-                        new ActionRowBuilder().addComponents(
-                            new ButtonBuilder().setCustomId('pk_lib').setLabel('↩ 返回罪人列表').setStyle(ButtonStyle.Secondary),
-                            backToLobbyRow().components[0],
-                        ),
-                    ],
+                        .setDescription(pick(l, '你尚未持有此罪人的人格。透過抽卡來獲取吧！', 'You do not own any identities for this sinner. Try pulling!'))],
+                    components: [navRow([
+                        new ButtonBuilder().setCustomId('pk_lib').setLabel(pick(l, '↩ 返回', '↩ Back')).setStyle(ButtonStyle.Secondary),
+                    ], l)],
                 });
             }
 
@@ -741,20 +762,19 @@ async function showPack(client, message) {
 
             const menu = new StringSelectMenuBuilder()
                 .setCustomId('pk_lib_id')
-                .setPlaceholder(`${sinnerName} 的人格列表...`)
+                .setPlaceholder(pick(l, `${sinnerName} 的人格列表...`, `${sinnerName} identities...`))
                 .addOptions(opts);
 
             return ix.update({
                 embeds: [new EmbedBuilder()
-                    .setTitle(`📋 人格庫 — ${sinnerName}`)
+                    .setTitle(pick(l, `📋 人格庫 — ${sinnerName}`, `📋 Identity Library — ${sinnerName}`))
                     .setColor(0x3a0ca3)
-                    .setDescription(`共持有 **${ownedForSinner.length}** 件 ${sinnerName} 人格`)],
+                    .setDescription(pick(l, `共持有 **${ownedForSinner.length}** 件 ${sinnerName} 人格`, `You own **${ownedForSinner.length}** ${sinnerName} identities`))],
                 components: [
                     new ActionRowBuilder().addComponents(menu),
-                    new ActionRowBuilder().addComponents(
-                        new ButtonBuilder().setCustomId('pk_lib').setLabel('↩ 返回罪人列表').setStyle(ButtonStyle.Secondary),
-                        backToLobbyRow().components[0],
-                    ),
+                    navRow([
+                        new ButtonBuilder().setCustomId('pk_lib').setLabel(pick(l, '↩ 返回罪人列表', '↩ Back to sinners')).setStyle(ButtonStyle.Secondary),
+                    ], l),
                 ],
             });
         }
@@ -776,26 +796,26 @@ async function showPack(client, message) {
                 .setColor(RARITY_COLOR[rarity])
                 .setDescription(
                     `\`${name}\`\n\n` +
-                    `${owned ? `已持有 ｜ Lv.${lv} / ${MAX_ID_LEVEL}` : '未持有'}\n` +
-                    `完整資料已另存為 txt 檔案並送到頻道。`
+                    (owned ? pick(l, `已持有 ｜ Lv.${lv} / ${MAX_ID_LEVEL}`, `Owned ｜ Lv.${lv} / ${MAX_ID_LEVEL}`) : pick(l, '未持有', 'Not owned'))
                 )
                 .addFields(
-                    { name: '📊 狀態', value: owned ? `已持有 ｜ Lv.${lv} / ${MAX_ID_LEVEL}` : '未持有', inline: true },
-                    { name: '📁 檔案', value: `${fileName}`, inline: true },
+                    { name: pick(l, '📊 狀態', '📊 Status'), value: owned ? pick(l, `已持有 ｜ Lv.${lv} / ${MAX_ID_LEVEL}`, `Owned ｜ Lv.${lv} / ${MAX_ID_LEVEL}`) : pick(l, '未持有', 'Not owned'), inline: true },
+                    { name: pick(l, '📁 檔案', '📁 File'), value: `${fileName}`, inline: true },
                 )
-                .setFooter({ text: owned ? `升等費用 Lv${lv}→${lv + 1}: 碎片×${calcLevelCost(lv).frags} + 卷×${calcLevelCost(lv).scrolls}` : '透過 !pull 提取此人格' });
+                .setFooter({ text: owned
+                    ? pick(l, `升等費用 Lv${lv}→${lv + 1}: 碎片×${calcLevelCost(lv).frags} + 卷×${calcLevelCost(lv).scrolls}`, `Upgrade Lv${lv}→${lv + 1}: Frags×${calcLevelCost(lv).frags} + Scrolls×${calcLevelCost(lv).scrolls}`)
+                    : pick(l, '透過 /pull 提取此人格', 'Use /pull to obtain this identity') });
 
             const actionBtns = [
-                new ButtonBuilder().setCustomId('pk_lib').setLabel('↩ 返回').setStyle(ButtonStyle.Secondary),
-                backToLobbyRow().components[0],
+                new ButtonBuilder().setCustomId('pk_lib').setLabel(pick(l, '↩ 返回', '↩ Back')).setStyle(ButtonStyle.Secondary),
             ];
             if (owned) {
                 const lampBroken = p.identityLampBreaks && p.identityLampBreaks[name];
-                actionBtns.splice(1, 0,
-                    new ButtonBuilder().setCustomId(`pk_cult_do_${name.slice(0, 60)}`).setLabel('🔼 升等').setStyle(ButtonStyle.Primary),
+                actionBtns.push(
+                    new ButtonBuilder().setCustomId(`pk_cult_do_${name.slice(0, 60)}`).setLabel(pick(l, '🔼 升等', '🔼 Upgrade')).setStyle(ButtonStyle.Primary),
                     new ButtonBuilder()
                         .setCustomId(`pk_lamp_${name.slice(0, 60)}`)
-                        .setLabel(lampBroken ? '💡 已破燈' : '破燈')
+                        .setLabel(lampBroken ? pick(l, '💡 已破燈', '💡 Lamp On') : pick(l, '破燈', 'Lamp Break'))
                         .setStyle(lampBroken ? ButtonStyle.Success : ButtonStyle.Secondary)
                         .setDisabled(lampBroken || lv < MAX_ID_LEVEL),
                 );
@@ -804,10 +824,10 @@ async function showPack(client, message) {
             try {
                 await ix.update({
                     embeds: [detailEmbed],
-                    components: [new ActionRowBuilder().addComponents(actionBtns)],
+                    components: [navRow(actionBtns, l)],
                 });
             } catch (e) {
-                console.error(`[Pack] 更新人格資料卡失敗: ${e.message}`);
+                console.error(`[Pack] Identity detail update failed: ${e.message}`);
             }
 
             try {
@@ -815,32 +835,31 @@ async function showPack(client, message) {
                 if (channel) {
                     const attachment = new AttachmentBuilder(Buffer.from(fileText, 'utf8'), { name: fileName });
                     await channel.send({
-                        content: `📄 **${message.author.username}** 的人格完整資料：**${name}**`,
+                        content: pick(l, `📄 **${message.author.username}** 的人格完整資料：**${name}**`, `📄 **${message.author.username}**'s identity details: **${name}**`),
                         files: [attachment],
                     });
                 }
             } catch (e) {
-                console.error(`[Pack] 發送人格 txt 失敗: ${e.message}`);
-                try {
-                    await message.channel.send(`❌ 發送 txt 檔案失敗：${e.message}`);
-                } catch {}
+                console.error(`[Pack] Failed to send identity txt: ${e.message}`);
             }
 
             return;
         }
 
+        // ─── Battle Party ────────────────────────────────────
         if (id === 'pk_form') {
             const { showPartyUI } = require('./PartySystem.js');
             return showPartyUI(client, ix, message.author.id, message.author.username);
         }
 
+        // ─── Cultivation ─────────────────────────────────────
         if (id === 'pk_cult') {
             const p   = refresh();
             const all = p.identities.slice(0, 25);
             if (!all.length) {
                 return ix.update({
-                    embeds: [new EmbedBuilder().setTitle('🔼 人格培育').setColor(0x57606f).setDescription('尚未持有任何人格。')],
-                    components: [new ActionRowBuilder().addComponents(backToLobbyRow().components)],
+                    embeds: [new EmbedBuilder().setTitle(pick(l, '🔼 人格培育', '🔼 Cultivation')).setColor(0x57606f).setDescription(pick(l, '尚未持有任何人格。', 'You do not own any identities.'))],
+                    components: [navRow([], l)],
                 });
             }
 
@@ -849,28 +868,34 @@ async function showPack(client, message) {
                 const cost = calcLevelCost(lv);
                 return {
                     label:       `${getShortName(name).slice(0, 20)} (Lv.${lv}/${MAX_ID_LEVEL})`,
-                    description: `升一級需碎片×${cost.frags}${cost.scrolls ? ` + 卷×${cost.scrolls}` : ''}`,
+                    description: pick(l, `升1級需碎片×${cost.frags}${cost.scrolls ? ` + 卷×${cost.scrolls}` : ''}`, `+1 Lv: Frags×${cost.frags}${cost.scrolls ? ` + Scrolls×${cost.scrolls}` : ''}`),
                     value:       name.slice(0, 100),
                 };
             });
 
             const menu = new StringSelectMenuBuilder()
                 .setCustomId('pk_cult_select')
-                .setPlaceholder('選擇要培育的人格...')
+                .setPlaceholder(pick(l, '選擇要培育的人格...', 'Select an identity to cultivate...'))
                 .addOptions(opts);
 
             return ix.update({
                 embeds: [new EmbedBuilder()
-                    .setTitle('🔼 人格培育')
+                    .setTitle(pick(l, '🔼 人格培育', '🔼 Cultivation'))
                     .setColor(0xffd166)
-                    .setDescription(`📦 人格碎片：**${p.fragments}** ／ 📜 經驗卷：**${p.expScrolls}**`)],
-                components: [new ActionRowBuilder().addComponents(menu), new ActionRowBuilder().addComponents(backToLobbyRow().components)],
+                    .setDescription(
+                        `📦 ${pick(l, '人格碎片', 'Fragments')}: **${p.fragments}** ｜ 📜 ${pick(l, '經驗卷', 'Exp Scrolls')}: **${p.expScrolls}**\n\n` +
+                        pick(l, '選擇人格進行升等。', 'Select an identity to upgrade.')
+                    )],
+                components: [
+                    new ActionRowBuilder().addComponents(menu),
+                    navRow([], l),
+                ],
             });
         }
 
         if (id === 'pk_cult_select' || id.startsWith('pk_cult_do_')) {
             const name = id.startsWith('pk_cult_do_') ? id.slice('pk_cult_do_'.length) : ix.values[0];
-            return showCultivation(ix, name, refresh, save);
+            return showCultivation(ix, name, refresh, save, l);
         }
 
         if (id.startsWith('pk_lvup_')) {
@@ -880,20 +905,20 @@ async function showPack(client, message) {
             const p     = refresh();
             const lv    = p.identityLevels[name] || 1;
 
-            if (lv >= MAX_ID_LEVEL) return ix.reply({ content: `⛔ 已達最高等級 Lv.${MAX_ID_LEVEL}。`, ephemeral: true });
+            if (lv >= MAX_ID_LEVEL) return ix.reply({ content: pick(l, `⛔ 已達最高等級 Lv.${MAX_ID_LEVEL}。`, `⛔ Already at max level Lv.${MAX_ID_LEVEL}.`), ephemeral: true });
 
             const realSteps = Math.min(steps, MAX_ID_LEVEL - lv);
             const cost = calcLevelCost(lv, realSteps);
 
-            if (p.fragments < cost.frags) return ix.reply({ content: `❌ 碎片不足！需要 ${cost.frags}，持有 ${p.fragments}。`, ephemeral: true });
-            if (p.expScrolls < cost.scrolls) return ix.reply({ content: `❌ 經驗卷不足！需要 ${cost.scrolls}，持有 ${p.expScrolls}。`, ephemeral: true });
+            if (p.fragments < cost.frags) return ix.reply({ content: pick(l, `❌ 碎片不足！需要 ${cost.frags}，持有 ${p.fragments}。`, `❌ Not enough fragments! Need ${cost.frags}, have ${p.fragments}.`), ephemeral: true });
+            if (p.expScrolls < cost.scrolls) return ix.reply({ content: pick(l, `❌ 經驗卷不足！需要 ${cost.scrolls}，持有 ${p.expScrolls}。`, `❌ Not enough scrolls! Need ${cost.scrolls}, have ${p.expScrolls}.`), ephemeral: true });
 
             p.fragments -= cost.frags;
             p.expScrolls -= cost.scrolls;
             p.identityLevels[name] = lv + realSteps;
             save(p);
 
-            return showCultivation(ix, name, refresh, save);
+            return showCultivation(ix, name, refresh, save, l);
         }
 
         if (id.startsWith('pk_lamp_')) {
@@ -902,75 +927,76 @@ async function showPack(client, message) {
             const lv = p.identityLevels[name] || 1;
             const owned = p.identities.includes(name);
 
-            if (!owned) return ix.reply({ content: '❌ 你未持有此人格。', ephemeral: true });
-            if (lv < MAX_ID_LEVEL) return ix.reply({ content: `⛔ 需先達到 Lv.${MAX_ID_LEVEL} 滿等才能破燈。`, ephemeral: true });
+            if (!owned) return ix.reply({ content: pick(l, '❌ 你未持有此人格。', '❌ You do not own this identity.'), ephemeral: true });
+            if (lv < MAX_ID_LEVEL) return ix.reply({ content: pick(l, `⛔ 需先達到 Lv.${MAX_ID_LEVEL} 滿等才能破燈。`, `⛔ Must reach Lv.${MAX_ID_LEVEL} before lamp break.`), ephemeral: true });
 
             p.identityLampBreaks = p.identityLampBreaks || {};
-            if (p.identityLampBreaks[name]) return ix.reply({ content: '💡 此人格已破燈。', ephemeral: true });
+            if (p.identityLampBreaks[name]) return ix.reply({ content: pick(l, '💡 此人格已破燈。', '💡 Lamp already broken.'), ephemeral: true });
 
             const lampCost = { frags: 200, scrolls: 10 };
-            if (p.fragments < lampCost.frags) return ix.reply({ content: `❌ 破燈需碎片×${lampCost.frags}，持有 ${p.fragments}。`, ephemeral: true });
-            if (p.expScrolls < lampCost.scrolls) return ix.reply({ content: `❌ 破燈需經驗卷×${lampCost.scrolls}，持有 ${p.expScrolls}。`, ephemeral: true });
+            if (p.fragments < lampCost.frags) return ix.reply({ content: pick(l, `❌ 破燈需碎片×${lampCost.frags}，持有 ${p.fragments}。`, `❌ Lamp break needs Frags×${lampCost.frags}, have ${p.fragments}.`), ephemeral: true });
+            if (p.expScrolls < lampCost.scrolls) return ix.reply({ content: pick(l, `❌ 破燈需經驗卷×${lampCost.scrolls}，持有 ${p.expScrolls}。`, `❌ Lamp break needs Scrolls×${lampCost.scrolls}, have ${p.expScrolls}.`), ephemeral: true });
 
             p.fragments -= lampCost.frags;
             p.expScrolls -= lampCost.scrolls;
             p.identityLampBreaks[name] = true;
             save(p);
 
-            return ix.reply({ content: `💡 **${getShortName(name)}** 已成功破燈！能力上限解放！`, ephemeral: false });
+            return ix.reply({ content: pick(l, `💡 **${getShortName(name)}** 已成功破燈！能力上限解放！`, `💡 **${getShortName(name)}** lamp broken! Power unleashed!`), ephemeral: false });
         }
 
+        // ─── E.G.O Library ───────────────────────────────────
         if (id === 'pk_ego') {
             const p    = refresh();
             const desc = p.egos.length
                 ? p.egos.map((e, i) => `${i + 1}. 🔮 ${e}`).join('\n')
-                : '您尚未持有任何 E.G.O。';
+                : pick(l, '您尚未持有任何 E.G.O。', 'You do not own any E.G.O.');
 
             return ix.update({
                 embeds: [new EmbedBuilder()
-                    .setTitle('🔮 E.G.O 庫')
+                    .setTitle(pick(l, '🔮 E.G.O 庫', '🔮 E.G.O Library'))
                     .setColor(0xa55eea)
                     .setDescription(desc)
-                    .setFooter({ text: `共 ${p.egos.length} 件 E.G.O` })],
-                components: [new ActionRowBuilder().addComponents(backToLobbyRow().components)],
+                    .setFooter({ text: pick(l, `共 ${p.egos.length} 件 E.G.O`, `Total: ${p.egos.length} E.G.O`) })],
+                components: [navRow([], l)],
             });
         }
 
-        // ─── 罪人總覽 ──────────────────────────────────────────
+        // ─── Sinners Overview ────────────────────────────────
         if (id === 'pk_sinner') {
             const p = refresh();
             const lines = SINNER_NAMES.map(n => {
                 const sd = p.sinners?.[n] || {};
                 const ut = sd.uptie || 1;
                 const lv = p.identityLevels?.[`LCB ${n}`] || p.identityLevels?.[n] || 1;
-                return `• **${n}** Lv.${lv}/${MAX_ID_LEVEL} ｜ T${ut} ｜ 裝備：${sd.equippedIdentity ? sd.equippedIdentity.slice(0, 24) : `LCB ${n}`}`;
+                const stars = '◆'.repeat(ut) + '◇'.repeat(4 - ut);
+                return `• **${n}** Lv.${lv} ｜ ${stars} T${ut} ｜ ${pick(l, '裝備', 'Equip')}: ${sd.equippedIdentity ? getShortName(sd.equippedIdentity) : `LCB ${n}`}`;
             });
 
             return ix.update({
                 embeds: [new EmbedBuilder()
-                    .setTitle('📋 全罪人狀態')
+                    .setTitle(pick(l, '👤 全罪人狀態', '👤 All Sinners'))
                     .setColor(0x74b9ff)
                     .setDescription(lines.join('\n'))
                     .addFields(
-                        { name: '🧵 紡錘', value: `${p.thread || 0}`, inline: true },
-                        { name: '📦 人格碎片', value: `${p.fragments || 0}`, inline: true },
-                        { name: '📜 經驗卷', value: `${p.expScrolls || 0}`, inline: true },
-                        { name: '🌱 LightSeeds', value: `${p.lightSeeds || 0}`, inline: true },
+                        { name: '🧵 ' + pick(l, '紡錘', 'Threads'), value: `${p.thread || 0}`, inline: true },
+                        { name: '📦 ' + pick(l, '人格碎片', 'Fragments'), value: `${p.fragments || 0}`, inline: true },
+                        { name: '📜 ' + pick(l, '經驗卷', 'Scrolls'), value: `${p.expScrolls || 0}`, inline: true },
                     )
-                    .setFooter({ text: '選擇罪人查看詳細資料 ｜ 🔗 連結提升 ｜ 🔧 裝備人格' })
+                    .setFooter({ text: pick(l, '選擇罪人查看詳細資料', 'Select a sinner for details') })
                     .setTimestamp()],
                 components: [
                     new ActionRowBuilder().addComponents(
                         new StringSelectMenuBuilder()
                             .setCustomId('pk_sinner_select')
-                            .setPlaceholder('🔍 選擇罪人查看詳細...')
+                            .setPlaceholder(pick(l, '🔍 選擇罪人查看詳細...', '🔍 Select a sinner...'))
                             .addOptions(SINNER_NAMES.slice(0, 25).map(n => ({
                                 label: n,
                                 description: `T${p.sinners?.[n]?.uptie || 1} ｜ ${p.sinners?.[n]?.equippedIdentity?.slice(0, 30) || `LCB ${n}`}`,
                                 value: n,
                             }))),
                     ),
-                    new ActionRowBuilder().addComponents(backToLobbyRow().components),
+                    navRow([], l),
                 ],
             });
         }
@@ -979,7 +1005,7 @@ async function showPack(client, message) {
             const name = ix.values[0];
             const p = refresh();
             const s = SINNERS[name];
-            if (!s) return ix.reply({ content: `❌ 找不到「${name}」`, ephemeral: true });
+            if (!s) return ix.reply({ content: pick(l, `❌ 找不到「${name}」`, `❌ Sinner "${name}" not found`), ephemeral: true });
 
             const sd = p.sinners?.[name] || { uptie: 1, equippedIdentity: `LCB ${name}` };
             const lv = p.identityLevels?.[`LCB ${name}`] || p.identityLevels?.[name] || 1;
@@ -989,7 +1015,7 @@ async function showPack(client, message) {
             const skills = getSkillList(s);
             const skillLines = skills.map((sk, i) =>
                 `**${i + 1}.${sk.name}** [${sk.type}/${sk.sin}]\n` +
-                `　基礎:${sk.clashbase} 硬幣:${sk.coins}×+${sk.clashpower} 攻:${sk.attack}${sk.effect ? ` → ${sk.effect.name}×${sk.effect.stacks}` : ''}`
+                `　${pick(l, '基礎', 'Base')}:${sk.clashbase} ${pick(l, '硬幣', 'Coins')}:${sk.coins}×+${sk.clashpower} ${pick(l, '攻', 'Atk')}:${sk.attack}${sk.effect ? ` → ${sk.effect.name}×${sk.effect.stacks}` : ''}`
             ).join('\n');
 
             const uptieCost = ut < 4 ? UPTIE_COSTS[ut] : null;
@@ -998,34 +1024,31 @@ async function showPack(client, message) {
                 embeds: [new EmbedBuilder()
                     .setTitle(`👤 ${s.name} / ${s.nameEn}`)
                     .setColor(0x5865f2)
-                    .addFields(
-                        { name: '📊 等級', value: `Lv.**${lv}** / ${MAX_ID_LEVEL}`, inline: true },
-                        { name: '🔗 連結', value: `${stars} (T${ut})`, inline: true },
-                        { name: '⚡ 速度', value: `${s.minSpd}~${s.maxSpd}`, inline: true },
-                        { name: '❤️ 基礎HP', value: `${s.hp}`, inline: true },
-                        { name: '🛡️ 防禦等級', value: `${s.defLevel}`, inline: true },
-                        { name: '✨ 主罪業', value: `${s.primarySin}`, inline: true },
-                        { name: '⚔️ 主動技能', value: skillLines || '（無）', inline: false },
-                        { name: '🌟 被動', value: `**${s.passive?.name || '—'}**：${s.passive?.desc || '—'}`, inline: false },
-                        { name: '🔧 裝備人格', value: sd.equippedIdentity || `LCB ${name}`, inline: false },
-                        uptieCost
-                            ? { name: '🔗 下次連結提升', value: `🧵 紡錘×${uptieCost}`, inline: true }
-                            : { name: '🔗 連結提升', value: '已達最高 T4', inline: true },
+                    .setDescription(
+                        `${stars} **T${ut}** ｜ Lv.**${lv}**/${MAX_ID_LEVEL} ｜ ${pick(l, '裝備', 'Equip')}: ${sd.equippedIdentity || `LCB ${name}`}`
                     )
-                    .setFooter({ text: `使用 🔗 連結提升按鈕 ｜ 🔧 裝備人格` })
+                    .addFields(
+                        { name: '⚡ ' + pick(l, '速度', 'Speed'), value: `${s.minSpd}~${s.maxSpd}`, inline: true },
+                        { name: '❤️ HP', value: `${s.hp}`, inline: true },
+                        { name: '🛡️ ' + pick(l, '防禦等級', 'Def Level'), value: `${s.defLevel}`, inline: true },
+                        { name: '✨ ' + pick(l, '主罪業', 'Primary Sin'), value: `${s.primarySin}`, inline: true },
+                        { name: '⚔️ ' + pick(l, '主動技能', 'Active Skills'), value: skillLines || pick(l, '（無）', '(None)'), inline: false },
+                        { name: '🌟 ' + pick(l, '被動', 'Passive'), value: `**${s.passive?.name || '—'}**：${s.passive?.desc || '—'}`, inline: false },
+                        uptieCost
+                            ? { name: '🔗 ' + pick(l, '下次連結提升', 'Next Uptie'), value: `🧵 ×${uptieCost}`, inline: true }
+                            : { name: '🔗 ' + pick(l, '連結提升', 'Uptie'), value: pick(l, '已達最高 T4', 'Max T4'), inline: true },
+                    )
+                    .setFooter({ text: pick(l, '使用下方按鈕操作', 'Use the buttons below') })
                     .setTimestamp()],
-                components: [
-                    new ActionRowBuilder().addComponents(
-                        new ButtonBuilder().setCustomId('pk_uptie').setLabel('🔗 連結提升').setStyle(ButtonStyle.Primary),
-                        new ButtonBuilder().setCustomId('pk_equip').setLabel('🔧 裝備人格').setStyle(ButtonStyle.Secondary),
-                        new ButtonBuilder().setCustomId('pk_sinner').setLabel('↩ 返回罪人').setStyle(ButtonStyle.Secondary),
-                        backToLobbyRow().components[0],
-                    ),
-                ],
+                components: [navRow([
+                    new ButtonBuilder().setCustomId('pk_uptie').setLabel(pick(l, '🔗 連結提升', '🔗 Uptie')).setStyle(ButtonStyle.Primary),
+                    new ButtonBuilder().setCustomId('pk_equip').setLabel(pick(l, '🔧 裝備人格', '🔧 Equip')).setStyle(ButtonStyle.Secondary),
+                    new ButtonBuilder().setCustomId('pk_sinner').setLabel(pick(l, '↩ 返回罪人', '↩ Back')).setStyle(ButtonStyle.Secondary),
+                ], l)],
             });
         }
 
-        // ─── 連結提升 (Uptie) ──────────────────────────────────
+        // ─── Uptie ───────────────────────────────────────────
         if (id === 'pk_uptie') {
             const p = refresh();
             const opts = SINNER_NAMES.slice(0, 25).map(n => {
@@ -1034,25 +1057,29 @@ async function showPack(client, message) {
                 const cost = ut < 4 ? UPTIE_COSTS[ut] : null;
                 return {
                     label: `${n} (T${ut}${cost ? ` → T${ut + 1}` : ' MAX'})`,
-                    description: cost ? `需要 🧵×${cost} ｜ 持有 🧵×${p.thread || 0}` : '已達最高 T4',
+                    description: cost ? pick(l, `需要 🧵×${cost} ｜ 持有 🧵×${p.thread || 0}`, `Cost: 🧵×${cost} ｜ Have: 🧵×${p.thread || 0}`) : pick(l, '已達最高 T4', 'Max T4'),
                     value: n,
                 };
             });
 
             return ix.update({
                 embeds: [new EmbedBuilder()
-                    .setTitle('🔗 連結提升')
+                    .setTitle(pick(l, '🔗 連結提升', '🔗 Uptie'))
                     .setColor(0xffd166)
-                    .setDescription(`🧵 持有紡錘：**${p.thread || 0}**\n\n**連結提升費用：**\nT1→T2：×20　T2→T3：×40　T3→T4：×80`)
-                    .setFooter({ text: '選擇罪人進行連結提升' })],
+                    .setDescription(
+                        `🧵 ${pick(l, '持有紡錘', 'Threads')}: **${p.thread || 0}**\n\n` +
+                        `**${pick(l, '連結提升費用', 'Uptie Costs')}**\n` +
+                        `T1→T2: ×20 ｜ T2→T3: ×40 ｜ T3→T4: ×80`
+                    )
+                    .setFooter({ text: pick(l, '選擇罪人進行連結提升', 'Select a sinner to uptie') })],
                 components: [
                     new ActionRowBuilder().addComponents(
                         new StringSelectMenuBuilder()
                             .setCustomId('pk_uptie_select')
-                            .setPlaceholder('🔍 選擇要連結提升的罪人...')
+                            .setPlaceholder(pick(l, '🔍 選擇要連結提升的罪人...', '🔍 Select a sinner to uptie...'))
                             .addOptions(opts),
                     ),
-                    new ActionRowBuilder().addComponents(backToLobbyRow().components),
+                    navRow([], l),
                 ],
             });
         }
@@ -1066,12 +1093,12 @@ async function showPack(client, message) {
             const ut = sd.uptie || 1;
 
             if (ut >= 4) {
-                return ix.reply({ content: `「${name}」已達最高連結等級 T4。`, ephemeral: true });
+                return ix.reply({ content: pick(l, `「${name}」已達最高連結等級 T4。`, `${name} is already at max uptie T4.`), ephemeral: true });
             }
 
             const cost = UPTIE_COSTS[ut];
             if ((p.thread || 0) < cost) {
-                return ix.reply({ content: `❌ 紡錘不足！需要 🧵×${cost}，目前 🧵×${p.thread || 0}`, ephemeral: true });
+                return ix.reply({ content: pick(l, `❌ 紡錘不足！需要 🧵×${cost}，目前 🧵×${p.thread || 0}`, `❌ Not enough threads! Need 🧵×${cost}, have 🧵×${p.thread || 0}`), ephemeral: true });
             }
 
             p.thread = (p.thread || 0) - cost;
@@ -1081,46 +1108,43 @@ async function showPack(client, message) {
             const stars = '◆'.repeat(sd.uptie) + '◇'.repeat(4 - sd.uptie);
             return ix.update({
                 embeds: [new EmbedBuilder()
-                    .setTitle('🔗 連結提升成功！')
+                    .setTitle(pick(l, '🔗 連結提升成功！', '🔗 Uptie Successful!'))
                     .setColor(0xffd166)
-                    .setDescription(`**${name}** → T${sd.uptie} ${stars}\n消耗：🧵 ×${cost}　剩餘：🧵 ×${p.thread || 0}`)
+                    .setDescription(`**${name}** → T${sd.uptie} ${stars}\n${pick(l, '消耗', 'Cost')}: 🧵 ×${cost} ｜ ${pick(l, '剩餘', 'Left')}: 🧵 ×${p.thread || 0}`)
                     .setTimestamp()],
-                components: [
-                    new ActionRowBuilder().addComponents(
-                        new ButtonBuilder().setCustomId('pk_uptie').setLabel('↩ 返回連結提升').setStyle(ButtonStyle.Secondary),
-                        backToLobbyRow().components[0],
-                    ),
-                ],
+                components: [navRow([
+                    new ButtonBuilder().setCustomId('pk_uptie').setLabel(pick(l, '↩ 返回連結提升', '↩ Back to uptie')).setStyle(ButtonStyle.Secondary),
+                ], l)],
             });
         }
 
-        // ─── 裝備人格 (Equip) ──────────────────────────────────
+        // ─── Equip ───────────────────────────────────────────
         if (id === 'pk_equip') {
             const p = refresh();
             const opts = SINNER_NAMES.slice(0, 25).map(n => {
                 const sd = p.sinners?.[n] || { equippedIdentity: `LCB ${n}` };
                 const ownedForSinner = (p.identities || []).filter(name => getIdentitySinnerKey(name) === n);
                 return {
-                    label: `${n} (${ownedForSinner.length}件)`,
-                    description: `目前：${sd.equippedIdentity?.slice(0, 30) || `LCB ${n}`}`,
+                    label: `${n} (${ownedForSinner.length})`,
+                    description: pick(l, `目前：${sd.equippedIdentity?.slice(0, 30) || `LCB ${n}`}`, `Current: ${sd.equippedIdentity?.slice(0, 30) || `LCB ${n}`}`),
                     value: n,
                 };
             });
 
             return ix.update({
                 embeds: [new EmbedBuilder()
-                    .setTitle('🔧 裝備人格')
+                    .setTitle(pick(l, '🔧 裝備人格', '🔧 Equip Identity'))
                     .setColor(0x2ed573)
-                    .setDescription('選擇罪人後，再選擇要裝備的人格。')
-                    .setFooter({ text: `持有 ${p.identities.length} 件人格` })],
+                    .setDescription(pick(l, '選擇罪人後，再選擇要裝備的人格。', 'Select a sinner, then choose an identity to equip.'))
+                    .setFooter({ text: pick(l, `持有 ${p.identities.length} 件人格`, `Owned: ${p.identities.length} identities`) })],
                 components: [
                     new ActionRowBuilder().addComponents(
                         new StringSelectMenuBuilder()
                             .setCustomId('pk_equip_sinner')
-                            .setPlaceholder('🔍 選擇罪人...')
+                            .setPlaceholder(pick(l, '🔍 選擇罪人...', '🔍 Select a sinner...'))
                             .addOptions(opts),
                     ),
-                    new ActionRowBuilder().addComponents(backToLobbyRow().components),
+                    navRow([], l),
                 ],
             });
         }
@@ -1132,27 +1156,26 @@ async function showPack(client, message) {
             const allOpts = [`LCB ${sinnerName}`, ...ownedForSinner];
             const opts = allOpts.slice(0, 25).map(name => ({
                 label: getShortName(name).slice(0, 25),
-                description: name === `LCB ${sinnerName}` ? '預設人格' : RARITY_LABEL[findRarity(name)],
+                description: name === `LCB ${sinnerName}` ? pick(l, '預設人格', 'Default') : RARITY_LABEL[findRarity(name)],
                 value: name.slice(0, 100),
             }));
 
             return ix.update({
                 embeds: [new EmbedBuilder()
-                    .setTitle(`🔧 裝備人格 — ${sinnerName}`)
+                    .setTitle(pick(l, `🔧 裝備人格 — ${sinnerName}`, `🔧 Equip — ${sinnerName}`))
                     .setColor(0x2ed573)
-                    .setDescription(`選擇要裝備的人格：`)
-                    .setFooter({ text: `可選 ${allOpts.length} 件人格` })],
+                    .setDescription(pick(l, '選擇要裝備的人格：', 'Choose an identity to equip:'))
+                    .setFooter({ text: pick(l, `可選 ${allOpts.length} 件人格`, `${allOpts.length} options available`) })],
                 components: [
                     new ActionRowBuilder().addComponents(
                         new StringSelectMenuBuilder()
                             .setCustomId('pk_equip_select')
-                            .setPlaceholder('選擇人格...')
+                            .setPlaceholder(pick(l, '選擇人格...', 'Select identity...'))
                             .addOptions(opts),
                     ),
-                    new ActionRowBuilder().addComponents(
-                        new ButtonBuilder().setCustomId('pk_equip').setLabel('↩ 返回罪人選擇').setStyle(ButtonStyle.Secondary),
-                        backToLobbyRow().components[0],
-                    ),
+                    navRow([
+                        new ButtonBuilder().setCustomId('pk_equip').setLabel(pick(l, '↩ 返回罪人選擇', '↩ Back to sinners')).setStyle(ButtonStyle.Secondary),
+                    ], l),
                 ],
             });
         }
@@ -1161,12 +1184,12 @@ async function showPack(client, message) {
             const identityName = ix.values[0];
             const p = refresh();
             const sinnerName = SINNER_NAMES.find(n => identityName === `LCB ${n}` || getIdentitySinnerKey(identityName) === n);
-            if (!sinnerName) return ix.reply({ content: '❌ 無法識別此人格對應的罪人。', ephemeral: true });
+            if (!sinnerName) return ix.reply({ content: pick(l, '❌ 無法識別此人格對應的罪人。', '❌ Cannot identify the sinner for this identity.'), ephemeral: true });
 
             const owned = (p.identities || []).includes(identityName);
             const isDefault = identityName === `LCB ${sinnerName}`;
             if (!owned && !isDefault) {
-                return ix.reply({ content: `❌ 你沒有持有「${identityName}」，不能裝備。`, ephemeral: true });
+                return ix.reply({ content: pick(l, `❌ 你沒有持有「${identityName}」，不能裝備。`, `❌ You do not own "${identityName}".`), ephemeral: true });
             }
 
             if (!p.sinners) p.sinners = {};
@@ -1176,39 +1199,42 @@ async function showPack(client, message) {
 
             return ix.update({
                 embeds: [new EmbedBuilder()
-                    .setTitle('🔧 裝備更新')
+                    .setTitle(pick(l, '🔧 裝備更新', '🔧 Equipment Updated'))
                     .setColor(0x2ed573)
-                    .setDescription(`**${sinnerName}** 現在裝備：\n${identityName}`)
+                    .setDescription(pick(l, `**${sinnerName}** 現在裝備：\n${identityName}`, `**${sinnerName}** now equipped with:\n${identityName}`))
                     .setTimestamp()],
-                components: [
-                    new ActionRowBuilder().addComponents(
-                        new ButtonBuilder().setCustomId('pk_equip').setLabel('↩ 返回裝備').setStyle(ButtonStyle.Secondary),
-                        backToLobbyRow().components[0],
-                    ),
-                ],
+                components: [navRow([
+                    new ButtonBuilder().setCustomId('pk_equip').setLabel(pick(l, '↩ 返回裝備', '↩ Back to equip')).setStyle(ButtonStyle.Secondary),
+                ], l)],
             });
         }
 
-        // ─── 資源查詢 (Threads) ────────────────────────────────
+        // ─── Resources ───────────────────────────────────────
         if (id === 'pk_threads') {
             const p = refresh();
             return ix.update({
                 embeds: [new EmbedBuilder()
-                    .setTitle('🧵 資源查詢')
+                    .setTitle(pick(l, '🧵 資源查詢', '🧵 Resources'))
                     .setColor(0xa55eea)
-                    .addFields(
-                        { name: '🧵 紡錘', value: `${p.thread || 0}`, inline: true },
-                        { name: '📦 人格碎片', value: `${p.fragments || 0}`, inline: true },
-                        { name: '📜 經驗卷', value: `${p.expScrolls || 0}`, inline: true },
-                        { name: '🌱 LightSeeds', value: `${p.lightSeeds || 0}`, inline: true },
-                    )
                     .setDescription(
-                        '**連結提升費用：**\nT1→T2：×20　T2→T3：×40　T3→T4：×80\n\n' +
-                        '**人格升等費用（每一級）：**\nLv1-20：碎片×(等級×5)\nLv21-40：碎片×(等級×8) + 卷×1\nLv41-60：碎片×(等級×12) + 卷×3'
+                        `**${pick(l, '連結提升費用', 'Uptie Costs')}**\n` +
+                        `T1→T2: ×20 ｜ T2→T3: ×40 ｜ T3→T4: ×80\n\n` +
+                        `**${pick(l, '人格升等費用（每一級）', 'Identity Upgrade Cost (per level)')}**\n` +
+                        `Lv1-20: ${pick(l, '碎片', 'Frags')}×(Lv×5)\n` +
+                        `Lv21-40: ${pick(l, '碎片', 'Frags')}×(Lv×8) + ${pick(l, '卷', 'Scrolls')}×1\n` +
+                        `Lv41-60: ${pick(l, '碎片', 'Frags')}×(Lv×12) + ${pick(l, '卷', 'Scrolls')}×3`
                     )
-                    .setFooter({ text: '在 📋 人格庫或 🔼 人格培育進行升等' })
+                    .addFields(
+                        { name: '🧵 ' + pick(l, '紡錘', 'Threads'), value: `${p.thread || 0}`, inline: true },
+                        { name: '📦 ' + pick(l, '人格碎片', 'Fragments'), value: `${p.fragments || 0}`, inline: true },
+                        { name: '📜 ' + pick(l, '經驗卷', 'Exp Scrolls'), value: `${p.expScrolls || 0}`, inline: true },
+                        { name: '🌱 LightSeeds', value: `${Number(p.lightSeeds || 0).toLocaleString()}`, inline: true },
+                        { name: '🌟 StarCoins', value: `${Number(p.starCoins || 0).toLocaleString()}`, inline: true },
+                        { name: '\u200b', value: '\u200b', inline: true },
+                    )
+                    .setFooter({ text: pick(l, '在 📋 人格庫或 🔼 人格培育進行升等', 'Upgrade via 📋 Library or 🔼 Cultivation') })
                     .setTimestamp()],
-                components: [new ActionRowBuilder().addComponents(backToLobbyRow().components)],
+                components: [navRow([], l)],
             });
         }
     });
@@ -1216,7 +1242,7 @@ async function showPack(client, message) {
     col.on('end', () => reply.edit({ components: [] }).catch(() => {}));
 }
 
-async function showCultivation(ix, name, refresh, save) {
+async function showCultivation(ix, name, refresh, save, lang) {
     const p     = refresh();
     const lv    = p.identityLevels[name] || 1;
     const cost1  = calcLevelCost(lv, 1);
@@ -1225,30 +1251,31 @@ async function showCultivation(ix, name, refresh, save) {
     const rarity  = findRarity(name);
 
     const embed = new EmbedBuilder()
-        .setTitle(`🔼 人格培育 — ${getShortName(name)}`)
+        .setTitle(pick(lang, `🔼 人格培育 — ${getShortName(name)}`, `🔼 Cultivation — ${getShortName(name)}`))
         .setColor(RARITY_COLOR[rarity])
+        .setDescription(
+            `${RARITY_LABEL[rarity]} ｜ Lv.**${lv}** / ${MAX_ID_LEVEL}`
+        )
         .addFields(
-            { name: '📊 等級', value: `Lv.**${lv}** / ${MAX_ID_LEVEL}`, inline: true },
-            { name: '📦 持有碎片', value: `${p.fragments}`, inline: true },
-            { name: '📜 持有卷', value: `${p.expScrolls}`, inline: true },
+            { name: '📦 ' + pick(lang, '持有碎片', 'Fragments'), value: `${p.fragments}`, inline: true },
+            { name: '📜 ' + pick(lang, '持有卷', 'Scrolls'), value: `${p.expScrolls}`, inline: true },
             lv < MAX_ID_LEVEL
-                ? { name: '💰 升1級費用', value: `碎片×${cost1.frags}${cost1.scrolls ? ` + 卷×${cost1.scrolls}` : ''}`, inline: true }
-                : { name: '🏆 狀態', value: '**最高等級**', inline: true },
+                ? { name: '💰 +1 ' + pick(lang, '級費用', 'Lv Cost'), value: `${pick(lang, '碎片', 'Frags')}×${cost1.frags}${cost1.scrolls ? ` + ${pick(lang, '卷', 'Sc')}×${cost1.scrolls}` : ''}`, inline: true }
+                : { name: '🏆 ' + pick(lang, '狀態', 'Status'), value: pick(lang, '**最高等級**', '**Max Level**'), inline: true },
             lv + 10 <= MAX_ID_LEVEL
-                ? { name: '💰 升10級費用', value: `碎片×${cost10.frags}${cost10.scrolls ? ` + 卷×${cost10.scrolls}` : ''}`, inline: true }
+                ? { name: '💰 +10 ' + pick(lang, '級費用', 'Lv Cost'), value: `${pick(lang, '碎片', 'Frags')}×${cost10.frags}${cost10.scrolls ? ` + ${pick(lang, '卷', 'Sc')}×${cost10.scrolls}` : ''}`, inline: true }
                 : { name: '\u200b', value: '\u200b', inline: true },
         )
-        .setFooter({ text: `${RARITY_LABEL[rarity]} ｜ 升到滿級需: 碎片×${maxCost.frags}${maxCost.scrolls ? ` + 卷×${maxCost.scrolls}` : ''}` });
+        .setFooter({ text: pick(lang, `升到滿級需: 碎片×${maxCost.frags}${maxCost.scrolls ? ` + 卷×${maxCost.scrolls}` : ''}`, `Max upgrade cost: Frags×${maxCost.frags}${maxCost.scrolls ? ` + Sc×${maxCost.scrolls}` : ''}`) });
 
     const btnKey = name.slice(0, 55);
     const buttons = [
-        new ButtonBuilder().setCustomId(`pk_lvup_1_${btnKey}`).setLabel('+1 級').setStyle(ButtonStyle.Primary).setDisabled(lv >= MAX_ID_LEVEL),
-        new ButtonBuilder().setCustomId(`pk_lvup_10_${btnKey}`).setLabel('+10 級').setStyle(ButtonStyle.Primary).setDisabled(lv + 10 > MAX_ID_LEVEL),
-        new ButtonBuilder().setCustomId('pk_cult').setLabel('↩ 返回培育').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('pk_home').setLabel('🏠 主頁').setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId(`pk_lvup_1_${btnKey}`).setLabel(pick(lang, '+1 級', '+1 Lv')).setStyle(ButtonStyle.Primary).setDisabled(lv >= MAX_ID_LEVEL),
+        new ButtonBuilder().setCustomId(`pk_lvup_10_${btnKey}`).setLabel(pick(lang, '+10 級', '+10 Lv')).setStyle(ButtonStyle.Primary).setDisabled(lv + 10 > MAX_ID_LEVEL),
+        new ButtonBuilder().setCustomId('pk_cult').setLabel(pick(lang, '↩ 返回培育', '↩ Back')).setStyle(ButtonStyle.Secondary),
     ];
 
-    return ix.update({ embeds: [embed], components: [new ActionRowBuilder().addComponents(buttons)] });
+    return ix.update({ embeds: [embed], components: [navRow(buttons, lang)] });
 }
 
 // ─── !list（翻頁機率清單）─────────────────────────────────────

@@ -20,11 +20,24 @@ const MAX_BANNER_SIZE_MB = 8;
 
 const BANNER_DIR = path.join(process.cwd(), 'data', 'banners');
 
+function getBannerExt(filename) {
+    const m = String(filename || '').match(/\.(jpg|jpeg|png|gif|webp)$/i);
+    return m ? m[1].toLowerCase() : 'png';
+}
+
 function getBannerPath(userId) {
+    const metaPath = path.join(BANNER_DIR, `${userId}.meta`);
+    try {
+        if (fs.existsSync(metaPath)) {
+            const ext = fs.readFileSync(metaPath, 'utf8').trim();
+            if (ext) return path.join(BANNER_DIR, `${userId}.${ext}`);
+        }
+    } catch {}
     return path.join(BANNER_DIR, `${userId}.png`);
 }
 
-function saveBannerFromUrl(userId, url) {
+function saveBannerFromUrl(userId, url, filename) {
+    const ext = getBannerExt(filename);
     return fetch(url)
         .then(res => {
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -36,21 +49,32 @@ function saveBannerFromUrl(userId, url) {
                 throw new Error('File too large');
             }
             fs.mkdirSync(BANNER_DIR, { recursive: true });
-            fs.writeFileSync(getBannerPath(userId), buffer);
+            // Remove old banner with different extension
+            for (const oldExt of ['png', 'jpg', 'jpeg', 'gif', 'webp']) {
+                const oldFile = path.join(BANNER_DIR, `${userId}.${oldExt}`);
+                if (oldExt !== ext && fs.existsSync(oldFile)) {
+                    try { fs.unlinkSync(oldFile); } catch {}
+                }
+            }
+            const filePath = path.join(BANNER_DIR, `${userId}.${ext}`);
+            fs.writeFileSync(filePath, buffer);
+            fs.writeFileSync(path.join(BANNER_DIR, `${userId}.meta`), ext);
             return true;
         });
 }
 
-function getBannerUrl(userId, client) {
+function getBannerUrl(userId) {
     const filePath = getBannerPath(userId);
     if (!fs.existsSync(filePath)) return null;
-    return `attachment://banner_${userId}.png`;
+    const ext = path.extname(filePath).slice(1);
+    return `attachment://banner_${userId}.${ext}`;
 }
 
 function createBannerAttachment(userId) {
     const filePath = getBannerPath(userId);
     if (!fs.existsSync(filePath)) return null;
-    return new AttachmentBuilder(filePath, { name: `banner_${userId}.png` });
+    const ext = path.extname(filePath).slice(1);
+    return new AttachmentBuilder(filePath, { name: `banner_${userId}.${ext}` });
 }
 
 // ─── 個人資料欄位預設值 ─────────────────────────────────────────
@@ -166,8 +190,9 @@ async function handleProfile(client, interaction) {
         .setThumbnail(target.displayAvatarURL({ dynamic: true, size: 256 }));
 
     const bannerAttachment = createBannerAttachment(target.id);
-    if (bannerAttachment) {
-        embed.setImage(`attachment://banner_${target.id}.png`);
+    const bannerUrl = getBannerUrl(target.id);
+    if (bannerAttachment && bannerUrl) {
+        embed.setImage(bannerUrl);
     } else if (profile.imageUrl) {
         embed.setImage(profile.imageUrl);
     }
@@ -262,7 +287,7 @@ async function handleUpdateProfile(client, interaction) {
         }
         try {
             await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-            await saveBannerFromUrl(interaction.user.id, attachment.url);
+            await saveBannerFromUrl(interaction.user.id, attachment.url, attachment.name);
             changed = true;
             changes.push(pick(lang, '橫幅圖片', 'Banner Image'));
         } catch (err) {
@@ -415,16 +440,17 @@ async function handleSetBanner(client, interaction) {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     try {
-        await saveBannerFromUrl(interaction.user.id, attachment.url);
+        await saveBannerFromUrl(interaction.user.id, attachment.url, attachment.name);
         recordUpdate(player);
         savePlayerData(client, interaction.user.id, player);
 
         const bannerAttachment = createBannerAttachment(interaction.user.id);
+        const bannerUrl = getBannerUrl(interaction.user.id);
         const embed = new EmbedBuilder()
             .setColor(0x2ed573)
             .setTitle(pick(lang, '✅ 橫幅已更新', '✅ Banner Updated'))
             .setDescription(pick(lang, '你的個人資料橫幅已成功上傳！', 'Your profile banner has been uploaded successfully!'))
-            .setImage(`attachment://banner_${interaction.user.id}.png`)
+            .setImage(bannerUrl || `attachment://banner_${interaction.user.id}.png`)
             .setTimestamp();
 
         return interaction.editReply({ embeds: [embed], files: bannerAttachment ? [bannerAttachment] : [] });

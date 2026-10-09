@@ -413,25 +413,25 @@ async function handleSlashCommands(client, interaction) {
 
 async function sendHelp(interaction) {
     const embed = new EmbedBuilder()
-        .setTitle('📋 Angela 指令清單')
+        .setTitle('📋 Angela Command List')
         .setColor(0x00b4d8)
         .addFields(
-            { name: '🎰 抽卡與背包',        value: '`/pull_limbuscompany` — 抽卡 ｜ `/pack_limbuscompany` — 背包 ｜ `/list_limbuscompany` — 機率清單' },
-            { name: '⚔️ 戰鬥與隊伍',        value: '`/battle` — 出戰關卡 ｜ `/party` — 隊伍管理' },
-            { name: '👤 罪人與資源',          value: '`/sinner` — 罪人全覽 ｜ `/uptie` — 提升連結\n`/equip` — 裝備人格 ｜ `/threads` — 絲線查詢' },
-            { name: '🪞 鏡光迷宮',           value: '`/md` — 鏡光迷宮系統' },
-            { name: '📋 個人資料',           value: '`/profile` — 查看完整個人資料 ｜ `/updateprofile` — 編輯自我介紹/圖片/稱號\n`/setbanner` — 上傳橫幅圖片 ｜ `/title` — 裝備或查看稱號' },
-            { name: '📊 等級系統',           value: '`/rank` — 查看等級與 XP 進度 ｜ `/leaderboard` — 等級排行榜' },
-            { name: '📅 簽到',              value: '`/checkin` — 每日簽到，連續天數加成' },
-            { name: '🎰 賭博',              value: '`/gamble <金額>` — 下注 🌱 LightSeeds，50/50 勝負' },
-            { name: '🎲 娛樂功能',           value: '`/gayrate` — 男同指數 ｜ `/lesbianrate` — 姬圈指數' },
-            { name: '🔊 語音控制',           value: '`/join` ｜ `/leave` ｜ `/status`' },
-            { name: '🏆 成就與任務', value: '`/achievements` ｜ `/dailyquest`' },
-            { name: '📰 社群檢測 (伺服器管理員)', value: '`/steam` ｜ `/tweet` ｜ `/youtube`\n`/setchannel` — 統一設定所有通知/功能頻道' },
-            { name: '🛒 商城與抽獎', value: '`/shop` ｜ `/giveaway-create` ｜ `/giveaway-end`' },
-            { name: '👑 最高主管特權 (Sles 專屬)', value: '`/givelightseeds` ｜ `/givefragments` ｜ `/givescrolls`\n`/givethreads` ｜ `/updaterewards` ｜ `/updatebuff`\n`/announce` — 全伺服器公告' }
+            { name: '🎰 Gacha & Inventory',     value: '`/pull_limbuscompany` — Pull ｜ `/pack_limbuscompany` — Inventory ｜ `/list_limbuscompany` — Rates' },
+            { name: '⚔️ Battle & Party',        value: '`/battle` — Enter battle ｜ `/party` — Party management' },
+            { name: '👤 Sinners & Resources',    value: '`/sinner` — Sinner overview ｜ `/uptie` — Uptie upgrade\n`/equip` — Equip identity ｜ `/threads` — Thread check' },
+            { name: '🪞 Mirror Dungeon',        value: '`/md` — Mirror Dungeon system' },
+            { name: '📋 Profile',               value: '`/profile` — View full profile ｜ `/updateprofile` — Edit bio/image/title\n`/setbanner` — Upload banner ｜ `/title` — Equip or view titles' },
+            { name: '📊 Level System',          value: '`/rank` — Check level & XP ｜ `/leaderboard` — XP leaderboard' },
+            { name: '📅 Check-in',              value: '`/checkin` — Daily check-in with streak bonus' },
+            { name: '🎰 Gamble',                value: '`/gamble <amount>` — Bet Starcoins, 50/50' },
+            { name: '🎲 Fun',                   value: '`/gayrate` — Gay rate ｜ `/lesbianrate` — Lesbian rate' },
+            { name: '🔊 Voice',                 value: '`/join` ｜ `/leave` ｜ `/status`' },
+            { name: '🏆 Achievements & Quests', value: '`/achievements` ｜ `/dailyquest`' },
+            { name: '📰 Social Checks (Admin)', value: '`/steam` ｜ `/tweet` ｜ `/youtube`\n`/setchannel` — Set all notification channels' },
+            { name: '🛒 Shop & Giveaways',      value: '`/shop` ｜ `/giveaway-create` ｜ `/giveaway-end`' },
+            { name: '👑 Admin (Sles only)',     value: '`/givelightseeds` ｜ `/givefragments` ｜ `/givescrolls`\n`/givethreads` ｜ `/updaterewards` ｜ `/updatebuff`\n`/announce` — Global announcement' }
         )
-        .setFooter({ text: '輸入 / 即可喚出選單 ｜ 所有特權指令已鎖定為 Sles 專屬' });
+        .setFooter({ text: 'Type / to see the command menu ｜ All admin commands are Sles-only' });
 
     return interaction.reply({ embeds: [embed] });
 }
