@@ -384,6 +384,7 @@ async function handleSlashCommands(client, interaction) {
             // ─── 個人資料 ────────────────────────────────────────────
             if (commandName === 'profile') return ProfileSystem.handleProfile(client, interaction);
             if (commandName === 'updateprofile') return ProfileSystem.handleUpdateProfile(client, interaction);
+            if (commandName === 'setbanner') return ProfileSystem.handleSetBanner(client, interaction);
             if (commandName === 'title') return ProfileSystem.handleTitle(client, interaction);
 
             // ─── 每日簽到 ────────────────────────────────────────────
@@ -419,7 +420,7 @@ async function sendHelp(interaction) {
             { name: '⚔️ 戰鬥與隊伍',        value: '`/battle` — 出戰關卡 ｜ `/party` — 隊伍管理' },
             { name: '👤 罪人與資源',          value: '`/sinner` — 罪人全覽 ｜ `/uptie` — 提升連結\n`/equip` — 裝備人格 ｜ `/threads` — 絲線查詢' },
             { name: '🪞 鏡光迷宮',           value: '`/md` — 鏡光迷宮系統' },
-            { name: '📋 個人資料',           value: '`/profile` — 查看完整個人資料 ｜ `/updateprofile` — 編輯自我介紹/圖片/稱號\n`/title` — 裝備或查看稱號' },
+            { name: '📋 個人資料',           value: '`/profile` — 查看完整個人資料 ｜ `/updateprofile` — 編輯自我介紹/圖片/稱號\n`/setbanner` — 上傳橫幅圖片 ｜ `/title` — 裝備或查看稱號' },
             { name: '📊 等級系統',           value: '`/rank` — 查看等級與 XP 進度 ｜ `/leaderboard` — 等級排行榜' },
             { name: '📅 簽到',              value: '`/checkin` — 每日簽到，連續天數加成' },
             { name: '🎰 賭博',              value: '`/gamble <金額>` — 下注 🌱 LightSeeds，50/50 勝負' },

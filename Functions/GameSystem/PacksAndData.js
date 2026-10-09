@@ -20,7 +20,7 @@ const SHOP_ITEMS_PATH = path.join(PERSISTENT_DATA_DIR, 'shop-items.json');
 const SHOP_SALES_PATH = path.join(PERSISTENT_DATA_DIR, 'shop-sales.json');
 const { getLanguage } = require('./LanguageSystem.js');
 // ─── SinnersData（供 getIdentitySinnerKey 使用）─────────────────
-const { SINNERS } = require('./Data/SinnersData.js');
+const { SINNERS, SINNER_NAMES, UPTIE_COSTS, getSkillList } = require('./Data/SinnersData.js');
 try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch {}
 
 // Discord 備份頻道
@@ -629,12 +629,20 @@ function lobbyEmbed(player) {
 }
 
 function lobbyRows() {
-    return [new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('pk_lib').setLabel('📋 人格庫').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId('pk_form').setLabel('⚔️ 出擊編成').setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId('pk_cult').setLabel('🔼 人格培育').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('pk_ego').setLabel('🔮 E.G.O').setStyle(ButtonStyle.Secondary),
-    )];
+    return [
+        new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('pk_lib').setLabel('📋 人格庫').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('pk_form').setLabel('⚔️ 出擊編成').setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId('pk_cult').setLabel('🔼 人格培育').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('pk_ego').setLabel('🔮 E.G.O').setStyle(ButtonStyle.Secondary),
+        ),
+        new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('pk_sinner').setLabel('👤 罪人總覽').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId('pk_uptie').setLabel('🔗 連結提升').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('pk_equip').setLabel('🔧 裝備人格').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId('pk_threads').setLabel('🧵 資源查詢').setStyle(ButtonStyle.Secondary),
+        ),
+    ];
 }
 
 function backToLobbyRow() {
@@ -924,6 +932,282 @@ async function showPack(client, message) {
                     .setColor(0xa55eea)
                     .setDescription(desc)
                     .setFooter({ text: `共 ${p.egos.length} 件 E.G.O` })],
+                components: [new ActionRowBuilder().addComponents(backToLobbyRow().components)],
+            });
+        }
+
+        // ─── 罪人總覽 ──────────────────────────────────────────
+        if (id === 'pk_sinner') {
+            const p = refresh();
+            const lines = SINNER_NAMES.map(n => {
+                const sd = p.sinners?.[n] || {};
+                const ut = sd.uptie || 1;
+                const lv = p.identityLevels?.[`LCB ${n}`] || p.identityLevels?.[n] || 1;
+                return `• **${n}** Lv.${lv}/${MAX_ID_LEVEL} ｜ T${ut} ｜ 裝備：${sd.equippedIdentity ? sd.equippedIdentity.slice(0, 24) : `LCB ${n}`}`;
+            });
+
+            return ix.update({
+                embeds: [new EmbedBuilder()
+                    .setTitle('📋 全罪人狀態')
+                    .setColor(0x74b9ff)
+                    .setDescription(lines.join('\n'))
+                    .addFields(
+                        { name: '🧵 紡錘', value: `${p.thread || 0}`, inline: true },
+                        { name: '📦 人格碎片', value: `${p.fragments || 0}`, inline: true },
+                        { name: '📜 經驗卷', value: `${p.expScrolls || 0}`, inline: true },
+                        { name: '🌱 LightSeeds', value: `${p.lightSeeds || 0}`, inline: true },
+                    )
+                    .setFooter({ text: '選擇罪人查看詳細資料 ｜ 🔗 連結提升 ｜ 🔧 裝備人格' })
+                    .setTimestamp()],
+                components: [
+                    new ActionRowBuilder().addComponents(
+                        new StringSelectMenuBuilder()
+                            .setCustomId('pk_sinner_select')
+                            .setPlaceholder('🔍 選擇罪人查看詳細...')
+                            .addOptions(SINNER_NAMES.slice(0, 25).map(n => ({
+                                label: n,
+                                description: `T${p.sinners?.[n]?.uptie || 1} ｜ ${p.sinners?.[n]?.equippedIdentity?.slice(0, 30) || `LCB ${n}`}`,
+                                value: n,
+                            }))),
+                    ),
+                    new ActionRowBuilder().addComponents(backToLobbyRow().components),
+                ],
+            });
+        }
+
+        if (id === 'pk_sinner_select') {
+            const name = ix.values[0];
+            const p = refresh();
+            const s = SINNERS[name];
+            if (!s) return ix.reply({ content: `❌ 找不到「${name}」`, ephemeral: true });
+
+            const sd = p.sinners?.[name] || { uptie: 1, equippedIdentity: `LCB ${name}` };
+            const lv = p.identityLevels?.[`LCB ${name}`] || p.identityLevels?.[name] || 1;
+            const ut = sd.uptie || 1;
+            const stars = '◆'.repeat(ut) + '◇'.repeat(4 - ut);
+
+            const skills = getSkillList(s);
+            const skillLines = skills.map((sk, i) =>
+                `**${i + 1}.${sk.name}** [${sk.type}/${sk.sin}]\n` +
+                `　基礎:${sk.clashbase} 硬幣:${sk.coins}×+${sk.clashpower} 攻:${sk.attack}${sk.effect ? ` → ${sk.effect.name}×${sk.effect.stacks}` : ''}`
+            ).join('\n');
+
+            const uptieCost = ut < 4 ? UPTIE_COSTS[ut] : null;
+
+            return ix.update({
+                embeds: [new EmbedBuilder()
+                    .setTitle(`👤 ${s.name} / ${s.nameEn}`)
+                    .setColor(0x5865f2)
+                    .addFields(
+                        { name: '📊 等級', value: `Lv.**${lv}** / ${MAX_ID_LEVEL}`, inline: true },
+                        { name: '🔗 連結', value: `${stars} (T${ut})`, inline: true },
+                        { name: '⚡ 速度', value: `${s.minSpd}~${s.maxSpd}`, inline: true },
+                        { name: '❤️ 基礎HP', value: `${s.hp}`, inline: true },
+                        { name: '🛡️ 防禦等級', value: `${s.defLevel}`, inline: true },
+                        { name: '✨ 主罪業', value: `${s.primarySin}`, inline: true },
+                        { name: '⚔️ 主動技能', value: skillLines || '（無）', inline: false },
+                        { name: '🌟 被動', value: `**${s.passive?.name || '—'}**：${s.passive?.desc || '—'}`, inline: false },
+                        { name: '🔧 裝備人格', value: sd.equippedIdentity || `LCB ${name}`, inline: false },
+                        uptieCost
+                            ? { name: '🔗 下次連結提升', value: `🧵 紡錘×${uptieCost}`, inline: true }
+                            : { name: '🔗 連結提升', value: '已達最高 T4', inline: true },
+                    )
+                    .setFooter({ text: `使用 🔗 連結提升按鈕 ｜ 🔧 裝備人格` })
+                    .setTimestamp()],
+                components: [
+                    new ActionRowBuilder().addComponents(
+                        new ButtonBuilder().setCustomId('pk_uptie').setLabel('🔗 連結提升').setStyle(ButtonStyle.Primary),
+                        new ButtonBuilder().setCustomId('pk_equip').setLabel('🔧 裝備人格').setStyle(ButtonStyle.Secondary),
+                        new ButtonBuilder().setCustomId('pk_sinner').setLabel('↩ 返回罪人').setStyle(ButtonStyle.Secondary),
+                        backToLobbyRow().components[0],
+                    ),
+                ],
+            });
+        }
+
+        // ─── 連結提升 (Uptie) ──────────────────────────────────
+        if (id === 'pk_uptie') {
+            const p = refresh();
+            const opts = SINNER_NAMES.slice(0, 25).map(n => {
+                const sd = p.sinners?.[n] || { uptie: 1 };
+                const ut = sd.uptie || 1;
+                const cost = ut < 4 ? UPTIE_COSTS[ut] : null;
+                return {
+                    label: `${n} (T${ut}${cost ? ` → T${ut + 1}` : ' MAX'})`,
+                    description: cost ? `需要 🧵×${cost} ｜ 持有 🧵×${p.thread || 0}` : '已達最高 T4',
+                    value: n,
+                };
+            });
+
+            return ix.update({
+                embeds: [new EmbedBuilder()
+                    .setTitle('🔗 連結提升')
+                    .setColor(0xffd166)
+                    .setDescription(`🧵 持有紡錘：**${p.thread || 0}**\n\n**連結提升費用：**\nT1→T2：×20　T2→T3：×40　T3→T4：×80`)
+                    .setFooter({ text: '選擇罪人進行連結提升' })],
+                components: [
+                    new ActionRowBuilder().addComponents(
+                        new StringSelectMenuBuilder()
+                            .setCustomId('pk_uptie_select')
+                            .setPlaceholder('🔍 選擇要連結提升的罪人...')
+                            .addOptions(opts),
+                    ),
+                    new ActionRowBuilder().addComponents(backToLobbyRow().components),
+                ],
+            });
+        }
+
+        if (id === 'pk_uptie_select') {
+            const name = ix.values[0];
+            const p = refresh();
+            if (!p.sinners) p.sinners = {};
+            if (!p.sinners[name]) p.sinners[name] = { uptie: 1, equippedIdentity: `LCB ${name}` };
+            const sd = p.sinners[name];
+            const ut = sd.uptie || 1;
+
+            if (ut >= 4) {
+                return ix.reply({ content: `「${name}」已達最高連結等級 T4。`, ephemeral: true });
+            }
+
+            const cost = UPTIE_COSTS[ut];
+            if ((p.thread || 0) < cost) {
+                return ix.reply({ content: `❌ 紡錘不足！需要 🧵×${cost}，目前 🧵×${p.thread || 0}`, ephemeral: true });
+            }
+
+            p.thread = (p.thread || 0) - cost;
+            sd.uptie = ut + 1;
+            save(p);
+
+            const stars = '◆'.repeat(sd.uptie) + '◇'.repeat(4 - sd.uptie);
+            return ix.update({
+                embeds: [new EmbedBuilder()
+                    .setTitle('🔗 連結提升成功！')
+                    .setColor(0xffd166)
+                    .setDescription(`**${name}** → T${sd.uptie} ${stars}\n消耗：🧵 ×${cost}　剩餘：🧵 ×${p.thread || 0}`)
+                    .setTimestamp()],
+                components: [
+                    new ActionRowBuilder().addComponents(
+                        new ButtonBuilder().setCustomId('pk_uptie').setLabel('↩ 返回連結提升').setStyle(ButtonStyle.Secondary),
+                        backToLobbyRow().components[0],
+                    ),
+                ],
+            });
+        }
+
+        // ─── 裝備人格 (Equip) ──────────────────────────────────
+        if (id === 'pk_equip') {
+            const p = refresh();
+            const opts = SINNER_NAMES.slice(0, 25).map(n => {
+                const sd = p.sinners?.[n] || { equippedIdentity: `LCB ${n}` };
+                const ownedForSinner = (p.identities || []).filter(name => getIdentitySinnerKey(name) === n);
+                return {
+                    label: `${n} (${ownedForSinner.length}件)`,
+                    description: `目前：${sd.equippedIdentity?.slice(0, 30) || `LCB ${n}`}`,
+                    value: n,
+                };
+            });
+
+            return ix.update({
+                embeds: [new EmbedBuilder()
+                    .setTitle('🔧 裝備人格')
+                    .setColor(0x2ed573)
+                    .setDescription('選擇罪人後，再選擇要裝備的人格。')
+                    .setFooter({ text: `持有 ${p.identities.length} 件人格` })],
+                components: [
+                    new ActionRowBuilder().addComponents(
+                        new StringSelectMenuBuilder()
+                            .setCustomId('pk_equip_sinner')
+                            .setPlaceholder('🔍 選擇罪人...')
+                            .addOptions(opts),
+                    ),
+                    new ActionRowBuilder().addComponents(backToLobbyRow().components),
+                ],
+            });
+        }
+
+        if (id === 'pk_equip_sinner') {
+            const sinnerName = ix.values[0];
+            const p = refresh();
+            const ownedForSinner = (p.identities || []).filter(name => getIdentitySinnerKey(name) === sinnerName);
+            const allOpts = [`LCB ${sinnerName}`, ...ownedForSinner];
+            const opts = allOpts.slice(0, 25).map(name => ({
+                label: getShortName(name).slice(0, 25),
+                description: name === `LCB ${sinnerName}` ? '預設人格' : RARITY_LABEL[findRarity(name)],
+                value: name.slice(0, 100),
+            }));
+
+            return ix.update({
+                embeds: [new EmbedBuilder()
+                    .setTitle(`🔧 裝備人格 — ${sinnerName}`)
+                    .setColor(0x2ed573)
+                    .setDescription(`選擇要裝備的人格：`)
+                    .setFooter({ text: `可選 ${allOpts.length} 件人格` })],
+                components: [
+                    new ActionRowBuilder().addComponents(
+                        new StringSelectMenuBuilder()
+                            .setCustomId('pk_equip_select')
+                            .setPlaceholder('選擇人格...')
+                            .addOptions(opts),
+                    ),
+                    new ActionRowBuilder().addComponents(
+                        new ButtonBuilder().setCustomId('pk_equip').setLabel('↩ 返回罪人選擇').setStyle(ButtonStyle.Secondary),
+                        backToLobbyRow().components[0],
+                    ),
+                ],
+            });
+        }
+
+        if (id === 'pk_equip_select') {
+            const identityName = ix.values[0];
+            const p = refresh();
+            const sinnerName = SINNER_NAMES.find(n => identityName === `LCB ${n}` || getIdentitySinnerKey(identityName) === n);
+            if (!sinnerName) return ix.reply({ content: '❌ 無法識別此人格對應的罪人。', ephemeral: true });
+
+            const owned = (p.identities || []).includes(identityName);
+            const isDefault = identityName === `LCB ${sinnerName}`;
+            if (!owned && !isDefault) {
+                return ix.reply({ content: `❌ 你沒有持有「${identityName}」，不能裝備。`, ephemeral: true });
+            }
+
+            if (!p.sinners) p.sinners = {};
+            if (!p.sinners[sinnerName]) p.sinners[sinnerName] = { uptie: 1, equippedIdentity: `LCB ${sinnerName}` };
+            p.sinners[sinnerName].equippedIdentity = identityName;
+            save(p);
+
+            return ix.update({
+                embeds: [new EmbedBuilder()
+                    .setTitle('🔧 裝備更新')
+                    .setColor(0x2ed573)
+                    .setDescription(`**${sinnerName}** 現在裝備：\n${identityName}`)
+                    .setTimestamp()],
+                components: [
+                    new ActionRowBuilder().addComponents(
+                        new ButtonBuilder().setCustomId('pk_equip').setLabel('↩ 返回裝備').setStyle(ButtonStyle.Secondary),
+                        backToLobbyRow().components[0],
+                    ),
+                ],
+            });
+        }
+
+        // ─── 資源查詢 (Threads) ────────────────────────────────
+        if (id === 'pk_threads') {
+            const p = refresh();
+            return ix.update({
+                embeds: [new EmbedBuilder()
+                    .setTitle('🧵 資源查詢')
+                    .setColor(0xa55eea)
+                    .addFields(
+                        { name: '🧵 紡錘', value: `${p.thread || 0}`, inline: true },
+                        { name: '📦 人格碎片', value: `${p.fragments || 0}`, inline: true },
+                        { name: '📜 經驗卷', value: `${p.expScrolls || 0}`, inline: true },
+                        { name: '🌱 LightSeeds', value: `${p.lightSeeds || 0}`, inline: true },
+                    )
+                    .setDescription(
+                        '**連結提升費用：**\nT1→T2：×20　T2→T3：×40　T3→T4：×80\n\n' +
+                        '**人格升等費用（每一級）：**\nLv1-20：碎片×(等級×5)\nLv21-40：碎片×(等級×8) + 卷×1\nLv41-60：碎片×(等級×12) + 卷×3'
+                    )
+                    .setFooter({ text: '在 📋 人格庫或 🔼 人格培育進行升等' })
+                    .setTimestamp()],
                 components: [new ActionRowBuilder().addComponents(backToLobbyRow().components)],
             });
         }

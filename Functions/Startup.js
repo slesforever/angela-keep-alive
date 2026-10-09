@@ -711,11 +711,10 @@ const allSlashCommands = [
         ),
 
     new SlashCommandBuilder()
-            .setName('setaichannel')
-            .setDescription('將 AI 人格綁定至一個文字頻道')
+            .setName('aipersona')
+            .setDescription('切換此頻道的 AI 人格')
             .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-            // 人格選項直接取自 AIChatSystem 的 PERSONAS，不再另外維護清單。
-            .addStringOption(o => o.setName('persona').setDescription('此頻道使用的人格').setRequired(true).addChoices(...AIChatSystem.getPersonaChoices()))
+            .addStringOption(o => o.setName('persona').setDescription('選擇人格').setRequired(true).addChoices(...AIChatSystem.getPersonaChoices()))
             .addChannelOption(o => o.setName('channel').setDescription('目標頻道（不選則使用目前頻道）').addChannelTypes(ChannelType.GuildText)),
     
         new SlashCommandBuilder()
@@ -1082,7 +1081,13 @@ const allSlashCommands = [
         .addStringOption(o => o.setName('bio').setDescription('自我介紹（最多 500 字）').setMaxLength(500))
         .addStringOption(o => o.setName('origin').setDescription('經驗來源 — 你玩過什麼、從哪來（最多 300 字）').setMaxLength(300))
         .addStringOption(o => o.setName('image_url').setDescription('背景圖片網址（banner，http/https 開頭）'))
-        .addStringOption(o => o.setName('title').setDescription('裝備稱號（留空卸下）')),
+        .addStringOption(o => o.setName('title').setDescription('裝備稱號（留空卸下）'))
+        .addAttachmentOption(o => o.setName('banner').setDescription('上傳橫幅圖片（jpg/png/gif/webp，最大 8MB）')),
+
+    new SlashCommandBuilder()
+        .setName('setbanner')
+        .setDescription('上傳個人資料橫幅圖片')
+        .addAttachmentOption(o => o.setName('banner').setDescription('選擇要上傳的橫幅圖片').setRequired(true)),
 
     new SlashCommandBuilder()
         .setName('title')
@@ -1578,7 +1583,7 @@ client.on(
             });
         }
 
-        if (interaction.commandName === 'setaichannel') {
+        if (interaction.commandName === 'aipersona') {
                 if (!interaction.guild || !interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
                     return interaction.reply({ content: '此指令僅限伺服器管理員使用。', flags: MessageFlags.Ephemeral });
                 }
@@ -1591,7 +1596,7 @@ client.on(
                 const patch = { aiChannelId: channel.id };
                 saveConfig(patch);
                 const persisted = await saveGuildConfigToDiscord(client, interaction.guild.id, patch);
-                return interaction.reply({ content: '已將 ' + channel + ' 設為 ' + AIChatSystem.getPersonaLabel(persona) + ' AI 頻道。' + (persisted ? '' : '（提醒：尚未設定 Discord 儲存頻道。）'), flags: MessageFlags.Ephemeral });
+                return interaction.reply({ content: '✅ 已將 ' + channel + ' 的 AI 人格切換為 **' + AIChatSystem.getPersonaLabel(persona) + '**。' + (persisted ? '' : '（提醒：尚未設定 Discord 儲存頻道。）'), flags: MessageFlags.Ephemeral });
             }
 
             // ═════════════════════════════════════

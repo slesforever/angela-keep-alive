@@ -1,21 +1,57 @@
 // Functions/GameSystem/ProfileSystem.js
-// 個人資料系統：融合 rank + stats，可編輯自我介紹、經驗來源、頭像、稱號
-// 每天最多更新 2 次（圖片需 AI 審核）
+// 個人資料系統：融合 rank + stats，可編輯自我介紹、經驗來源、橫幅、稱號
+// 每天最多更新 2 次
 'use strict';
 
 const fs = require('fs');
 const path = require('path');
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags, AttachmentBuilder } = require('discord.js');
 const { getOrCreatePlayer, savePlayerData } = require('./PacksAndData.js');
 const { getLanguage, pick } = require('./LanguageSystem.js');
 const { getLevelFromXp, getPlayerTotalXp } = require('./LevelSystem.js');
-const { getMarriages, addMarriage } = require('./MarriageSystem.js');
+const { getMarriages } = require('./MarriageSystem.js');
 
 const SUPER_ADMIN_ID = '1330463890122735642';
 const PROFILE_UPDATE_LIMIT = 2;
 const MAX_BIO_LENGTH = 500;
 const MAX_ORIGIN_LENGTH = 300;
 const MAX_TITLE_LENGTH = 50;
+const MAX_BANNER_SIZE_MB = 8;
+
+const BANNER_DIR = path.join(process.cwd(), 'data', 'banners');
+
+function getBannerPath(userId) {
+    return path.join(BANNER_DIR, `${userId}.png`);
+}
+
+function saveBannerFromUrl(userId, url) {
+    return fetch(url)
+        .then(res => {
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res.arrayBuffer();
+        })
+        .then(buf => {
+            const buffer = Buffer.from(buf);
+            if (buffer.length > MAX_BANNER_SIZE_MB * 1024 * 1024) {
+                throw new Error('File too large');
+            }
+            fs.mkdirSync(BANNER_DIR, { recursive: true });
+            fs.writeFileSync(getBannerPath(userId), buffer);
+            return true;
+        });
+}
+
+function getBannerUrl(userId, client) {
+    const filePath = getBannerPath(userId);
+    if (!fs.existsSync(filePath)) return null;
+    return `attachment://banner_${userId}.png`;
+}
+
+function createBannerAttachment(userId) {
+    const filePath = getBannerPath(userId);
+    if (!fs.existsSync(filePath)) return null;
+    return new AttachmentBuilder(filePath, { name: `banner_${userId}.png` });
+}
 
 // ─── 個人資料欄位預設值 ─────────────────────────────────────────
 function ensureProfile(player) {
@@ -129,7 +165,10 @@ async function handleProfile(client, interaction) {
         .setTitle(pick(lang, `📋 ${target.username} 的個人資料`, `📋 ${target.username}'s Profile`))
         .setThumbnail(target.displayAvatarURL({ dynamic: true, size: 256 }));
 
-    if (profile.imageUrl) {
+    const bannerAttachment = createBannerAttachment(target.id);
+    if (bannerAttachment) {
+        embed.setImage(`attachment://banner_${target.id}.png`);
+    } else if (profile.imageUrl) {
         embed.setImage(profile.imageUrl);
     }
 
@@ -179,7 +218,12 @@ async function handleProfile(client, interaction) {
     embed.setFooter({ text: pick(lang, '使用 /updateprofile 編輯你的個人資料（每天最多 2 次）', 'Use /updateprofile to edit your profile (max 2 times/day)') });
     embed.setTimestamp();
 
-    return interaction.reply({ embeds: [embed] });
+    const replyPayload = { embeds: [embed] };
+    if (bannerAttachment) {
+        replyPayload.files = [bannerAttachment];
+    }
+
+    return interaction.reply(replyPayload);
 }
 
 // ─── /updateprofile 指令 ────────────────────────────────────────
@@ -203,8 +247,29 @@ async function handleUpdateProfile(client, interaction) {
     const imageUrl = interaction.options?.getString('image_url');
     const title = interaction.options?.getString('title');
 
+    const attachment = interaction.options?.getAttachment?.('banner');
+
     let changed = false;
     const changes = [];
+
+    if (attachment) {
+        const isImage = attachment.contentType?.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp)$/i.test(attachment.name || '');
+        if (!isImage) {
+            return interaction.reply({ content: pick(lang, '❌ 上傳的檔案必須是圖片格式（jpg/png/gif/webp）。', '❌ The uploaded file must be an image (jpg/png/gif/webp).'), flags: MessageFlags.Ephemeral });
+        }
+        if (attachment.size > MAX_BANNER_SIZE_MB * 1024 * 1024) {
+            return interaction.reply({ content: pick(lang, `❌ 圖片大小不能超過 ${MAX_BANNER_SIZE_MB}MB。`, `❌ Image size must not exceed ${MAX_BANNER_SIZE_MB}MB.`), flags: MessageFlags.Ephemeral });
+        }
+        try {
+            await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+            await saveBannerFromUrl(interaction.user.id, attachment.url);
+            changed = true;
+            changes.push(pick(lang, '橫幅圖片', 'Banner Image'));
+        } catch (err) {
+            console.error('[Profile] 橫幅儲存失敗:', err.message);
+            return interaction.editReply({ content: pick(lang, '❌ 橫幅圖片儲存失敗，請稍後再試。', '❌ Failed to save banner image, please try again later.') });
+        }
+    }
 
     if (bio !== null && bio !== undefined) {
         if (bio.length > MAX_BIO_LENGTH) {
@@ -261,10 +326,15 @@ async function handleUpdateProfile(client, interaction) {
     recordUpdate(player);
     savePlayerData(client, interaction.user.id, player);
 
+    const replyContent = pick(lang,
+        `✅ 個人資料已更新：${changes.join('、')}（今日已更新 ${getUpdateCountToday(player)}/${PROFILE_UPDATE_LIMIT} 次）`,
+        `✅ Profile updated: ${changes.join(', ')} (${getUpdateCountToday(player)}/${PROFILE_UPDATE_LIMIT} updates today)`);
+
+    if (interaction.deferred) {
+        return interaction.editReply({ content: replyContent });
+    }
     return interaction.reply({
-        content: pick(lang,
-            `✅ 個人資料已更新：${changes.join('、')}（今日已更新 ${getUpdateCountToday(player)}/${PROFILE_UPDATE_LIMIT} 次）`,
-            `✅ Profile updated: ${changes.join(', ')} (${getUpdateCountToday(player)}/${PROFILE_UPDATE_LIMIT} updates today)`),
+        content: replyContent,
         flags: MessageFlags.Ephemeral,
     });
 }
@@ -314,10 +384,61 @@ async function handleTitle(client, interaction) {
     }
 }
 
+// ─── /setbanner 指令（上傳橫幅圖片）──────────────────────────────
+async function handleSetBanner(client, interaction) {
+    const lang = getLanguage(interaction.user.id);
+    const player = getOrCreatePlayer(client, interaction.user.id, interaction.user.username);
+
+    const updatesToday = getUpdateCountToday(player);
+    if (updatesToday >= PROFILE_UPDATE_LIMIT && interaction.user.id !== SUPER_ADMIN_ID) {
+        return interaction.reply({
+            content: pick(lang,
+                `⏳ 你今天已經更新了 ${updatesToday} 次個人資料，每日上限為 ${PROFILE_UPDATE_LIMIT} 次。請明天再試。`,
+                `⏳ You've updated your profile ${updatesToday} times today (daily limit: ${PROFILE_UPDATE_LIMIT}). Try again tomorrow.`),
+            flags: MessageFlags.Ephemeral,
+        });
+    }
+
+    const attachment = interaction.options?.getAttachment?.('banner');
+    if (!attachment) {
+        return interaction.reply({ content: pick(lang, '❌ 請上傳一張圖片作為橫幅。', '❌ Please upload an image as your banner.'), flags: MessageFlags.Ephemeral });
+    }
+
+    const isImage = attachment.contentType?.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp)$/i.test(attachment.name || '');
+    if (!isImage) {
+        return interaction.reply({ content: pick(lang, '❌ 上傳的檔案必須是圖片格式（jpg/png/gif/webp）。', '❌ The uploaded file must be an image (jpg/png/gif/webp).'), flags: MessageFlags.Ephemeral });
+    }
+    if (attachment.size > MAX_BANNER_SIZE_MB * 1024 * 1024) {
+        return interaction.reply({ content: pick(lang, `❌ 圖片大小不能超過 ${MAX_BANNER_SIZE_MB}MB。`, `❌ Image size must not exceed ${MAX_BANNER_SIZE_MB}MB.`), flags: MessageFlags.Ephemeral });
+    }
+
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+    try {
+        await saveBannerFromUrl(interaction.user.id, attachment.url);
+        recordUpdate(player);
+        savePlayerData(client, interaction.user.id, player);
+
+        const bannerAttachment = createBannerAttachment(interaction.user.id);
+        const embed = new EmbedBuilder()
+            .setColor(0x2ed573)
+            .setTitle(pick(lang, '✅ 橫幅已更新', '✅ Banner Updated'))
+            .setDescription(pick(lang, '你的個人資料橫幅已成功上傳！', 'Your profile banner has been uploaded successfully!'))
+            .setImage(`attachment://banner_${interaction.user.id}.png`)
+            .setTimestamp();
+
+        return interaction.editReply({ embeds: [embed], files: bannerAttachment ? [bannerAttachment] : [] });
+    } catch (err) {
+        console.error('[Profile] 橫幅儲存失敗:', err.message);
+        return interaction.editReply({ content: pick(lang, '❌ 橫幅圖片儲存失敗，請稍後再試。', '❌ Failed to save banner image, please try again later.') });
+    }
+}
+
 module.exports = {
     handleProfile,
     handleUpdateProfile,
     handleTitle,
+    handleSetBanner,
     ensureProfile,
     recordUpdate,
     getUpdateCountToday,

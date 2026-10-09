@@ -65,7 +65,10 @@ const commands = [
         .addStringOption(o => o.setName('bio').setDescription('自我介紹（最多 500 字）').setMaxLength(500))
         .addStringOption(o => o.setName('origin').setDescription('經驗來源（最多 300 字）').setMaxLength(300))
         .addStringOption(o => o.setName('image_url').setDescription('背景圖片網址（banner）'))
-        .addStringOption(o => o.setName('title').setDescription('裝備稱號')),
+        .addStringOption(o => o.setName('title').setDescription('裝備稱號'))
+        .addAttachmentOption(o => o.setName('banner').setDescription('上傳橫幅圖片（jpg/png/gif/webp，最大 8MB）')),
+    new SlashCommandBuilder().setName('setbanner').setDescription('上傳個人資料橫幅圖片')
+        .addAttachmentOption(o => o.setName('banner').setDescription('選擇要上傳的橫幅圖片').setRequired(true)),
     new SlashCommandBuilder().setName('title').setDescription('查看或裝備稱號')
         .addStringOption(o => o.setName('action').setDescription('操作').setRequired(true).addChoices({ name: '查看列表', value: 'list' }, { name: '裝備', value: 'equip' }, { name: '卸下', value: 'unequip' }))
         .addStringOption(o => o.setName('name').setDescription('稱號名稱')),
