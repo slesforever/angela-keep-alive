@@ -243,53 +243,54 @@ function buildAllPlayersBackupText() {
 function splitTextIntoChunks(text, maxBytes = MAX_TXT_BYTES) {
     const lines = String(text || '').split('\n');
     const chunks = [];
-    let current = '';
+    let current = [];
+    let currentBytes = 0;
 
     const pushCurrent = () => {
-        if (current.length > 0) chunks.push(current);
-        current = '';
+        if (current.length) chunks.push(current.join('\n'));
+        current = [];
+        currentBytes = 0;
     };
 
-    const appendLine = (line) => {
-        const next = current ? `${current}\n${line}` : line;
-        if (Buffer.byteLength(next, 'utf8') <= maxBytes) {
-            current = next;
-            return;
+    for (const line of lines) {
+        const lineBytes = Buffer.byteLength(line, 'utf8');
+        const nextBytes = current.length ? currentBytes + 1 + lineBytes : lineBytes;
+
+        if (nextBytes <= maxBytes) {
+            current.push(line);
+            currentBytes = nextBytes;
+            continue;
         }
 
-        if (current) pushCurrent();
+        pushCurrent();
 
-        if (Buffer.byteLength(line, 'utf8') <= maxBytes) {
-            current = line;
-            return;
+        if (lineBytes <= maxBytes) {
+            current.push(line);
+            currentBytes = lineBytes;
+            continue;
         }
 
+        // 單行就超過上限（幾乎不會發生）：直接硬切
         let remaining = line;
         while (remaining.length > 0) {
             let lo = 1;
             let hi = remaining.length;
             let best = 1;
-
             while (lo <= hi) {
                 const mid = Math.floor((lo + hi) / 2);
-                const piece = remaining.slice(0, mid);
-                if (Buffer.byteLength(piece, 'utf8') <= maxBytes) {
+                if (Buffer.byteLength(remaining.slice(0, mid), 'utf8') <= maxBytes) {
                     best = mid;
                     lo = mid + 1;
                 } else {
                     hi = mid - 1;
                 }
             }
-
-            const piece = remaining.slice(0, best);
-            chunks.push(piece);
+            chunks.push(remaining.slice(0, best));
             remaining = remaining.slice(best);
         }
-    };
+    }
 
-    for (const line of lines) appendLine(line);
     pushCurrent();
-
     return chunks.filter(Boolean);
 }
 
