@@ -113,6 +113,11 @@ async function handleMarry(client, interaction) {
             flags: MessageFlags.Ephemeral,
         });
     }
+    
+    if (subcommand === 'status' || !targetOption) {
+        const spouses = getMarriages(interaction.user.id);
+        const en = language === 'en';
+        const embed = new EmbedBuilder()
 
         const embed = new EmbedBuilder()
             .setColor(0xe91e63)
