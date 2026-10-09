@@ -79,7 +79,7 @@ function addMarriage(a, b) {
     if (a === b) return false;
     if (data.marriages.some(m => pairKey(m.a, m.b) === pairKey(a, b))) return false;
     data.marriages.push({ a, b, createdAt: Date.now() });
-    data.pending = data.pending.filter(r => !(r.from === a && r.to === b));
+    data.pending = data.pending.filter(r => !((r.from === a && r.to === b) || (r.from === b && r.to === a)));
     save(data);
     return true;
 }
@@ -99,9 +99,21 @@ async function handleMarry(client, interaction) {
         : null;
     const language = getLanguage(interaction.user.id);
 
-    if (subcommand === 'status' || !targetOption) {
-        const spouses = getMarriages(interaction.user.id);
+    if (subcommand === 'cancel') {
         const en = language === 'en';
+        const data = cleanExpired(load());
+        const before = data.pending.length;
+        data.pending = data.pending.filter(r => r.from !== interaction.user.id);
+        save(data);
+        const removed = before - data.pending.length;
+        return interaction.reply({
+            content: removed
+                ? (en ? `✅ Cancelled ${removed} outgoing marriage request(s).` : `✅ 已取消 ${removed} 個發送中的結婚請求。`)
+                : (en ? 'You have no outgoing marriage requests.' : '你沒有發送中的結婚請求。'),
+            flags: MessageFlags.Ephemeral,
+        });
+    }
+
         const embed = new EmbedBuilder()
             .setColor(0xe91e63)
             .setTitle(en ? '💍 Your Marriages' : '💍 你的婚姻')
