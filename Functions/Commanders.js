@@ -85,6 +85,18 @@ function createPseudoMessage(interaction) {
 async function handleSlashCommands(client, interaction) {
     const { commandName, user } = interaction;
     const uid = user.id;
+
+    // If the Startup.js auto-defer timer already fired, redirect
+    // interaction.reply → editReply so handlers that call reply()
+    // directly don't throw "Interaction has already been deferred".
+    const origReply = interaction.reply.bind(interaction);
+    interaction.reply = function (options) {
+        if (interaction.deferred && !interaction.replied) {
+            return interaction.editReply(options);
+        }
+        return origReply(options);
+    };
+
     const fakeMessage = createPseudoMessage(interaction);
 
     try {
