@@ -118,8 +118,6 @@ async function handleMarry(client, interaction) {
         const spouses = getMarriages(interaction.user.id);
         const en = language === 'en';
         const embed = new EmbedBuilder()
-
-        const embed = new EmbedBuilder()
             .setColor(0xe91e63)
             .setTitle(en ? '💍 Your Marriages' : '💍 你的婚姻')
             .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true, size: 256 }));
