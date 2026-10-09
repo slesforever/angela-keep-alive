@@ -1328,9 +1328,61 @@ client.on(
             return;
         }
 
+        // ── 立即 Loading：指令一進來就先回一句「載入中」，
+        //    之後所有回覆都自動改成編輯這則訊息。
+        //    /announce 要開 Modal，不能先回覆，所以跳過。
+        if (interaction.commandName !== 'announce') {
+            try {
+                await interaction.reply({
+                    content: '⏳ 載入中… Loading…'
+                });
+            } catch (err) {
+                console.warn('[Slash] 載入中提示送出失敗:', err.message);
+            }
+
+            const origReply = interaction.reply.bind(interaction);
+            const origFollowUp = interaction.followUp.bind(interaction);
+
+            const replaceLoading = options => {
+                if (interaction.__loadingDone) return null;
+                interaction.__loadingDone = true;
+
+                const wantsEphemeral =
+                    !!options &&
+                    typeof options === 'object' &&
+                    (options.ephemeral === true ||
+                        (Number(options.flags) & MessageFlags.Ephemeral) === MessageFlags.Ephemeral);
+
+                // 原本「只有自己看得到」的回應：收掉公開的 Loading，改成私下回
+                if (wantsEphemeral) {
+                    return interaction
+                        .deleteReply()
+                        .catch(() => {})
+                        .then(() => interaction.followUp(options));
+                }
+
+                return interaction.editReply(options);
+            };
+
+            interaction.reply = function (options) {
+                if (!interaction.deferred && !interaction.replied) return origReply(options);
+                return replaceLoading(options) || origReply(options);
+            };
+
+            interaction.followUp = function (options) {
+                return replaceLoading(options) || origFollowUp(options);
+            };
+
+            // 指令自己又呼叫 deferReply 時直接略過，避免重複回覆
+            interaction.deferReply = function () {
+                return Promise.resolve();
+            };
+        }
+
         localizeInteraction(
             interaction
         );
+        
 
         // ═════════════════════════════════════
         // /announce
