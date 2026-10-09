@@ -36,7 +36,8 @@ const commands = [
     new SlashCommandBuilder().setName('leave').setDescription('離開語音'),
     new SlashCommandBuilder().setName('marry').setDescription('查看婚姻狀態或發送結婚請求')
         .addSubcommand(s => s.setName('status').setDescription('查看自己的婚姻狀態與配偶'))
-        .addSubcommand(s => s.setName('request').setDescription('向指定使用者發送結婚請求').addUserOption(o => o.setName('target').setDescription('選擇要結婚的使用者').setRequired(true))),
+        .addSubcommand(s => s.setName('request').setDescription('向指定使用者發送結婚請求').addUserOption(o => o.setName('target').setDescription('選擇要結婚的使用者').setRequired(true)))
+        .addSubcommand(s => s.setName('cancel').setDescription('取消你發送中的結婚請求')),
     new SlashCommandBuilder().setName('divorce').setDescription('離婚；不選對象會顯示可選配偶').addUserOption(o => o.setName('target').setDescription('選擇要離婚的配偶')),
     new SlashCommandBuilder().setName('status').setDescription('查看狀態'),
     new SlashCommandBuilder().setName('setchannel').setDescription('設定系統頻道').setDefaultMemberPermissions(admin)
