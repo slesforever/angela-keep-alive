@@ -32,6 +32,9 @@ let lastModelFetch = 0;
 const MODEL_CACHE_TTL = 1800_000;  // 30 分鐘更新一次
 const MAX_MODEL_ATTEMPTS = 5;      // 單次對話最多嘗試 5 個模型
 const GENERATION_TIMEOUT_MS = 30000;// 30 秒生成逾時
+const SEARCH_TIMEOUT_MS    = 45000;   // 帶網頁搜尋的生成逾時 45 秒
+const ENABLE_WEB_SEARCH    = true;    // 啟用 Gemini Google Search grounding
+const SEARCH_FALLBACK_MODELS = 3;     // 最多對前 N 個模型嘗試搜尋 grounding
 
 try { fs.mkdirSync(MEM_DIR, { recursive: true }); } catch {}
 
@@ -491,7 +494,65 @@ function likelyContainsPersonalFacts(text) {
         return true;
     }
 
-    // ─── Gemini 呼叫核心 ───────────────────────────────────────────
+    // ─── Google Search Grounding 輔助 ───────────────────────────────
+// 從 Gemini groundingMetadata 抽出引用來源，回傳 { text, sources }
+function extractGrounding(data) {
+    const cand = data?.candidates?.[0];
+    const meta = cand?.groundingMetadata;
+    if (!meta) return { sources: [] };
+    const chunks = Array.isArray(meta.groundingChunks) ? meta.groundingChunks : [];
+    const seen = new Set();
+    const sources = [];
+    for (const c of chunks) {
+        const web = c && c.web;
+        if (!web || !web.uri) continue;
+        if (seen.has(web.uri)) continue;
+        seen.add(web.uri);
+        sources.push({ uri: web.uri, title: web.title || web.uri });
+    }
+    return { sources };
+}
+
+// 把來源附在回覆末尾，讓使用者知道 Angela 查過網路
+function appendSources(text, sources) {
+    if (!sources || !sources.length) return text;
+    const list = sources.slice(0, 4).map((s, i) => `[${i + 1}] ${s.title} — ${s.uri}`).join('\n');
+    return text + '\n\n📚 參考資料：\n' + list;
+}
+
+// 判斷一則訊息是否「需要」查網路：時事、事實、價格、版本、誰是誰、最近、幾年等
+function looksLikeSearchQuery(text) {
+    if (!text || typeof text !== 'string') return false;
+    const t = text.trim();
+    if (t.length < 4) return false;
+    const zh = /(最新|最近|現在|今天|今年|幾年|多少錢|價格|推出|上市|是誰|是什麼|怎麼回事|發生|新聞|更新|版本|哪一個|哪個|查一下|幫我查|搜尋|搜尋一下|查詢)/u;
+    const en = /(latest|recent|current|today|this year|price|news|update|version|who is|what is|when did|how many|search|look up)/i;
+    return zh.test(t) || en.test(t);
+}
+
+// 對單一模型發出帶搜尋 grounding 的請求；失敗時回傳 { error } 而非拋出
+async function generateWithSearch(apiKey, modelName, body, timeoutMs) {
+    const searchBody = { ...body, tools: [{ googleSearch: {} }] };
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+    const res = await fetchWithTimeout(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(searchBody)
+    }, timeoutMs);
+    if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        return { error: new Error(`[search ${modelName}] HTTP ${res.status}:${errText.slice(0, 150)}`), status: res.status, errText };
+    }
+    const data = await res.json();
+    const rawParts = data?.candidates?.[0]?.content?.parts || [];
+    const textParts = rawParts.filter(p => !p.thought && typeof p.text === 'string');
+    let out = textParts.map(p => p.text).join('').trim();
+    if (!out && rawParts.length > 0) out = rawParts.map(p => p.text || '').join('').trim();
+    const { sources } = extractGrounding(data);
+    return { out, sources, data };
+}
+
+// ─── Gemini 呼叫核心 ───────────────────────────────────────────
 async function askGemini(prompt, g, userId, images, guild, client, userName = '使用者', channelId = 'legacy') {
     const apiKey = (process.env.GEMINI_API_KEY || '').trim();
     if (!apiKey) {
@@ -540,6 +601,44 @@ async function askGemini(prompt, g, userId, images, guild, client, userName = '�
     };
 
     let lastError = null;
+    const wantsSearch = ENABLE_WEB_SEARCH && looksLikeSearchQuery(rawContent);
+
+    // ── 先嘗試帶 Google Search grounding 的生成（僅當訊息看起來需要查網路）
+    if (wantsSearch) {
+        for (const modelName of modelsToTry.slice(0, SEARCH_FALLBACK_MODELS)) {
+            try {
+                const r = await generateWithSearch(apiKey, modelName, body, SEARCH_TIMEOUT_MS);
+                if (r.error) {
+                    const code = r.status;
+                    if (code === 429 || (r.errText || '').includes('quota') || (r.errText || '').includes('RESOURCE_EXHAUSTED')) {
+                        console.warn(`⏳ [AIChat+Search] ${modelName} 配額限制，換下一個模型`);
+                        lastError = r.error; continue;
+                    }
+                    if (code === 400 || code === 404 || (r.errText || '').includes('not found')) {
+                        console.warn(`🚫 [AIChat+Search] ${modelName} 不支援搜尋 grounding 或已停用，跳過`);
+                        lastError = r.error; continue;
+                    }
+                    lastError = r.error; continue;
+                }
+                if (r.out && r.out.trim()) {
+                    let final = r.out;
+                    if (r.sources && r.sources.length) final = appendSources(final, r.sources);
+                    pushHistByKey(sharedKey, 'user', userText, SHARED_HIST_CAP);
+                    pushHistByKey(sharedKey, 'model', final, SHARED_HIST_CAP);
+                    pushHistByKey(userKey, 'user', rawContent, USER_HIST_CAP);
+                    pushHistByKey(userKey, 'model', final, USER_HIST_CAP);
+                    queueBackup(client, g);
+                    updateLongTermFacts(rawContent, g, userId, userName, client).catch(err => console.error('[AIChat] 長期事實抽取失敗:', err.message));
+                    console.log(`🌐 [AIChat+Search] ${modelName} 以網頁搜尋回覆，引用 ${r.sources.length} 個來源`);
+                    return polish(final, guild);
+                }
+            } catch (err) {
+                lastError = err;
+                console.error(`⚠️ [AIChat+Search] ${modelName} 例外:`, err.message);
+            }
+        }
+        console.warn('🔄 [AIChat+Search] 所有支援搜尋的模型都失敗，退回一般生成模式');
+    }
 
     for (const modelName of modelsToTry.slice(0, MAX_MODEL_ATTEMPTS)) {
         try {
