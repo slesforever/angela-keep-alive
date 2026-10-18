@@ -34,7 +34,7 @@ const MAX_MODEL_ATTEMPTS = 5;      // 單次對話最多嘗試 5 個模型
 const GENERATION_TIMEOUT_MS = 30000;// 30 秒生成逾時
 const SEARCH_TIMEOUT_MS    = 45000;   // 帶網頁搜尋的生成逾時 45 秒
 const ENABLE_WEB_SEARCH    = true;    // 啟用 Gemini Google Search grounding
-const SEARCH_FALLBACK_MODELS = 3;     // 最多對前 N 個模型嘗試搜尋 grounding
+const SEARCH_FALLBACK_MODELS = 5;     // 最多對前 N 個模型嘗試搜尋 grounding
 
 try { fs.mkdirSync(MEM_DIR, { recursive: true }); } catch {}
 
@@ -601,7 +601,7 @@ async function askGemini(prompt, g, userId, images, guild, client, userName = '�
     };
 
     let lastError = null;
-    const wantsSearch = ENABLE_WEB_SEARCH && looksLikeSearchQuery(rawContent);
+    const wantsSearch = ENABLE_WEB_SEARCH;
 
     // ── 先嘗試帶 Google Search grounding 的生成（僅當訊息看起來需要查網路）
     if (wantsSearch) {
