@@ -152,6 +152,7 @@ const {
 const ShopSystem = require('./GameSystem/ShopSystem.js');
 const GiveawaySystem = require('./GameSystem/GiveawayEventSystem.js');
 const AIChatSystem = require('./GameSystem/AIChatSystem.js');
+const AngelaStatusSystem = require('./GameSystem/AngelaStatusSystem.js');
 const ProfileSystem = require('./GameSystem/ProfileSystem.js');
 const CheckInSystem = require('./GameSystem/CheckInSystem.js');
 const WatchdogSystem = require('./GameSystem/WatchdogSystem.js');
@@ -2448,22 +2449,7 @@ client.once(
         // Presence
         // ─────────────────────────────────────
 
-        client.user.setPresence({
-            status: 'idle',
-
-            activities: [
-                {
-                    name:
-                        'customstatus',
-
-                    type:
-                        ActivityType.Custom,
-
-                    state:
-                        '羅蘭。我不能在這裡停下。哪怕這是一條沒有盡頭的荊棘之路，哪怕最後只能迎來毫無意義的毀滅……我也要親手為這長達百年的悲劇畫上句號'
-                }
-            ]
-        });
+        AngelaStatusSystem.start(client, 30 * 60 * 1000);
 
         // ─────────────────────────────────────
         // Discord 伺服器設定還原
