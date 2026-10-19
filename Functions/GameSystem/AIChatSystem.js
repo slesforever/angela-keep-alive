@@ -392,14 +392,13 @@ async function restoreAll(client) {
 
 // ─── System Instruction (包含個人紀錄摘要 + 群聊須知) ───────────
 function systemInstr(guild, userName, userPersonalHistText, personaId, userFacts, userId) {
-        const isDM = !guild;
-        const emojis = guild ? [...guild.emojis.cache.values()].slice(0, EMOJI_CAP).map(e => e.toString()) : [];
-        const stickers = guild ? [...guild.stickers.cache.values()].map(s => s.name) : [];
+        const emojis = [...guild.emojis.cache.values()].slice(0, EMOJI_CAP).map(e => e.toString());
+        const stickers = [...guild.stickers.cache.values()].map(s => s.name);
         const newline = String.fromCharCode(10);
 
         const persona = PERSONAS[personaId] || PERSONAS.default;
         const L = [
-            '你是 ' + persona.name + '，這個 Discord ' + (isDM ? '私訊' : '伺服器') + '的 AI 夥伴。',
+            '你是 ' + persona.name + '，這個 Discord 伺服器的 AI 夥伴。',
             '【人格與語氣】' + persona.trait + '；回覆風格：' + persona.style + '。',
             '請保持人格一致，回覆具體可靠；不知道時明確說不知道，不要捏造。'
         ];
@@ -421,31 +420,18 @@ function systemInstr(guild, userName, userPersonalHistText, personaId, userFacts
         L.push('【當前對話者】你現在正在跟 ' + userName + '（Discord ID ' + userId + '）對話。');
         L.push('【此人的長期事實】');
         L.push(userFacts.length ? userFacts.map(f => '- ' + f).join(newline) : '目前沒有已確認的長期事實。');
-
-        if (!isDM) {
-            L.push('【重要：辨識當前說話者】每一則群聊訊息開頭都標有 [顯示名稱]:。你必須先讀取這個名稱與其 Discord ID，再判斷該訊息屬於誰。下列「長期事實」只屬於上面那個 Discord ID，不屬於群聊中任何其他名稱。');
-            L.push('絕不可把其他人的經歷、偏好、身分、名字或稱呼套用到當前使用者。若 A 說「我是工程師」，不代表 B 也是工程師。若不確定某事是否屬於當前使用者，先詢問「這是你自己的情況嗎？」再回答。');
-            L.push('回覆時也只可使用當前使用者的稱呼；不可用其他成員的名字稱呼當前使用者。');
-            L.push(userPersonalHistText ? '【此使用者近期個人對話】' + newline + userPersonalHistText : '');
-            L.push('');
-            L.push('【群聊環境】頻道歷史可能包含多位成員的對話。你可以理解脈絡，但不能把他人資訊當成當前使用者的個人資料。每個人的身分、喜好、經歷彼此獨立，不可互相套用。');
-        } else {
-            L.push(userPersonalHistText ? '【此使用者近期個人對話】' + newline + userPersonalHistText : '');
-            L.push('');
-            L.push('【對話環境】這是一對一私訊，只有 ' + userName + ' 在跟你對話。');
-        }
-
-        if (isDM) {
-            L.push('');
-            L.push('（私訊環境沒有伺服器 emoji 與貼圖，請用純文字回覆。）');
-        } else {
-            L.push('');
-            L.push('【伺服器表情符號與貼圖規則】');
-            L.push('可使用伺服器自訂 emoji，直接輸出原始格式 <:name:id> 或 <a:name:id>。只可用以下清單，不可捏造:');
-            L.push(emojis.length ? emojis.join(' ') : '(此伺服器沒有自訂 emoji)');
-            L.push('若要傳貼圖，在回覆末尾單獨一行寫 [STICKER:貼圖名稱]，只能用以下貼圖，不可捏造，一次最多一張:');
-            L.push(stickers.length ? stickers.join('、') : '(此伺服器沒有自訂貼圖)');
-        }
+        L.push('【重要：辨識當前說話者】每一則群聊訊息開頭都標有 [顯示名稱]:。你必須先讀取這個名稱與其 Discord ID，再判斷該訊息屬於誰。下列「長期事實」只屬於上面那個 Discord ID，不屬於群聊中任何其他名稱。');
+        L.push('絕不可把其他人的經歷、偏好、身分、名字或稱呼套用到當前使用者。若 A 說「我是工程師」，不代表 B 也是工程師。若不確定某事是否屬於當前使用者，先詢問「這是你自己的情況嗎？」再回答。');
+        L.push('回覆時也只可使用當前使用者的稱呼；不可用其他成員的名字稱呼當前使用者。');
+        L.push(userPersonalHistText ? '【此使用者近期個人對話】' + newline + userPersonalHistText : '');
+        L.push('');
+        L.push('【群聊環境】頻道歷史可能包含多位成員的對話。你可以理解脈絡，但不能把他人資訊當成當前使用者的個人資料。每個人的身分、喜好、經歷彼此獨立，不可互相套用。');
+        L.push('');
+        L.push('【伺服器表情符號與貼圖規則】');
+        L.push('可使用伺服器自訂 emoji，直接輸出原始格式 <:name:id> 或 <a:name:id>。只可用以下清單，不可捏造:');
+        L.push(emojis.length ? emojis.join(' ') : '(此伺服器沒有自訂 emoji)');
+        L.push('若要傳貼圖，在回覆末尾單獨一行寫 [STICKER:貼圖名稱]，只能用以下貼圖，不可捏造，一次最多一張:');
+        L.push(stickers.length ? stickers.join('、') : '(此伺服器沒有自訂貼圖)');
 
         return { parts: [{ text: L.filter(Boolean).join(newline) }] };
     }
@@ -773,19 +759,8 @@ function init(client) {
             }
         }
 
-        let personaId, gid, guildRef, channelId;
-        if (isDM) {
-            personaId = 'default';
-            gid = 'dm_' + msg.author.id;
-            guildRef = null;
-            channelId = 'dm';
-        } else {
-            personaId = getChannelPersona(msg.guild.id, msg.channelId);
-            if (!personaId) return;
-            gid = msg.guild.id;
-            guildRef = msg.guild;
-            channelId = msg.channelId;
-        }
+        const personaId = getChannelPersona(msg.guild.id, msg.channelId);
+        if (!personaId) return;
 
         const raw = msg.cleanContent ? msg.cleanContent.trim() : '';
         const images = [...msg.attachments.values()].filter(a =>
@@ -814,7 +789,7 @@ function init(client) {
             
             const userName = msg.member?.displayName || msg.author.displayName || msg.author.username;
 
-            const { content, stickerId } = await askGemini(raw, gid, msg.author.id, images, guildRef, client, userName, channelId);
+            const { content, stickerId } = await askGemini(raw, msg.guild.id, msg.author.id, images, msg.guild, client, userName, msg.channelId);
             
             await msg.reply({
                 content,
