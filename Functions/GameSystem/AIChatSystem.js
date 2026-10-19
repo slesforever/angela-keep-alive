@@ -74,14 +74,15 @@ const EMOJI_CAP       = 60;         // 只送前 60 個 emoji
 
 // 模型黑名單與快取機制
 const blacklistedModels = new Set();
+const noSearchModels = new Set();   // 已確認不支援 googleSearch grounding 的模型，下次直接跳過
 let cachedModels = [];
 let lastModelFetch = 0;
 const MODEL_CACHE_TTL = 1800_000;  // 30 分鐘更新一次
-const MAX_MODEL_ATTEMPTS = 1;      // 一般生成只用 1 個模型（配額同一桶，試多個只會更快耗盡）
+const MAX_MODEL_ATTEMPTS = 3;      // 單次對話最多嘗試 3 個模型（降低配額消耗）
 const GENERATION_TIMEOUT_MS = 30000;// 30 秒生成逾時
 const SEARCH_TIMEOUT_MS    = 45000;   // 帶網頁搜尋的生成逾時 45 秒
 const ENABLE_WEB_SEARCH    = true;    // 啟用 Gemini Google Search grounding
-const SEARCH_FALLBACK_MODELS = 1;     // 搜尋也只用 1 個模型，失敗就退回一般生成
+const SEARCH_FALLBACK_MODELS = 3;     // 最多對前 N 個模型嘗試搜尋 grounding
 
 // ─── 429 配額保護：避免配額用盡時瘋狂重試 ───────────────────────
 // 每個模型觸發 429 後冷卻 60 秒；全部模型都在冷卻時啟動全域熔斷 90 秒
@@ -257,6 +258,7 @@ async function fetchValidModels(apiKey) {
         const data = await res.json();
         if (!Array.isArray(data.models)) throw new Error('ListModels 回傳格式無效');
 
+        const seen = new Set();
         const available = data.models
             .filter(m => {
                 const rawName = String(m.name || '').replace(/^models\//, '');
@@ -271,20 +273,29 @@ async function fetchValidModels(apiKey) {
                     lower.includes('realtime') || 
                     lower.includes('aqa') || 
                     lower.includes('interactions') ||
-                    lower.includes('-image');
+                    lower.includes('-image') ||
+                    lower.includes('exp') ||        // 實驗性模型，不穩定
+                    lower.includes('preview');        // preview 版本常有額度限制
 
-                return supportsGenerate && !isSpecialOrNonChat && !blacklistedModels.has(rawName);
+                if (!supportsGenerate || isSpecialOrNonChat || blacklistedModels.has(rawName)) return false;
+                if (seen.has(rawName)) return false;   // 去重
+                seen.add(rawName);
+                return true;
             })
             .map(m => String(m.name || '').replace(/^models\//, ''))
             .filter(Boolean);
 
         if (!available.length) throw new Error('無可用的標準對話模型');
 
-        available.sort((a, b) => {
-            const aFlash = a.toLowerCase().includes('flash') ? 0 : 1;
-            const bFlash = b.toLowerCase().includes('flash') ? 0 : 1;
-            return aFlash - bFlash || a.localeCompare(b);
-        });
+        // 排序：flash-lite（最便宜）→ flash → pro → 其他
+        function modelTier(name) {
+            const n = name.toLowerCase();
+            if (n.includes('flash-lite')) return 0;
+            if (n.includes('flash')) return 1;
+            if (n.includes('pro')) return 2;
+            return 3;
+        }
+        available.sort((a, b) => modelTier(a) - modelTier(b) || a.localeCompare(b));
 
         cachedModels = available;
         lastModelFetch = now;
@@ -734,15 +745,15 @@ async function askGemini(prompt, g, userId, images, guild, client, userName = '�
     };
 
     let lastError = null;
-    // 🔑 只在訊息真的需要查網路時才走搜尋流程，一般對話直接跳過，省下大量配額
-    const wantsSearch = ENABLE_WEB_SEARCH && looksLikeSearchQuery(rawContent);
+    const wantsSearch = ENABLE_WEB_SEARCH;
     let search429Count = 0;
     const searchModels = modelsToTry.slice(0, SEARCH_FALLBACK_MODELS);
 
+    // ── 先嘗試帶 Google Search grounding 的生成（僅當訊息看起來需要查網路）
     if (wantsSearch) {
-        console.log(`🔍 [AIChat] 訊息疑似需要查網路，啟用搜尋 grounding`);
         for (const modelName of searchModels) {
             if (isModelIn429Cooldown(modelName)) { search429Count++; continue; }
+            if (noSearchModels.has(modelName)) continue;   // 已確認不支援搜尋，跳過
             try {
                 const r = await generateWithSearch(apiKey, modelName, body, SEARCH_TIMEOUT_MS);
                 if (r.error) {
@@ -755,6 +766,8 @@ async function askGemini(prompt, g, userId, images, guild, client, userName = '�
                     }
                     if (code === 400 || code === 404 || (r.errText || '').includes('not found')) {
                         console.warn(`🚫 [AIChat+Search] ${modelName} 不支援搜尋 grounding 或已停用，跳過`);
+                        noSearchModels.add(modelName);   // 記住，下次不再試搜尋
+                        if (code === 404) { blacklistedModels.add(modelName); cachedModels = cachedModels.filter(m => m !== modelName); }   // 已下架，永久拉黑
                         lastError = r.error; continue;
                     }
                     lastError = r.error; continue;
