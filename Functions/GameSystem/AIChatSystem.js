@@ -77,11 +77,38 @@ const blacklistedModels = new Set();
 let cachedModels = [];
 let lastModelFetch = 0;
 const MODEL_CACHE_TTL = 1800_000;  // 30 分鐘更新一次
-const MAX_MODEL_ATTEMPTS = 5;      // 單次對話最多嘗試 5 個模型
+const MAX_MODEL_ATTEMPTS = 3;      // 單次對話最多嘗試 3 個模型（降低配額消耗）
 const GENERATION_TIMEOUT_MS = 30000;// 30 秒生成逾時
 const SEARCH_TIMEOUT_MS    = 45000;   // 帶網頁搜尋的生成逾時 45 秒
 const ENABLE_WEB_SEARCH    = true;    // 啟用 Gemini Google Search grounding
-const SEARCH_FALLBACK_MODELS = 5;     // 最多對前 N 個模型嘗試搜尋 grounding
+const SEARCH_FALLBACK_MODELS = 3;     // 最多對前 N 個模型嘗試搜尋 grounding
+
+// ─── 429 配額保護：避免配額用盡時瘋狂重試 ───────────────────────
+// 每個模型觸發 429 後冷卻 60 秒；全部模型都在冷卻時啟動全域熔斷 90 秒
+const model429Cooldowns = new Map();  // modelName -> 觸發 429 的 timestamp
+const MODEL_429_COOLDOWN = 60_000;     // 單一模型 429 後冷卻 60 秒
+let quotaBlockedUntil = 0;             // 全域熔斷到期時間
+const QUOTA_BLOCK_DURATION = 90_000;   // 全域熔斷 90 秒
+
+function isModelIn429Cooldown(modelName) {
+    const ts = model429Cooldowns.get(modelName);
+    if (!ts) return false;
+    if (Date.now() - ts < MODEL_429_COOLDOWN) return true;
+    model429Cooldowns.delete(modelName);
+    return false;
+}
+
+function markModel429(modelName) {
+    model429Cooldowns.set(modelName, Date.now());
+}
+
+function isQuotaBlocked() {
+    return Date.now() < quotaBlockedUntil;
+}
+
+function getAvailableModels(allModels) {
+    return allModels.filter(m => !isModelIn429Cooldown(m));
+}
 
 try { fs.mkdirSync(MEM_DIR, { recursive: true }); } catch {}
 
@@ -652,8 +679,21 @@ async function askGemini(prompt, g, userId, images, guild, client, userName = '�
         return { content: '❌ **除錯提示**：`process.env.GEMINI_API_KEY` 是空的！請檢查 `.env` 檔。', stickerId: null };
     }
 
-    const modelsToTry = await fetchValidModels(apiKey);
-    if (!modelsToTry.length) throw new Error('目前沒有任何可用的 Gemini 模型，請檢查 API Key 權限。');
+    const allModels = await fetchValidModels(apiKey);
+    if (!allModels.length) throw new Error('目前沒有任何可用的 Gemini 模型，請檢查 API Key 權限。');
+
+    // 全域熔斷：若剛剛所有模型都 429，直接回友善訊息，不再消耗配額
+    if (isQuotaBlocked()) {
+        const waitSec = Math.ceil((quotaBlockedUntil - Date.now()) / 1000);
+        console.warn(`🛑 [AIChat] 配額熔斷中，剩餘 ${waitSec}s，跳過本次呼叫`);
+        return { content: `⏳ Gemini 配額暫時用盡，請約 ${waitSec} 秒後再試。`, stickerId: null };
+    }
+
+    const modelsToTry = getAvailableModels(allModels);
+    if (!modelsToTry.length) {
+        quotaBlockedUntil = Date.now() + QUOTA_BLOCK_DURATION;
+        return { content: '⏳ 所有 Gemini 模型都觸發了配額限制，已暫時暫停 90 秒，請稍後再試。', stickerId: null };
+    }
 
     const sharedKey = mkShared(g, channelId);
     const userKey = mkUser(g, userId);
@@ -695,16 +735,21 @@ async function askGemini(prompt, g, userId, images, guild, client, userName = '�
 
     let lastError = null;
     const wantsSearch = ENABLE_WEB_SEARCH;
+    let search429Count = 0;
+    const searchModels = modelsToTry.slice(0, SEARCH_FALLBACK_MODELS);
 
     // ── 先嘗試帶 Google Search grounding 的生成（僅當訊息看起來需要查網路）
     if (wantsSearch) {
-        for (const modelName of modelsToTry.slice(0, SEARCH_FALLBACK_MODELS)) {
+        for (const modelName of searchModels) {
+            if (isModelIn429Cooldown(modelName)) { search429Count++; continue; }
             try {
                 const r = await generateWithSearch(apiKey, modelName, body, SEARCH_TIMEOUT_MS);
                 if (r.error) {
                     const code = r.status;
                     if (code === 429 || (r.errText || '').includes('quota') || (r.errText || '').includes('RESOURCE_EXHAUSTED')) {
-                        console.warn(`⏳ [AIChat+Search] ${modelName} 配額限制，換下一個模型`);
+                        console.warn(`⏳ [AIChat+Search] ${modelName} 配額限制，冷卻 ${MODEL_429_COOLDOWN / 1000}s`);
+                        markModel429(modelName);
+                        search429Count++;
                         lastError = r.error; continue;
                     }
                     if (code === 400 || code === 404 || (r.errText || '').includes('not found')) {
@@ -730,10 +775,23 @@ async function askGemini(prompt, g, userId, images, guild, client, userName = '�
                 console.error(`⚠️ [AIChat+Search] ${modelName} 例外:`, err.message);
             }
         }
+        // 若搜尋階段全部是 429，啟動熔斷不再嘗試一般生成
+        if (search429Count === searchModels.length && searchModels.length > 0) {
+            quotaBlockedUntil = Date.now() + QUOTA_BLOCK_DURATION;
+            console.warn(`🛑 [AIChat] 搜尋階段所有模型皆 429，啟動熔斷 ${QUOTA_BLOCK_DURATION / 1000}s`);
+            return { content: `⏳ Gemini 配額暫時用盡（搜尋模式），已暫停 ${QUOTA_BLOCK_DURATION / 1000} 秒，請稍後再試。`, stickerId: null };
+        }
         console.warn('🔄 [AIChat+Search] 所有支援搜尋的模型都失敗，退回一般生成模式');
     }
 
-    for (const modelName of modelsToTry.slice(0, MAX_MODEL_ATTEMPTS)) {
+    const genModels = getAvailableModels(allModels).slice(0, MAX_MODEL_ATTEMPTS);
+    if (!genModels.length) {
+        quotaBlockedUntil = Date.now() + QUOTA_BLOCK_DURATION;
+        return { content: `⏳ 所有 Gemini 模型都在配額冷卻中，已暫停 ${QUOTA_BLOCK_DURATION / 1000} 秒，請稍後再試。`, stickerId: null };
+    }
+
+    let gen429Count = 0;
+    for (const modelName of genModels) {
         try {
             const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
             
@@ -747,9 +805,11 @@ async function askGemini(prompt, g, userId, images, guild, client, userName = '�
                 const errText = await res.text().catch(() => '');
                 const errObj = new Error(`[${modelName}] HTTP ${res.status}:${errText.slice(0, 150)}`);
 
-                // 💡 429 速率限制為暫時狀況，切換模型即可，不拉入黑名單
+                // 💡 429 速率限制為暫時狀況，冷卻該模型但不拉入永久黑名單
                 if (res.status === 429 || errText.includes('quota') || errText.includes('RESOURCE_EXHAUSTED')) {
-                    console.warn(`⏳ [AIChat] 模型 ${modelName} 觸發配額/速率限制 (${res.status})，嘗試下一個...`);
+                    console.warn(`⏳ [AIChat] 模型 ${modelName} 觸發配額/速率限制 (${res.status})，冷卻 ${MODEL_429_COOLDOWN / 1000}s`);
+                    markModel429(modelName);
+                    gen429Count++;
                     lastError = errObj;
                     continue;
                 }
@@ -797,6 +857,13 @@ async function askGemini(prompt, g, userId, images, guild, client, userName = '�
             lastError = err;
             console.error(`❌ [AIChat] 模型 ${modelName} 呼叫失敗:`, err.message);
         }
+    }
+
+    // 若生成階段全部是 429，啟動熔斷
+    if (gen429Count === genModels.length && genModels.length > 0) {
+        quotaBlockedUntil = Date.now() + QUOTA_BLOCK_DURATION;
+        console.warn(`🛑 [AIChat] 生成階段所有模型皆 429，啟動熔斷 ${QUOTA_BLOCK_DURATION / 1000}s`);
+        return { content: `⏳ Gemini 配額暫時用盡，已暫停 ${QUOTA_BLOCK_DURATION / 1000} 秒，請稍後再試。`, stickerId: null };
     }
 
     throw lastError || new Error('所有可用 Gemini 模型均無法回應，請檢查 API Key 狀態。');
