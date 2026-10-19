@@ -82,7 +82,8 @@ function createDefaultConfig() {
 
         storageChannelId: '',
         aiChannelId: '',
-        aiMemoryChannelId: ''
+        aiMemoryChannelId: '',
+        aiPersona: ''
     };
 }
 

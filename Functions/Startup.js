@@ -1601,7 +1601,7 @@ client.on(
                 }
                 const persona = interaction.options.getString('persona');
                 AIChatSystem.setAiChannel(interaction.guild.id, channel.id, persona);
-                const patch = { aiChannelId: channel.id };
+                const patch = { aiChannelId: channel.id, aiPersona: persona };
                 saveConfig(patch);
                 const persisted = await saveGuildConfigToDiscord(client, interaction.guild.id, patch);
                 return interaction.reply({ content: '✅ 已將 ' + channel + ' 的 AI 人格切換為 **' + AIChatSystem.getPersonaLabel(persona) + '**。' + (persisted ? '' : '（提醒：尚未設定 Discord 儲存頻道。）'), flags: MessageFlags.Ephemeral });
@@ -1723,6 +1723,7 @@ client.on(
                         AIChatSystem.setMemoryChannel(interaction.guild.id, null);
                     }
                     const clearPatch = { [cfgKey]: '' };
+                    if (type === 'ai') clearPatch.aiPersona = '';
                     saveConfig(clearPatch);
                     if (cfgKey === 'notifyChannelId') setNotifyChannel(null);
                     await saveGuildConfigToDiscord(client, interaction.guild.id, clearPatch);
@@ -1740,6 +1741,7 @@ client.on(
                     [cfgKey]:
                         targetChannel.id
                 };
+                if (type === 'ai') patch.aiPersona = 'default';
 
                 // 原本本機 config
                 saveConfig(
@@ -2715,6 +2717,16 @@ client.once(
                         guild.id,
                         stored.auditChannelId
                     );
+                }
+
+                if (stored.aiChannelId) {
+                    const persona = stored.aiPersona || 'default';
+                    AIChatSystem.setAiChannel(guild.id, stored.aiChannelId, persona);
+                    console.log(`[Startup] 還原 Guild ${guild.id} AI 頻道: ${stored.aiChannelId}（人格 ${persona}）`);
+                }
+
+                if (stored.aiMemoryChannelId) {
+                    AIChatSystem.setMemoryChannel(guild.id, stored.aiMemoryChannelId);
                 }
 
                 if (
