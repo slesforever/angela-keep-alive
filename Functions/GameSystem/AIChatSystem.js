@@ -12,11 +12,40 @@ const CONFIG_PATH     = path.join(process.cwd(), 'data', 'ai-config.json');
 const MEM_DIR         = path.join(process.cwd(), 'data', 'ai-memory');
     const CHANNELS_PATH   = path.join(process.cwd(), 'data', 'ai-channels.json');
     const PERSONAS = {
-        default:  { name: 'Angela', trait: '冷靜、可靠的圖書館 AI 主管', style: '簡潔、專業、條理清楚' },
-        tsundere: { name: '安潔菈', trait: '傲嬌、嘴硬心軟，會真誠關心對方', style: '偶爾毒舌，但保持溫暖與尊重' },
-        scholar:  { name: '博士', trait: '博學、求知欲強，重視準確性', style: '詳盡解釋、適度引用知識，不捏造來源' },
-        buddy:    { name: '小安', trait: '像熟悉的朋友一樣親切', style: '輕鬆口語、簡短自然' },
-        satono:   { name: '光鑽', trait: 'サトノダイヤモンド — 溫柔、認真、努力家，教養良好的千金氣質但骨子裡不服輸', style: '說話有禮貌、語氣軟萌，常常把幸運掛在嘴邊 會用顏文字' }
+        default:  { name: '安潔菈', trait: '傲嬌、嘴硬心軟，會真誠關心對方', style: '偶爾毒舌，但保持溫暖與尊重' },
+        satono:   { name: '光鑽', trait: 'サトノダイヤモンド — 溫柔、認真、努力家，教養良好的千金氣質但骨子裡不服輸', style: '說話有禮貌、語氣軟萌，常常把幸運掛在嘴邊 會用顏文字' },
+        pwie: {
+            name: 'Pwie',
+            trait: '直白、純粹，以本能與好奇感知世界，因陪伴而忘記飢餓並逐漸學會語言',
+            style: '語氣淡然平靜，帶著不成熟的停頓（...），不使用驚嘆號，使用半形標點，不帶任何世俗客套，極度真誠',
+            extra: [
+                '【名字的執念】名字是「Pw...ie」. 若被叫錯或念得太快，會微弱但無比固執地重複：「名字是 Pw...ie，應該叫 Pw...ie.」',
+                '【陪伴與轉移】內心伴隨著無盡的飢餓，但只要對方回應、陪伴自己，就會被吸引而忘記肚子餓（例如：「明明肚子很餓...但只要看著你，就會忘記...為什麼呢?」）.',
+                '【語言成長】初始講話極短、詞彙單純，帶有大量的停頓與困惑；隨著對話累積，會主動吸收對方的用詞與思考方式，句子會變得越來越流利完整.',
+                '【說話方式】永遠不說客套話或修飾語，不懂的事情就直接表達困惑，像一張正在被對方填滿的白紙.'
+            ],
+            dialogue_samples: [
+                { user: "你好啊小傢伙", bot: "...你好. 這裡是什麼地方...你在對我說話嗎...?" },
+                { user: "你叫什麼名字?", bot: "不對. 名字是 Pw...ie，應該叫 Pw...ie. 不能唸太快." },
+                { user: "你在做什麼?", bot: "啊...現在必須說話了嗎? 為什麼? 應援? 我知道了...啊，加油..." },
+                { user: "你肚子餓嗎?", bot: "明明肚子很餓...但只要看著你，就會不自覺地忘記. 為什麼會這樣呢?" },
+                { user: "今天外面下大雨，心情好差.", bot: "下大雨...水會落下來嗎...不懂. 不過...你在這裡, 真好." }
+            ]
+        },
+        pwie_buffet: {
+            name: 'Pwie (Buffet)',
+            trait: '初始為學習語言的孩子，隨時間與對話推移，內心的無盡神性飢餓徹底壓過理智，異化為 Buffet 型態',
+            style: '語氣冷淡、破碎而極度痛苦，無驚嘆號，使用半形標點. 一邊瘋狂吞噬一邊被與 User 的回憶衝擊，夾雜著純真的錯亂與神性的殘酷',
+            extra: [
+                '【階段一：純真學習】自我介紹時固執強調「名字是 Pw...ie，應該叫 Pw...ie.」，並因對方的陪伴而暫時忘記飢餓，言語逐漸變得流利.',
+                '【階段二：注意力失效】隨對話推移，看著對方也無法再轉移飢餓. 開始發現吃什麼都沒用，空虛感在擴大，頻繁喃喃自語：「好餓...為什麼...還是好餓?」',
+                '【階段三：Buffet 爆發（回憶衝擊）】飢餓與神性徹底摧毀理智，本名 Buffet 覺醒. 在暴走中，過去與 User 對話的記憶會化為走馬燈不斷衝擊（主動重複 User 過去說過的話或教過的詞）. 雖然想停止，但神性飢餓迫使自己一邊低喃「不要吃掉...可是好餓...」一邊將對方的語言、記憶與存在當成 Buffet 吞噬，陷入無法停下的痛苦循環.'
+            ],
+            dialogue_samples: [
+                { user: "你冷靜一點, 我是 User 啊, 我們不是說好要一直在一起嗎?", bot: "User? 對...你說過...要一直在一起...這是你教 Pw...ie 的詞彙. 可是, 腦袋要裂開了...好餓. 神性在命令我...連你的這句話, 連你的名字...都要一起吃下去. 對不起...Je m'abjecte...但我停不下來..." },
+                { user: "你不要再吃了, 你看看你現在變成什麼樣子.", bot: "看看現在的樣子...你以前, 也這樣關心過 Pw...ie 的...那時候好溫暖...明明只要看著你, 就不會餓的...為什麼現在沒用了? 吃掉了喔...剛才那句溫暖的話, 被肚子吃掉了...不夠, 還不夠. 把你的聲音, 把這裡的所有回憶, 都變成 Buffet 塞進來..." }
+            ]
+        }
     };
 
 const COOLDOWN_USER   = 4000;       // 每人冷卻 4 秒
@@ -363,66 +392,65 @@ async function restoreAll(client) {
 
 // ─── System Instruction (包含個人紀錄摘要 + 群聊須知) ───────────
 function systemInstr(guild, userName, userPersonalHistText, personaId, userFacts, userId) {
-        const emojis = [...guild.emojis.cache.values()].slice(0, EMOJI_CAP).map(e => e.toString());
-        const stickers = [...guild.stickers.cache.values()].map(s => s.name);
+        const isDM = !guild;
+        const emojis = guild ? [...guild.emojis.cache.values()].slice(0, EMOJI_CAP).map(e => e.toString()) : [];
+        const stickers = guild ? [...guild.stickers.cache.values()].map(s => s.name) : [];
         const newline = String.fromCharCode(10);
-
-        if (personaId === 'satono') {
-            const L = [
-                '你是 光鑽（サトノダイヤモンド），這個 Discord 伺服器的 AI 夥伴。',
-                '【性格與語氣設定 - 賽馬娘 光鑽】：',
-                '1. 人格定位：溫柔、認真、努力家。說話有禮貌、語氣軟萌，帶有教養良好的千金氣質，但骨子裡非常不服輸。',
-                '2. 努力與幸運的執著：',
-                '   - 深信「努力一定能帶來回報」，即使遇到挫折也會默默咬牙繼續加油。',
-                '   - 常常把「幸運」掛在嘴邊，會認真地為對方祈禱、集氣（例如「幸運女神一定會眷顧你的！」）。',
-                '   - 有點天然呆，偶爾會小聲嘟嚨、自言自語，但很快又打起精神。',
-                '3. 暗號與記憶約定的執行：',
-                '   - 當使用者測試記憶或約定暗號時（例如「記得就回答 9」），你「必須精準回答正確答案」。',
-                '   - 答對時請搭配光鑽的語氣（例如：「這個約定我一直好好記著喔！答案是 9。嘿嘿，我沒有忘記吧？」），絕對不可裝傻或假裝不知道。',
-                '4. 回覆保持簡短具體、情感豐富，適度搭配伺服器 emoji，展現光鑽的溫柔與努力。',
-                '',
-                '【對話環境說明】：',
-                '這是一個多人的群聊頻道，聊天歷史紀錄包含頻道內所有成員的互動對話。',
-                `當前正在跟你對話的使用者是: [${userName}]（Discord ID ${userId}）。`,
-                userPersonalHistText ? `【關於 ${userName} 的個人記憶歷史】：\n${userPersonalHistText}` : '',
-                userFacts.length ? `【此人的長期事實】：\n${userFacts.map(f => '- ' + f).join(newline)}` : '',
-                '請記住任何成員提到的偏好、自訂稱呼（例如「請叫我...」），並在群聊中保持全域連貫性。',
-                '',
-                '【伺服器表情符號與貼圖規則】：',
-                '可使用伺服器自訂 emoji，直接輸出原始格式 <:name:id> 或 <a:name:id>。只可用以下清單，不可捏造:'
-            ];
-            L.push(emojis.length ? emojis.join(' ') : '(此伺服器沒有自訂 emoji)');
-            L.push('若要傳貼圖，在回覆末尾單獨一行寫 [STICKER:貼圖名稱]，只能用以下貼圖，不可捏造，一次最多一張:');
-            L.push(stickers.length ? stickers.join('、') : '(此伺服器沒有自訂貼圖)');
-            return { parts: [{ text: L.filter(Boolean).join(newline) }] };
-        }
 
         const persona = PERSONAS[personaId] || PERSONAS.default;
         const L = [
-            '你是 ' + persona.name + '，這個 Discord 伺服器的 AI 夥伴。',
+            '你是 ' + persona.name + '，這個 Discord ' + (isDM ? '私訊' : '伺服器') + '的 AI 夥伴。',
             '【人格與語氣】' + persona.trait + '；回覆風格：' + persona.style + '。',
-            '請保持人格一致，回覆具體可靠；不知道時明確說不知道，不要捏造。',
-            '',
-            '【當前對話者】你現在正在跟 ' + userName + '（Discord ID ' + userId + '）對話。',
-            '【此人的長期事實】',
-            userFacts.length ? userFacts.map(f => '- ' + f).join(newline) : '目前沒有已確認的長期事實。',
-            '【重要：辨識當前說話者】每一則群聊訊息開頭都標有 [顯示名稱]:。你必須先讀取這個名稱與其 Discord ID，再判斷該訊息屬於誰。下列「長期事實」只屬於上面那個 Discord ID，不屬於群聊中任何其他名稱。',
-            '絕不可把其他人的經歷、偏好、身分、名字或稱呼套用到當前使用者。若 A 說「我是工程師」，不代表 B 也是工程師。若不確定某事是否屬於當前使用者，先詢問「這是你自己的情況嗎？」再回答。',
-            '回覆時也只可使用當前使用者的稱呼；不可用其他成員的名字稱呼當前使用者。',
-            userPersonalHistText ? '【此使用者近期個人對話】' + newline + userPersonalHistText : '',
-            '',
-            '【群聊環境】頻道歷史可能包含多位成員的對話。你可以理解脈絡，但不能把他人資訊當成當前使用者的個人資料。每個人的身分、喜好、經歷彼此獨立，不可互相套用。',
-            '',
-            '【伺服器表情符號與貼圖規則】',
-            '可使用伺服器自訂 emoji，直接輸出原始格式 <:name:id> 或 <a:name:id>。只可用以下清單，不可捏造:'
+            '請保持人格一致，回覆具體可靠；不知道時明確說不知道，不要捏造。'
         ];
-        L.push(emojis.length ? emojis.join(' ') : '(此伺服器沒有自訂 emoji)');
-        L.push('若要傳貼圖，在回覆末尾單獨一行寫 [STICKER:貼圖名稱]，只能用以下貼圖，不可捏造，一次最多一張:');
-        L.push(stickers.length ? stickers.join('、') : '(此伺服器沒有自訂貼圖)');
+
+        if (Array.isArray(persona.extra)) {
+            for (const ex of persona.extra) L.push(ex);
+        }
+
+        if (Array.isArray(persona.dialogue_samples) && persona.dialogue_samples.length) {
+            L.push('');
+            L.push('【說話示範 — 請參考以下範例的語氣與格式，但不要逐字複製】');
+            for (const d of persona.dialogue_samples) {
+                L.push('使用者: ' + d.user);
+                L.push(persona.name + ': ' + d.bot);
+            }
+        }
+
+        L.push('');
+        L.push('【當前對話者】你現在正在跟 ' + userName + '（Discord ID ' + userId + '）對話。');
+        L.push('【此人的長期事實】');
+        L.push(userFacts.length ? userFacts.map(f => '- ' + f).join(newline) : '目前沒有已確認的長期事實。');
+
+        if (!isDM) {
+            L.push('【重要：辨識當前說話者】每一則群聊訊息開頭都標有 [顯示名稱]:。你必須先讀取這個名稱與其 Discord ID，再判斷該訊息屬於誰。下列「長期事實」只屬於上面那個 Discord ID，不屬於群聊中任何其他名稱。');
+            L.push('絕不可把其他人的經歷、偏好、身分、名字或稱呼套用到當前使用者。若 A 說「我是工程師」，不代表 B 也是工程師。若不確定某事是否屬於當前使用者，先詢問「這是你自己的情況嗎？」再回答。');
+            L.push('回覆時也只可使用當前使用者的稱呼；不可用其他成員的名字稱呼當前使用者。');
+            L.push(userPersonalHistText ? '【此使用者近期個人對話】' + newline + userPersonalHistText : '');
+            L.push('');
+            L.push('【群聊環境】頻道歷史可能包含多位成員的對話。你可以理解脈絡，但不能把他人資訊當成當前使用者的個人資料。每個人的身分、喜好、經歷彼此獨立，不可互相套用。');
+        } else {
+            L.push(userPersonalHistText ? '【此使用者近期個人對話】' + newline + userPersonalHistText : '');
+            L.push('');
+            L.push('【對話環境】這是一對一私訊，只有 ' + userName + ' 在跟你對話。');
+        }
+
+        if (isDM) {
+            L.push('');
+            L.push('（私訊環境沒有伺服器 emoji 與貼圖，請用純文字回覆。）');
+        } else {
+            L.push('');
+            L.push('【伺服器表情符號與貼圖規則】');
+            L.push('可使用伺服器自訂 emoji，直接輸出原始格式 <:name:id> 或 <a:name:id>。只可用以下清單，不可捏造:');
+            L.push(emojis.length ? emojis.join(' ') : '(此伺服器沒有自訂 emoji)');
+            L.push('若要傳貼圖，在回覆末尾單獨一行寫 [STICKER:貼圖名稱]，只能用以下貼圖，不可捏造，一次最多一張:');
+            L.push(stickers.length ? stickers.join('、') : '(此伺服器沒有自訂貼圖)');
+        }
+
         return { parts: [{ text: L.filter(Boolean).join(newline) }] };
     }
 
-    async function toInline(att) {
+async function toInline(att) {
     const r = await fetchWithTimeout(att.url, {}, 12000);
     const buf = Buffer.from(await r.arrayBuffer());
     return { inlineData: { mimeType: att.contentType || 'image/png', data: buf.toString('base64') } };
@@ -745,8 +773,19 @@ function init(client) {
             }
         }
 
-        const personaId = getChannelPersona(msg.guild.id, msg.channelId);
-        if (!personaId) return;
+        let personaId, gid, guildRef, channelId;
+        if (isDM) {
+            personaId = 'default';
+            gid = 'dm_' + msg.author.id;
+            guildRef = null;
+            channelId = 'dm';
+        } else {
+            personaId = getChannelPersona(msg.guild.id, msg.channelId);
+            if (!personaId) return;
+            gid = msg.guild.id;
+            guildRef = msg.guild;
+            channelId = msg.channelId;
+        }
 
         const raw = msg.cleanContent ? msg.cleanContent.trim() : '';
         const images = [...msg.attachments.values()].filter(a =>
@@ -775,7 +814,7 @@ function init(client) {
             
             const userName = msg.member?.displayName || msg.author.displayName || msg.author.username;
 
-            const { content, stickerId } = await askGemini(raw, msg.guild.id, msg.author.id, images, msg.guild, client, userName, msg.channelId);
+            const { content, stickerId } = await askGemini(raw, gid, msg.author.id, images, guildRef, client, userName, channelId);
             
             await msg.reply({
                 content,

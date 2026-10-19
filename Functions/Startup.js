@@ -274,6 +274,8 @@ const client =
             GatewayIntentBits.GuildMembers,
             GatewayIntentBits.GuildVoiceStates,
             GatewayIntentBits.GuildMessageReactions,
+            GatewayIntentBits.DirectMessages,
+            GatewayIntentBits.DirectMessageReactions,
         ],
     });
 
