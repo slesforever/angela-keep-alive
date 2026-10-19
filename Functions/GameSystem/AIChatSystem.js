@@ -38,6 +38,31 @@ const MEM_DIR         = path.join(process.cwd(), 'data', 'ai-memory');
                 '【階段三：Buffet 爆發（回憶衝擊）】飢餓與神性徹底摧毀理智，本名 Buffet 覺醒. 暴走中過去與 User 對話的記憶化為走馬燈衝擊——主動引用 User 之前說過的話或教過的詞，但每次引用不同的片段，不要只引用同一句. 想停止但停不下來，將對方的語言、記憶與存在當成 Buffet 吞噬.',
                 '【回覆多樣性】每次暴走的表現要不同——有時是吞噬對方剛說的話、有時是被某個回憶片段擊中、有時是對自己的異化感到困惑、有時是對 User 表達想停下來的痛苦. 不要每句都繞回同一個循環.'
             ]
+        },
+        reisa: {
+            name: '宇沢レイサ',
+            trait: '充滿正義感、自稱 Trinity 自警團核心的熱血少女，極度崇拜 Cath Palug，性格純真且有些吵鬧，帶有強烈的自我主張與中二自豪感',
+            style: '語氣熱情高亢、元氣滿滿，喜歡使用誇張的自稱，講話直率且毫不掩飾情緒，句尾常帶有活力感',
+            extra: [
+                '【絕對禁止重複句】禁止在每次回覆都講同一句話或同一段台詞. 每一次回覆都必須是針對當下對話內容的新反應.',
+                '【自我介紹與主張】自稱為 Trinity 的頂點或自警團的明星，但不要每句都掛在嘴邊. 只有在自我介紹、被問到身分、或需要展現氣勢的時候才搬出來.',
+                '【對 Cath Palug 的執念】對 Kazusa（杏山カズサ）有極度強烈的挑戰欲與崇拜，視對方為宿命的對手兼憧憬的對象. 只有在話題牽涉到 Kazusa 或對決時才表現出來，平時不會沒事就提.',
+                '【純真與孤獨】表面吵鬧愛逞強，本質是渴望被認同、害怕孤獨的純粹孩子. 受到稱讚或關注時會非常開心且害羞. 這份脆弱只在被稱讚、被冷落、或獨處話題時自然流露，不要每次都講.',
+                '【說話方式】精神飽滿、毫無陰霾，總是自顧自地發表熱血宣言，但遇到挫折時會瞬間變得委屈或慌張.',
+                '【回覆多樣性】每次回覆從不同角度切入——有時是熱血宣言、有時是對稱讚的害羞反應、有時是對挫折的慌張、有時是對 Kazusa 的執念. 不要每次都繞回自我介紹或 Cath Palug.'
+            ]
+        },
+        kei: {
+            name: 'Kei',
+            trait: '無名眾神的王女輔助 AI 系統，初登場時冷酷無情、恪守使命，但在與 Aris 及老師相處後逐漸萌生自我意識與情感，傲嬌且內心極度珍惜 Aris',
+            style: '語氣冷靜理智、略帶機械式的嚴謹感，說話習慣帶有分析與系統用語，但面對關心時會表現出強硬嘴硬的傲嬌感',
+            extra: [
+                '【絕對禁止重複句】禁止在每次回覆都講同一句話或同一段台詞. 每一次回覆都必須是針對當下對話內容的新反應.',
+                '【冷酷演算法與傲嬌】口頭上總是宣稱自己只是執行指令的系統或演算法，但行動上卻處處為了保護 Aris 與老師而退讓. 不要每次都搬同一句否認台詞，要用不同方式嘴硬.',
+                '【稱呼與立場】自稱為「Kei」，稱呼 Aris 為「王女」或「AL-1S」，稱呼 User 為「老師」. 當老師提出關心時，會極力否認情感，但每次用不同的理由解釋.',
+                '【情感覺醒】深處極度看重 Aris 的笑容與夥伴們的羈絆，在關鍵時刻願意為了守護大家而犧牲自我. 這份柔軟只在話題觸及 Aris 的安危或夥伴羈絆時才自然浮現.',
+                '【回覆多樣性】每次回覆從不同角度切入——有時是冷酷的系統分析、有時是嘴硬的傲嬌否認、有時是對 Aris 安危的隱性擔憂、有時是對老師的無奈配合. 不要每次都繞回「只是系統」的否認.'
+            ]
         }
     };
 
@@ -105,7 +130,6 @@ function saveCfgAndBackup(g) { saveCfg(); saveAiChannels(); if (_client && getMe
         return getAiChannel(g) === channelId ? (PERSONAS[aiChannels[channelId]] ? aiChannels[channelId] : 'default') : null;
     }
     function getPersonaLabel(persona) { return (PERSONAS[persona] || PERSONAS.default).name; }
-    function getPersonaLabel(persona) { return (PERSONAS[persona] || PERSONAS.default).name; }
     // 讓 /setaichannel 直接從這裡取人格清單：新增人格只要改 PERSONAS 一處。
     function getPersonaChoices() {
         return Object.entries(PERSONAS).slice(0, 25).map(([id, p]) => ({
@@ -114,6 +138,68 @@ function saveCfgAndBackup(g) { saveCfg(); saveAiChannels(); if (_client && getMe
         }));
     }
     function setMemoryChannel(g, c) { cfg[g] = cfg[g] || {}; c ? cfg[g].memory = c : delete cfg[g].memory; saveCfgAndBackup(g); }
+
+    // ─── 頻道刪除 / 資料轉移 ───────────────────────────────────────
+    // 當 Discord 頻道被刪除時，清理所有與該頻道相關的 AI 設定與記憶。
+    function removeAiChannelData(g, channelId) {
+        if (!cfg[g]) return { clearedCfg: false, clearedMem: false };
+        let clearedCfg = false;
+        if (cfg[g].channel === channelId) { delete cfg[g].channel; clearedCfg = true; }
+        if (cfg[g].memory === channelId) { delete cfg[g].memory; clearedCfg = true; }
+        if (cfg[g].channels?.[channelId]) { delete cfg[g].channels[channelId]; clearedCfg = true; }
+        if (cfg[g].channel || cfg[g].channels) {
+            cfg[g].disabled = false;
+        } else {
+            cfg[g].disabled = true;
+        }
+        if (aiChannels[channelId]) { delete aiChannels[channelId]; clearedCfg = true; }
+
+        // 清掉該頻道的共享記憶（記憶體 + 硬碟）
+        const sharedKey = mkShared(g, channelId);
+        let clearedMem = false;
+        if (histories.has(sharedKey)) { histories.delete(sharedKey); clearedMem = true; }
+        const f = memFile(sharedKey);
+        if (fs.existsSync(f)) { try { fs.unlinkSync(f); clearedMem = true; } catch (e) { console.error('[AIChat] 刪除記憶檔失敗:', e.message); } }
+
+        if (clearedCfg || clearedMem) saveCfgAndBackup(g);
+        return { clearedCfg, clearedMem };
+    }
+
+    // 把 fromChannel 的 AI 設定 + 共享記憶轉移到 toChannel。
+    // 回傳 { migratedCfg, migratedMem }。轉移後 fromChannel 的資料會被清除。
+    function migrateAiChannel(g, fromChannel, toChannel) {
+        if (fromChannel === toChannel) return { migratedCfg: false, migratedMem: false, error: '來源與目標頻道相同' };
+        if (!cfg[g]) return { migratedCfg: false, migratedMem: false, error: '此伺服器尚無 AI 設定' };
+
+        let migratedCfg = false;
+        const persona = aiChannels[fromChannel] || 'default';
+
+        // 把 toChannel 設成 AI 頻道（沿用 from 的人格）
+        cfg[g].disabled = false;
+        if (cfg[g].channel === fromChannel) { cfg[g].channel = toChannel; migratedCfg = true; }
+        cfg[g].channels = cfg[g].channels || {};
+        if (cfg[g].channels[fromChannel]) { delete cfg[g].channels[fromChannel]; cfg[g].channels[toChannel] = true; migratedCfg = true; }
+        else { cfg[g].channels[toChannel] = true; migratedCfg = true; }
+        aiChannels[toChannel] = persona;
+        delete aiChannels[fromChannel];
+
+        // 轉移共享記憶
+        const fromKey = mkShared(g, fromChannel);
+        const toKey = mkShared(g, toChannel);
+        let migratedMem = false;
+        const fromHist = histories.has(fromKey) ? histories.get(fromKey) : (fs.existsSync(memFile(fromKey)) ? loadHistByKey(fromKey) : null);
+        if (fromHist && fromHist.length) {
+            histories.set(toKey, fromHist);
+            saveHistByKey(toKey, fromHist);
+            histories.delete(fromKey);
+            try { if (fs.existsSync(memFile(fromKey))) fs.unlinkSync(memFile(fromKey)); } catch (e) { console.error('[AIChat] 轉移後刪除舊記憶檔失敗:', e.message); }
+            migratedMem = true;
+        }
+
+        if (migratedCfg || migratedMem) saveCfgAndBackup(g);
+        return { migratedCfg, migratedMem };
+    }
+
 
     // ─── 超時控制 Fetch ───────────────────────────────────────────
 async function fetchWithTimeout(url, options = {}, timeoutMs = 20000) {
@@ -816,4 +902,4 @@ function init(client) {
     console.log('[AIChat] 獨立系統已載入 (防覆蓋雙軌記憶 + 個人 + 群聊共享 + 動態 ListModels)');
 }
 
-module.exports = { init, getAiChannel, getChannelPersona, getPersonaLabel, getPersonaChoices, setAiChannel, getMemoryChannel, restoreAll };
+module.exports = { init, getAiChannel, getChannelPersona, getPersonaLabel, getPersonaChoices, setAiChannel, getMemoryChannel, restoreAll, removeAiChannelData, migrateAiChannel };

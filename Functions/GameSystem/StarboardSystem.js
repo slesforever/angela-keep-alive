@@ -1179,7 +1179,32 @@ async function fetchAllForumThreads(
 }
 
 // ─────────────────────────────────────────────
-// 掃描單一論壇頻道
+// 掃描快取：避免每 10 分鐘重新抓全部 thread 的 starter + reactions
+//
+// threadScanCache: Map<threadId, { lastStarCount, lastCheckedAt, onBoard }>
+//
+// 依下列規則決定要不要重新檢查一個 thread：
+//  1. 從沒掃過 → 檢查
+//  2. 已上榜 → 只在 lastCheckedAt 超過 30 分鐘才覆檢一次（數量可能變動）
+//  3. 沒上榜但上次 ⭐ < 門檻 → 每 15 分鐘覆檢一次（可能剛跨過門檻）
+//  4. thread 不存在於論壇清單 → 從快取移除
+// ─────────────────────────────────────────────
+
+const threadScanCache = new Map();
+const BOARD_RECHECK_MS = 30 * 60 * 1000;
+const UNBOARDED_RECHECK_MS = 15 * 60 * 1000;
+
+function shouldCheckThread(threadId) {
+    const e = threadScanCache.get(threadId);
+    if (!e) return true;
+    const age = Date.now() - e.lastCheckedAt;
+    return e.onBoard
+        ? age > BOARD_RECHECK_MS
+        : age > UNBOARDED_RECHECK_MS;
+}
+
+// ─────────────────────────────────────────────
+// 掃描單一論壇頻道（增量式：只檢查快取過期或沒掃過的 thread）
 // ─────────────────────────────────────────────
 
 async function scanForumChannel(
@@ -1206,12 +1231,23 @@ async function scanForumChannel(
             forumChannel
         );
 
+    // 清掉快取中已不存在的 thread
+    const liveIds = new Set(threads.map(t => t.id));
+    for (const id of [...threadScanCache.keys()]) {
+        if (!liveIds.has(id)) threadScanCache.delete(id);
+    }
+
+    const toCheck = threads.filter(t => shouldCheckThread(t.id));
+    console.log(
+        `[Starboard] ${forumChannel.name} 共 ${threads.length} 篇，需檢查 ${toCheck.length} 篇（增量）`
+    );
+
     let scanned = 0;
     let added = 0;
 
     for (
         const thread
-        of threads
+        of toCheck
     ) {
         try {
             const starterMessage =
@@ -1227,6 +1263,7 @@ async function scanForumChannel(
                     });
 
             if (!starterMessage) {
+                threadScanCache.set(thread.id, { lastStarCount: 0, lastCheckedAt: Date.now(), onBoard: false });
                 continue;
             }
 
@@ -1253,14 +1290,20 @@ async function scanForumChannel(
             const afterPosts =
                 getPosts();
 
+            const nowOnBoard = Boolean(afterPosts[starterMessage.id]);
+
             if (
                 !alreadyPosted &&
-                afterPosts[
-                    starterMessage.id
-                ]
+                nowOnBoard
             ) {
                 added++;
             }
+
+            threadScanCache.set(thread.id, {
+                lastStarCount: 0,
+                lastCheckedAt: Date.now(),
+                onBoard: nowOnBoard
+            });
 
         } catch (err) {
             console.error(
@@ -1271,7 +1314,7 @@ async function scanForumChannel(
     }
 
     console.log(
-        `[Starboard] ✅ 論壇 ${forumChannel.name} 掃描完成：${scanned} 篇，新增上榜 ${added} 篇`
+        `[Starboard] ✅ 論壇 ${forumChannel.name} 掃描完成：檢查 ${scanned} 篇，新增上榜 ${added} 篇`
     );
 
     return {

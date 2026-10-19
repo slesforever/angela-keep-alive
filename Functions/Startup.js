@@ -717,7 +717,14 @@ const allSlashCommands = [
             .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
             .addStringOption(o => o.setName('persona').setDescription('Choose persona').setRequired(true).addChoices(...AIChatSystem.getPersonaChoices()))
             .addChannelOption(o => o.setName('channel').setDescription('Target channel (defaults to current channel)').addChannelTypes(ChannelType.GuildText)),
-    
+
+        new SlashCommandBuilder()
+            .setName('aimigrate')
+            .setDescription('Transfer AI channel data (persona + shared memory) from one channel to another')
+            .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+            .addChannelOption(o => o.setName('from').setDescription('Source channel (data will be moved out of here)').addChannelTypes(ChannelType.GuildText).setRequired(true))
+            .addChannelOption(o => o.setName('to').setDescription('Destination channel (data will be moved here)').addChannelTypes(ChannelType.GuildText).setRequired(true)),
+
         new SlashCommandBuilder()
             .setName('setstoragechannel')
         .setDescription(
@@ -1601,6 +1608,40 @@ client.on(
             }
 
             // ═════════════════════════════════════
+            // /aimigrate — 把某頻道的 AI 設定 + 共享記憶轉移到另一個頻道
+            // ═════════════════════════════════════
+        if (interaction.commandName === 'aimigrate') {
+            if (!interaction.guild || !interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+                return interaction.reply({ content: '❌ 此指令僅限伺服器管理員使用。', flags: MessageFlags.Ephemeral });
+            }
+            const fromChannel = interaction.options.getChannel('from');
+            const toChannel = interaction.options.getChannel('to');
+            if (!fromChannel || !toChannel || fromChannel.id === toChannel.id) {
+                return interaction.reply({ content: '❌ 來源與目標頻道不可相同，且兩者皆須為文字頻道。', flags: MessageFlags.Ephemeral });
+            }
+            const result = AIChatSystem.migrateAiChannel(interaction.guild.id, fromChannel.id, toChannel.id);
+            if (result.error) {
+                return interaction.reply({ content: `❌ ${result.error}`, flags: MessageFlags.Ephemeral });
+            }
+            // 同步 aiChannelId 到 guild config（若 from 是主 AI 頻道，改成 to）
+            const prevGuild = getGuildConfig(interaction.guild.id);
+            const patch = {};
+            if (prevGuild.aiChannelId === fromChannel.id) patch.aiChannelId = toChannel.id;
+            if (Object.keys(patch).length) {
+                saveConfig(patch);
+                await saveGuildConfigToDiscord(client, interaction.guild.id, patch);
+            }
+            const parts = [];
+            parts.push(result.migratedCfg ? 'AI 頻道設定' : null);
+            parts.push(result.migratedMem ? '共享對話記憶' : null);
+            const done = parts.filter(Boolean).join('、');
+            return interaction.reply({
+                content: `✅ 已將 ${fromChannel} 的${done || 'AI 資料'}轉移到 ${toChannel}。來源頻道的相關資料已清除，可安全刪除。`,
+                flags: MessageFlags.Ephemeral
+            });
+        }
+
+            // ═════════════════════════════════════
             // /setchannel
         // ═════════════════════════════════════
 
@@ -1657,19 +1698,46 @@ client.on(
             };
 
             // ─────────────────────────────
-            // notify / rateup / news
+            // toggle：同一個頻道再設一次 = 取消
+            // ─────────────────────────────
+            const currentGuildConfig = getGuildConfig(interaction.guild.id);
+            function isAlreadySet(key) {
+                return String(currentGuildConfig[key] || '') === String(targetChannel.id);
+            }
+
+            // ─────────────────────────────
+            // notify / rateup / news / ai / ai-memory
             // ─────────────────────────────
 
             if (
                 configTypeMap[type]
             ) {
+                const cfgKey = configTypeMap[type].key;
+                const already = isAlreadySet(cfgKey);
 
+                if (already) {
+                    // 取消：清空該頻道設定
                     if (type === 'ai') {
-                        AIChatSystem.setAiChannel(interaction.guild.id, targetChannel.id, 'default');
+                        AIChatSystem.setAiChannel(interaction.guild.id, null);
+                    } else if (type === 'ai-memory') {
+                        AIChatSystem.setMemoryChannel(interaction.guild.id, null);
                     }
+                    const clearPatch = { [cfgKey]: '' };
+                    saveConfig(clearPatch);
+                    if (cfgKey === 'notifyChannelId') setNotifyChannel(null);
+                    await saveGuildConfigToDiscord(client, interaction.guild.id, clearPatch);
+                    return interaction.reply({
+                        content: `✅ 已取消 ${configTypeMap[type].label}（原為 ${targetChannel}）。`,
+                        flags: MessageFlags.Ephemeral
+                    });
+                }
+
+                if (type === 'ai') {
+                    AIChatSystem.setAiChannel(interaction.guild.id, targetChannel.id, 'default');
+                }
 
                 const patch = {
-                    [configTypeMap[type].key]:
+                    [cfgKey]:
                         targetChannel.id
                 };
 
@@ -1680,7 +1748,7 @@ client.on(
 
                 // Newscheck notify 同步
                 if (
-                    configTypeMap[type].key ===
+                    cfgKey ===
                     'notifyChannelId'
                 ) {
                     setNotifyChannel(
@@ -1732,6 +1800,17 @@ client.on(
                 type === 'level'
             ) {
 
+                if (isAlreadySet('levelChannelId')) {
+                    _setLvCh(interaction.guild.id, null);
+                    const clearPatch = { levelChannelId: '' };
+                    saveConfig(clearPatch);
+                    await saveGuildConfigToDiscord(client, interaction.guild.id, clearPatch);
+                    return interaction.reply({
+                        content: `✅ 已取消升級公告頻道（原為 ${targetChannel}）。`,
+                        flags: MessageFlags.Ephemeral
+                    });
+                }
+
                 _setLvCh(
                     interaction.guild.id,
                     targetChannel.id
@@ -1768,6 +1847,17 @@ client.on(
             if (
                 type === 'announce'
             ) {
+
+                if (isAlreadySet('announceChannelId')) {
+                    _setAnnCh(interaction.guild.id, null);
+                    const clearPatch = { announceChannelId: '' };
+                    saveConfig(clearPatch);
+                    await saveGuildConfigToDiscord(client, interaction.guild.id, clearPatch);
+                    return interaction.reply({
+                        content: `✅ 已取消Sles 公告接收頻道（原為 ${targetChannel}）。`,
+                        flags: MessageFlags.Ephemeral
+                    });
+                }
 
                 _setAnnCh(
                     interaction.guild.id,
@@ -1806,6 +1896,17 @@ client.on(
                 type === 'starboard'
             ) {
 
+                if (isAlreadySet('starboardChannelId')) {
+                    _setStarboard(interaction.guild.id, null);
+                    const clearPatch = { starboardChannelId: '' };
+                    saveConfig(clearPatch);
+                    await saveGuildConfigToDiscord(client, interaction.guild.id, clearPatch);
+                    return interaction.reply({
+                        content: `✅ 已取消星星榜頻道（原為 ${targetChannel}）。`,
+                        flags: MessageFlags.Ephemeral
+                    });
+                }
+
                 _setStarboard(
                     interaction.guild.id,
                     targetChannel.id
@@ -1842,6 +1943,17 @@ client.on(
             if (
                 type === 'audit'
             ) {
+
+                if (isAlreadySet('auditChannelId')) {
+                    setAuditChannel(interaction.guild.id, null);
+                    const clearPatch = { auditChannelId: '' };
+                    saveConfig(clearPatch);
+                    await saveGuildConfigToDiscord(client, interaction.guild.id, clearPatch);
+                    return interaction.reply({
+                        content: `✅ 已取消紀錄頻道（原為 ${targetChannel}）。`,
+                        flags: MessageFlags.Ephemeral
+                    });
+                }
 
                 setAuditChannel(
                     interaction.guild.id,
@@ -1880,6 +1992,17 @@ client.on(
                 type ===
                 'translate-output'
             ) {
+
+                if (isAlreadySet('translationOutputChannelId')) {
+                    setTranslationOutput(interaction.guild.id, null);
+                    const clearPatch = { translationOutputChannelId: '' };
+                    saveConfig(clearPatch);
+                    await saveGuildConfigToDiscord(client, interaction.guild.id, clearPatch);
+                    return interaction.reply({
+                        content: `✅ 已取消翻譯輸出頻道（原為 ${targetChannel}）。`,
+                        flags: MessageFlags.Ephemeral
+                    });
+                }
 
                 setTranslationOutput(
                     interaction.guild.id,
@@ -1967,6 +2090,8 @@ client.on(
                 'serverconfig',
                 'setlevelchannel',
                 'setannouncechannel',
+                'aipersona',
+                'aimigrate',
                 'givelightseeds',
                 'givestarcoins',
                 'takelightseeds',
@@ -2205,7 +2330,7 @@ client.on(
 
 client.on(
     Events.ChannelDelete,
-    channel =>
+    async channel => {
         logGuildChange(
             client,
             channel,
@@ -2213,7 +2338,31 @@ client.on(
             '頻道刪除'
         ).catch(
             () => {}
-        )
+        );
+
+        // 清理被刪頻道的 AI 設定 + 共享記憶
+        if (channel?.guild?.id) {
+            try {
+                const r = AIChatSystem.removeAiChannelData(channel.guild.id, channel.id);
+                if (r.clearedCfg) {
+                    const prev = getGuildConfig(channel.guild.id);
+                    const patch = {};
+                    if (prev.aiChannelId === channel.id) patch.aiChannelId = '';
+                    if (prev.aiMemoryChannelId === channel.id) patch.aiMemoryChannelId = '';
+                    if (Object.keys(patch).length) {
+                        saveConfig(patch);
+                        await saveGuildConfigToDiscord(client, channel.guild.id, patch).catch(() => {});
+                    }
+                    console.log(`[ChannelDelete] 已清理 ${channel.guild.id} 的 AI 頻道 ${channel.id} 設定`);
+                }
+                if (r.clearedMem) {
+                    console.log(`[ChannelDelete] 已清理 ${channel.guild.id} 的 AI 頻道 ${channel.id} 共享記憶`);
+                }
+            } catch (e) {
+                console.error('[ChannelDelete] AI 頻道清理失敗:', e.message);
+            }
+        }
+    }
 );
 
 client.on(
