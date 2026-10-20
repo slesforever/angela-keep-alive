@@ -82,11 +82,11 @@ const noSearchModels = new Set();   // 已確認不支援 googleSearch grounding
 let cachedModels = [];
 let lastModelFetch = 0;
 const MODEL_CACHE_TTL = 1800_000;  // 30 分鐘更新一次
-const MAX_MODEL_ATTEMPTS = 1;      // 一般生成只用 1 個模型（配額同一桶，試多個只會更快耗盡）
+const MAX_MODEL_ATTEMPTS = 3;      // 一般生成只用 1 個模型（配額同一桶，試多個只會更快耗盡）
 const GENERATION_TIMEOUT_MS = 30000;// 30 秒生成逾時
 const SEARCH_TIMEOUT_MS    = 45000;   // 帶網頁搜尋的生成逾時 45 秒
 const ENABLE_WEB_SEARCH    = true;    // 啟用 Gemini Google Search grounding
-const SEARCH_FALLBACK_MODELS = 1;     // 搜尋也只用 1 個模型，失敗就退回一般生成
+const SEARCH_FALLBACK_MODELS = 2;     // 搜尋也只用 1 個模型，失敗就退回一般生成
 
 // ─── 429 配額保護：避免配額用盡時瘋狂重試 ───────────────────────
 // 每個模型觸發 429 後冷卻 60 秒；全部模型都在冷卻時啟動全域熔斷 90 秒
@@ -270,6 +270,7 @@ async function fetchValidModels(apiKey) {
                 const supportsGenerate = Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes('generateContent');
                 
                 const isSpecialOrNonChat = 
+                    lower.includes('gemini-2.5') ||        // 2.5 系列實測全數無法呼叫，整系列封鎖
                     lower.includes('deep-research') || 
                     lower.includes('embedding') || 
                     lower.includes('imagen') || 
