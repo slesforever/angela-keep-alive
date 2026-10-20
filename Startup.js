@@ -152,6 +152,8 @@ const {
 const ShopSystem = require('./GameSystem/ShopSystem.js');
 const GiveawaySystem = require('./GameSystem/GiveawayEventSystem.js');
 const AIChatSystem = require('./GameSystem/AIChatSystem.js');
+const ServerAwareness = require('./GameSystem/ServerAwareness.js');
+const AngelaStatusSystem = require('./GameSystem/AngelaStatusSystem.js');
 const ProfileSystem = require('./GameSystem/ProfileSystem.js');
 const CheckInSystem = require('./GameSystem/CheckInSystem.js');
 const WatchdogSystem = require('./GameSystem/WatchdogSystem.js');
@@ -324,7 +326,7 @@ const allSlashCommands = [
     new SlashCommandBuilder()
         .setName('pull_limbuscompany')
         .setDescription(
-            '開啟 LightSeeds 提取介面'
+            'Open the LightSeeds extraction interface'
         ),
 
     // ─────────────────────────────────────
@@ -334,13 +336,13 @@ const allSlashCommands = [
     new SlashCommandBuilder()
         .setName('pack_limbuscompany')
         .setDescription(
-            '查看 LC 主頁式背包與資源介面'
+            'View your inventory and resources'
         ),
 
     new SlashCommandBuilder()
         .setName('list_limbuscompany')
         .setDescription(
-            '查看當前卡池機率與清單（已修正顯示完整角色名稱）'
+            'View gacha pool rates and item list'
         ),
 
     // ─────────────────────────────────────
@@ -350,13 +352,13 @@ const allSlashCommands = [
     new SlashCommandBuilder()
         .setName('battle')
         .setDescription(
-            '選擇難度進入戰鬥並獲取 LightSeeds'
+            'Choose a difficulty and enter battle'
         ),
 
     new SlashCommandBuilder()
         .setName('party')
         .setDescription(
-            '查看與管理出戰隊伍陣容'
+            'View and manage your party'
         ),
 
     // ─────────────────────────────────────
@@ -366,25 +368,25 @@ const allSlashCommands = [
     new SlashCommandBuilder()
         .setName('sinner')
         .setDescription(
-            '查看罪人詳細資料與清單'
+            'View sinner details'
         ),
 
     new SlashCommandBuilder()
         .setName('uptie')
         .setDescription(
-            '進行罪人人格/E.G.O 連結提升'
+            'Upgrade sinner uptie level'
         ),
 
     new SlashCommandBuilder()
         .setName('equip')
         .setDescription(
-            '更換罪人裝備與人格'
+            'Change equipped identity'
         ),
 
     new SlashCommandBuilder()
         .setName('threads')
         .setDescription(
-            '查詢當前持有絲線與資源'
+            'Check your thread resources'
         ),
 
     // ─────────────────────────────────────
@@ -394,7 +396,7 @@ const allSlashCommands = [
     new SlashCommandBuilder()
         .setName('md')
         .setDescription(
-            '開啟或查看鏡光迷宮進度'
+            'Open Mirror Dungeon'
         ),
 
     // ─────────────────────────────────────
@@ -404,28 +406,28 @@ const allSlashCommands = [
     new SlashCommandBuilder()
         .setName('rank')
         .setDescription(
-            '查看等級與 XP 進度'
+            'Check your level and XP'
         )
         .addUserOption(
             opt =>
                 opt
                     .setName('target')
                     .setDescription(
-                        '查看其他玩家的等級（預設為自己）'
+                        'View another player\'s level (default: yourself)'
                     )
         ),
 
     new SlashCommandBuilder()
         .setName('language')
         .setDescription(
-            '選擇指令顯示語言'
+            'Set your display language'
         )
         .addStringOption(
             opt =>
                 opt
                     .setName('language')
                     .setDescription(
-                        '語言'
+                        'Language'
                     )
                     .setRequired(true)
                     .addChoices(
@@ -447,21 +449,21 @@ const allSlashCommands = [
     new SlashCommandBuilder()
         .setName('sc')
         .setDescription(
-            '🌟 Starcoins 經濟系統'
+            '🌟 Starcoins economy system'
         )
         .addSubcommand(
             sub =>
                 sub
                     .setName('pay')
                     .setDescription(
-                        '支付 Starcoins 給其他玩家'
+                        'Pay Starcoins to another player'
                     )
                     .addUserOption(
                         opt =>
                             opt
                                 .setName('target')
                                 .setDescription(
-                                    '收款玩家'
+                                    'Recipient'
                                 )
                                 .setRequired(true)
                     )
@@ -470,7 +472,7 @@ const allSlashCommands = [
                             opt
                                 .setName('amount')
                                 .setDescription(
-                                    '支付金額'
+                                    'Amount'
                                 )
                                 .setRequired(true)
                                 .setMinValue(1)
@@ -481,7 +483,7 @@ const allSlashCommands = [
                 sub
                     .setName('work')
                     .setDescription(
-                        '工作取得 Starcoins'
+                        'Work to earn Starcoins'
                     )
         )
         .addSubcommand(
@@ -489,27 +491,27 @@ const allSlashCommands = [
                 sub
                     .setName('bank')
                     .setDescription(
-                        '存入、提出或查看銀行 Starcoins'
+                        'Deposit, withdraw, or check bank Starcoins'
                     )
                     .addStringOption(
                         opt =>
                             opt
                                 .setName('action')
                                 .setDescription(
-                                    '銀行操作'
+                                    'Action'
                                 )
                                 .setRequired(true)
                                 .addChoices(
                                     {
-                                        name: '存錢',
+                                        name: 'Deposit',
                                         value: 'deposit'
                                     },
                                     {
-                                        name: '拿錢',
+                                        name: 'Withdraw',
                                         value: 'withdraw'
                                     },
                                     {
-                                        name: '查看餘額',
+                                        name: 'Balance',
                                         value: 'balance'
                                     }
                                 )
@@ -519,7 +521,7 @@ const allSlashCommands = [
                             opt
                                 .setName('amount')
                                 .setDescription(
-                                    '金額（存錢/拿錢時需要）'
+                                    'Amount (required for deposit/withdraw)'
                                 )
                                 .setMinValue(1)
                     )
@@ -528,14 +530,14 @@ const allSlashCommands = [
     new SlashCommandBuilder()
         .setName('gamble')
         .setDescription(
-            '使用 Starcoins 進行 50/50 賭博'
+            'Gamble your Starcoins (50/50)'
         )
         .addIntegerOption(
             opt =>
                 opt
                     .setName('amount')
                     .setDescription(
-                        '下注金額（10–50000）'
+                        'Bet amount (10–50000)'
                     )
                     .setRequired(true)
                     .setMinValue(10)
@@ -549,28 +551,28 @@ const allSlashCommands = [
     new SlashCommandBuilder()
         .setName('gayrate')
         .setDescription(
-            '測量目標的男同指數'
+            'Measure gay rate'
         )
         .addUserOption(
             opt =>
                 opt
                     .setName('target')
                     .setDescription(
-                        '要測試的目標對象（預設為自己）'
+                        'Target player (default: yourself)'
                     )
         ),
 
     new SlashCommandBuilder()
         .setName('lesbianrate')
         .setDescription(
-            '測量目標的女同指數'
+            'Measure lesbian rate'
         )
         .addUserOption(
             opt =>
                 opt
                     .setName('target')
                     .setDescription(
-                        '要測試的目標對象（預設為自己）'
+                        'Target player (default: yourself)'
                     )
         ),
 
@@ -581,49 +583,49 @@ const allSlashCommands = [
     new SlashCommandBuilder()
         .setName('join')
         .setDescription(
-            '讓機器人加入你目前所在的語音頻道'
+            'Join your voice channel'
         ),
 
     new SlashCommandBuilder()
         .setName('play')
-        .setDescription('播放 YouTube 或 SoundCloud 音樂（支援播放清單）')
-        .addStringOption(option => option.setName('musiclink').setDescription('音樂或播放清單連結').setRequired(true)),
+        .setDescription('Play YouTube or SoundCloud music (supports playlists)')
+        .addStringOption(option => option.setName('musiclink').setDescription('Music or playlist link').setRequired(true)),
 
     new SlashCommandBuilder()
         .setName('leave')
         .setDescription(
-            '讓機器人離開目前所在的語音頻道'
+            'Leave voice channel'
         ),
 
     new SlashCommandBuilder()
         .setName('marry')
-        .setDescription('查看婚姻狀態或發送結婚請求')
+        .setDescription('View marriage status or send a marriage request')
         .addSubcommand(o =>
             o
                 .setName('status')
-                .setDescription('查看自己的婚姻狀態與配偶')
+                .setDescription('View your marriage status and spouses')
         )
         .addSubcommand(o =>
             o
                 .setName('request')
-                .setDescription('向指定使用者發送結婚請求')
+                .setDescription('Send a marriage request to a user')
                 .addUserOption(user =>
                     user
                         .setName('target')
-                        .setDescription('選擇要結婚的使用者')
+                        .setDescription('User to marry')
                         .setRequired(true)
                 )
         ),
 
     new SlashCommandBuilder()
         .setName('divorce')
-        .setDescription('離婚；不選對象會顯示可選配偶')
-        .addUserOption(o => o.setName('target').setDescription('選擇要離婚的配偶').setRequired(false)),
+        .setDescription('Divorce a spouse')
+        .addUserOption(o => o.setName('target').setDescription('Spouse to divorce').setRequired(false)),
 
     new SlashCommandBuilder()
         .setName('status')
         .setDescription(
-            '查看機器人目前的運行狀態'
+            'Check bot status'
         ),
 
     // ─────────────────────────────────────
@@ -633,7 +635,7 @@ const allSlashCommands = [
     new SlashCommandBuilder()
         .setName('help')
         .setDescription(
-            '顯示 Angela 系統全部斜線指令選單'
+            'Show all available commands'
         ),
 
     // ─────────────────────────────────────
@@ -643,7 +645,7 @@ const allSlashCommands = [
     new SlashCommandBuilder()
         .setName('setchannel')
         .setDescription(
-            '伺服器管理員 設定 Angela 系統各項通知頻道'
+            'Set system notification channels'
         )
         .setDefaultMemberPermissions(
             PermissionFlagsBits.Administrator
@@ -653,48 +655,48 @@ const allSlashCommands = [
                 option
                     .setName('type')
                     .setDescription(
-                        '請選擇要設定的頻道類型'
+                        'Channel type'
                     )
                     .setRequired(true)
                     .addChoices(
                         {
-                            name: '🟢 系統上線通知頻道',
+                            name: 'System Notification',
                             value: 'notify'
                         },
                         {
-                            name: '📢 Rate Up 抽卡公告頻道',
+                            name: 'Rate Up',
                             value: 'rateup'
                         },
                         {
-                            name: '📰 新聞與社群動態頻道',
+                            name: 'News',
                             value: 'news'
                         },
                         {
-                            name: '⬆️ 升級公告頻道',
+                            name: 'Level Up Announcement',
                             value: 'level'
                         },
                         {
-                            name: '📣 Sles 公告接收頻道',
+                            name: 'Sles Announcement',
                             value: 'announce'
                         },
                         {
-                            name: '⭐ 星星榜頻道',
+                            name: 'Starboard',
                             value: 'starboard'
                         },
                         {
-                            name: '📚 紀錄頻道',
+                            name: 'Audit Log',
                             value: 'audit'
                         },
                         {
-                            name: '🌐 翻譯輸出頻道',
+                            name: 'Translation Output',
                             value: 'translate-output'
                         },
                         {
-                            name: '🌐 切換翻譯來源頻道',
+                            name: 'Toggle Translation Source',
                             value: 'translate-source'
                         },
-                        { name: '🤖 AI 自動回覆頻道', value: 'ai' },
-                        { name: '🧠 AI 記憶庫頻道', value: 'ai-memory' }
+                        { name: 'AI Auto Reply', value: 'ai' },
+                        { name: 'AI Memory', value: 'ai-memory' }
                     )
         )
         .addChannelOption(
@@ -702,7 +704,7 @@ const allSlashCommands = [
                 option
                     .setName('target_channel')
                     .setDescription(
-                        '選擇目標文字頻道'
+                        'Target text channel'
                     )
                     .addChannelTypes(
                         ChannelType.GuildText
@@ -711,21 +713,23 @@ const allSlashCommands = [
         ),
 
     new SlashCommandBuilder()
-            .setName('setaichannel')
-            .setDescription('將 AI 人格綁定至一個文字頻道')
+            .setName('aipersona')
+            .setDescription('Switch AI persona for this channel')
             .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-            .addStringOption(o => o.setName('persona').setDescription('此頻道使用的人格').setRequired(true).addChoices(
-                { name: 'Angela — 冷靜的圖書館 AI 主管', value: 'default' },
-                { name: '安潔菈 — 傲嬌但關心人', value: 'tsundere' },
-                { name: '博士 — 博學詳盡', value: 'scholar' },
-                { name: '小安 — 輕鬆像朋友', value: 'buddy' }
-            ))
-            .addChannelOption(o => o.setName('channel').setDescription('目標頻道（不選則使用目前頻道）').addChannelTypes(ChannelType.GuildText)),
+            .addStringOption(o => o.setName('persona').setDescription('Choose persona').setRequired(true).addChoices(...AIChatSystem.getPersonaChoices()))
+            .addChannelOption(o => o.setName('channel').setDescription('Target channel (defaults to current channel)').addChannelTypes(ChannelType.GuildText)),
+
+        new SlashCommandBuilder()
+            .setName('aimigrate')
+            .setDescription('Transfer AI channel data (persona + shared memory) from one channel to another')
+            .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+            .addChannelOption(o => o.setName('from').setDescription('Source channel (data will be moved out of here)').addChannelTypes(ChannelType.GuildText).setRequired(true))
+            .addChannelOption(o => o.setName('to').setDescription('Destination channel (data will be moved here)').addChannelTypes(ChannelType.GuildText).setRequired(true)),
 
         new SlashCommandBuilder()
             .setName('setstoragechannel')
         .setDescription(
-            '伺服器管理員 設定 Angela 設定資料的永久儲存頻道'
+            'Set permanent storage channel for bot config'
         )
         .setDefaultMemberPermissions(
             PermissionFlagsBits.Administrator
@@ -737,7 +741,7 @@ const allSlashCommands = [
                         'target_channel'
                     )
                     .setDescription(
-                        '選擇一個只有管理員與 Angela 可見的文字頻道'
+                        'Choose a text channel visible only to admins and the bot'
                     )
                     .addChannelTypes(
                         ChannelType.GuildText
@@ -748,7 +752,7 @@ const allSlashCommands = [
     new SlashCommandBuilder()
         .setName('serverconfig')
         .setDescription(
-            '伺服器管理員 查看 Angela 目前儲存的頻道設定'
+            'View current channel settings'
         )
         .setDefaultMemberPermissions(
             PermissionFlagsBits.Administrator
@@ -757,23 +761,23 @@ const allSlashCommands = [
      new SlashCommandBuilder()
         .setName('leaderboard')
         .setDescription(
-            '查看等級排行榜 TOP 10'
+            'View XP Top 10 leaderboard'
         )
         // period=month 可查看本月 XP 排行
-        .addStringOption(o => o.setName('period').setDescription('排行榜期間').addChoices({ name: '全部', value: 'all' }, { name: '本月', value: 'month' })),
+        .addStringOption(o => o.setName('period').setDescription('Leaderboard period').addChoices({ name: 'All', value: 'all' }, { name: 'This Month', value: 'month' })),
     
     new SlashCommandBuilder()
             .setName('achievements')
-            .setDescription('查看已解鎖與尚未解鎖的成就'),
+            .setDescription('View unlocked and locked achievements'),
 
         new SlashCommandBuilder()
             .setName('dailyquest')
-            .setDescription('查看每日與本小時任務'),
+            .setDescription('View daily and hourly quests'),
 
         new SlashCommandBuilder()
             .setName('steam')
         .setDescription(
-            '伺服器管理員 手動觸發 Steam 最新更新檢測'
+            'Manually trigger Steam update check'
         )
         .setDefaultMemberPermissions(
             PermissionFlagsBits.Administrator
@@ -782,7 +786,7 @@ const allSlashCommands = [
     new SlashCommandBuilder()
         .setName('tweet')
         .setDescription(
-            '伺服器管理員 手動觸發 Twitter 最新推文檢測'
+            'Manually trigger Twitter update check'
         )
         .setDefaultMemberPermissions(
             PermissionFlagsBits.Administrator
@@ -791,7 +795,7 @@ const allSlashCommands = [
     new SlashCommandBuilder()
         .setName('youtube')
         .setDescription(
-            '伺服器管理員 手動觸發 YouTube 最新影片檢測'
+            'Manually trigger YouTube update check'
         )
         .setDefaultMemberPermissions(
             PermissionFlagsBits.Administrator
@@ -804,7 +808,7 @@ const allSlashCommands = [
     new SlashCommandBuilder()
         .setName('announce')
         .setDescription(
-            '👑 Sles 專屬 向所有設定公告頻道的伺服器發送全域公告'
+            '👑 Sles only: Send global announcement to all servers'
         )
         .setDefaultMemberPermissions(
             PermissionFlagsBits.Administrator
@@ -813,7 +817,7 @@ const allSlashCommands = [
     new SlashCommandBuilder()
         .setName('givestarcoins')
         .setDescription(
-            '👑 Sles 專屬 發放 Starcoins'
+            '👑 Sles only: Grant Starcoins'
         )
         .setDefaultMemberPermissions(
             PermissionFlagsBits.Administrator
@@ -823,7 +827,7 @@ const allSlashCommands = [
                 opt
                     .setName('amount')
                     .setDescription(
-                        '發放數量'
+                        'Amount'
                     )
                     .setRequired(true)
                     .setMinValue(1)
@@ -833,7 +837,7 @@ const allSlashCommands = [
                 opt
                     .setName('target')
                     .setDescription(
-                        '指定目標玩家'
+                        'Target player'
                     )
                     .setRequired(true)
         ),
@@ -841,7 +845,7 @@ const allSlashCommands = [
     new SlashCommandBuilder()
         .setName('takelightseeds')
         .setDescription(
-            '👑 Sles 專屬 扣除玩家 LightSeeds'
+            '👑 Sles only: Deduct LightSeeds'
         )
         .setDefaultMemberPermissions(
             PermissionFlagsBits.Administrator
@@ -851,7 +855,7 @@ const allSlashCommands = [
                 opt
                     .setName('amount')
                     .setDescription(
-                        '扣除數量'
+                        'Amount'
                     )
                     .setRequired(true)
                     .setMinValue(1)
@@ -861,7 +865,7 @@ const allSlashCommands = [
                 opt
                     .setName('target')
                     .setDescription(
-                        '指定目標玩家'
+                        'Target player'
                     )
                     .setRequired(true)
         ),
@@ -869,7 +873,7 @@ const allSlashCommands = [
     new SlashCommandBuilder()
         .setName('givelightseeds')
         .setDescription(
-            '👑 Sles 專屬 發放 LightSeeds（可給個人或全伺服器）'
+            '👑 Sles only: Grant LightSeeds (single player or all server)'
         )
         .setDefaultMemberPermissions(
             PermissionFlagsBits.Administrator
@@ -879,7 +883,7 @@ const allSlashCommands = [
                 opt
                     .setName('amount')
                     .setDescription(
-                        '發放數量'
+                        'Amount'
                     )
                     .setRequired(true)
         )
@@ -888,7 +892,7 @@ const allSlashCommands = [
                 opt
                     .setName('target')
                     .setDescription(
-                        '指定目標玩家（若發給全服可留空）'
+                        'Target player (leave empty for all server)'
                     )
         )
         .addBooleanOption(
@@ -896,14 +900,14 @@ const allSlashCommands = [
                 opt
                     .setName('all')
                     .setDescription(
-                        '是否發放給伺服器所有玩家（預設 False）'
+                        'Give to all server members (default: false)'
                     )
         ),
 
     new SlashCommandBuilder()
         .setName('givefragments')
         .setDescription(
-            '👑 Sles 專屬 發放人格碎片（可給個人或全伺服器）'
+            '👑 Sles only: Grant fragments'
         )
         .setDefaultMemberPermissions(
             PermissionFlagsBits.Administrator
@@ -913,7 +917,7 @@ const allSlashCommands = [
                 opt
                     .setName('amount')
                     .setDescription(
-                        '發放數量'
+                        'Amount'
                     )
                     .setRequired(true)
         )
@@ -922,7 +926,7 @@ const allSlashCommands = [
                 opt
                     .setName('target')
                     .setDescription(
-                        '指定目標玩家（若發給全服可留空）'
+                        'Target player (leave empty for all server)'
                     )
         )
         .addBooleanOption(
@@ -930,14 +934,14 @@ const allSlashCommands = [
                 opt
                     .setName('all')
                     .setDescription(
-                        '是否發放給伺服器所有玩家（預設 False）'
+                        'Give to all server members (default: false)'
                     )
         ),
 
     new SlashCommandBuilder()
         .setName('givescrolls')
         .setDescription(
-            '👑 Sles 專屬 發放抽卡券（可給個人或全伺服器）'
+            '👑 Sles only: Grant scrolls'
         )
         .setDefaultMemberPermissions(
             PermissionFlagsBits.Administrator
@@ -947,7 +951,7 @@ const allSlashCommands = [
                 opt
                     .setName('amount')
                     .setDescription(
-                        '發放數量'
+                        'Amount'
                     )
                     .setRequired(true)
         )
@@ -956,7 +960,7 @@ const allSlashCommands = [
                 opt
                     .setName('target')
                     .setDescription(
-                        '指定目標玩家（若發給全服可留空）'
+                        'Target player (leave empty for all server)'
                     )
         )
         .addBooleanOption(
@@ -964,14 +968,14 @@ const allSlashCommands = [
                 opt
                     .setName('all')
                     .setDescription(
-                        '是否發放給伺服器所有玩家（預設 False）'
+                        'Give to all server members (default: false)'
                     )
         ),
 
     new SlashCommandBuilder()
         .setName('givethreads')
         .setDescription(
-            '👑 Sles 專屬 發放絲線（可給個人或全伺服器）'
+            '👑 Sles only: Grant threads'
         )
         .setDefaultMemberPermissions(
             PermissionFlagsBits.Administrator
@@ -981,7 +985,7 @@ const allSlashCommands = [
                 opt
                     .setName('amount')
                     .setDescription(
-                        '發放數量'
+                        'Amount'
                     )
                     .setRequired(true)
         )
@@ -990,7 +994,7 @@ const allSlashCommands = [
                 opt
                     .setName('target')
                     .setDescription(
-                        '指定目標玩家（若發給全服可留空）'
+                        'Target player (leave empty for all server)'
                     )
         )
         .addBooleanOption(
@@ -998,14 +1002,14 @@ const allSlashCommands = [
                 opt
                     .setName('all')
                     .setDescription(
-                        '是否發放給伺服器所有玩家（預設 False）'
+                        'Give to all server members (default: false)'
                     )
         ),
 
     new SlashCommandBuilder()
         .setName('updaterewards')
         .setDescription(
-            '👑 Sles 專屬 更新全服獎勵設置'
+            '👑 Sles only: Update server reward settings'
         )
         .setDefaultMemberPermissions(
             PermissionFlagsBits.Administrator
@@ -1015,7 +1019,7 @@ const allSlashCommands = [
                 opt
                     .setName('amount')
                     .setDescription(
-                        '發放數量'
+                        'Amount'
                     )
                     .setRequired(true)
         ),
@@ -1023,7 +1027,7 @@ const allSlashCommands = [
     new SlashCommandBuilder()
         .setName('updatebuff')
         .setDescription(
-            '👑 Sles 專屬 更新關卡獎勵倍率 Buff'
+            '👑 Sles only: Update stage reward multiplier buff'
         )
         .setDefaultMemberPermissions(
             PermissionFlagsBits.Administrator
@@ -1033,42 +1037,42 @@ const allSlashCommands = [
                 opt
                     .setName('multiplier')
                     .setDescription(
-                        '倍率（例如 2 = 雙倍）'
+                        'Multiplier (e.g. 2 = double)'
                     )
                     .setRequired(true)
         ),
 
-    new SlashCommandBuilder().setName('shop').setDescription('開啟商城 UI'),
-    new SlashCommandBuilder().setName('shop-add').setDescription('Sles 專屬：上架商城商品')
-        .addStringOption(o => o.setName('name').setDescription('商品名稱').setRequired(true))
-        .addStringOption(o => o.setName('info').setDescription('商品資訊'))
-        .addIntegerOption(o => o.setName('lightseeds').setDescription('LightSeeds 價格').setMinValue(0))
-        .addIntegerOption(o => o.setName('starcoins').setDescription('StarCoins 價格').setMinValue(0))
-        .addIntegerOption(o => o.setName('minlevel').setDescription('最低等級').setMinValue(0))
-        .addIntegerOption(o => o.setName('stock').setDescription('庫存，不填代表無限').setMinValue(1))
+    new SlashCommandBuilder().setName('shop').setDescription('Open the shop UI'),
+    new SlashCommandBuilder().setName('shop-add').setDescription('Sles only: Add shop item')
+        .addStringOption(o => o.setName('name').setDescription('Item name').setRequired(true))
+        .addStringOption(o => o.setName('info').setDescription('Item info'))
+        .addIntegerOption(o => o.setName('lightseeds').setDescription('LightSeeds price').setMinValue(0))
+        .addIntegerOption(o => o.setName('starcoins').setDescription('StarCoins price').setMinValue(0))
+        .addIntegerOption(o => o.setName('minlevel').setDescription('Minimum level').setMinValue(0))
+        .addIntegerOption(o => o.setName('stock').setDescription('Stock (leave empty for unlimited)').setMinValue(1))
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
-    new SlashCommandBuilder().setName('shop-remove').setDescription('Sles 專屬：下架商城商品')
-        .addStringOption(o => o.setName('item_id').setDescription('商品 ID').setRequired(true))
+    new SlashCommandBuilder().setName('shop-remove').setDescription('Sles only: Remove shop item')
+        .addStringOption(o => o.setName('item_id').setDescription('Item ID').setRequired(true))
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
-    new SlashCommandBuilder().setName('shop-confirm').setDescription('Sles 專屬：確認商城序號已交付')
-        .addStringOption(o => o.setName('code').setDescription('購買序號').setRequired(true))
+    new SlashCommandBuilder().setName('shop-confirm').setDescription('Sles only: Confirm shop order delivery')
+        .addStringOption(o => o.setName('code').setDescription('Order code').setRequired(true))
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
-    new SlashCommandBuilder().setName('giveaway-create').setDescription('建立抽獎活動')
-        .addStringOption(o => o.setName('prize_name').setDescription('獎品名稱').setRequired(true))
-        .addIntegerOption(o => o.setName('winners').setDescription('抽出人數').setRequired(true).setMinValue(1).setMaxValue(20))
-        .addStringOption(o => o.setName('prize_info').setDescription('獎品資訊'))
-        .addIntegerOption(o => o.setName('max_participants').setDescription('最多參加人數').setMinValue(1).setMaxValue(10000))
-        .addIntegerOption(o => o.setName('min_level').setDescription('最低等級').setMinValue(0).setMaxValue(100))
-        .addIntegerOption(o => o.setName('entry_lightseeds').setDescription('參加扣除 LightSeeds').setMinValue(0))
-        .addIntegerOption(o => o.setName('entry_starcoins').setDescription('參加扣除 StarCoins').setMinValue(0))
-        .addIntegerOption(o => o.setName('prize_lightseeds').setDescription('得獎發放 LightSeeds').setMinValue(0))
-        .addIntegerOption(o => o.setName('prize_starcoins').setDescription('得獎發放 StarCoins').setMinValue(0))
-        .addIntegerOption(o => o.setName('duration').setDescription('持續分鐘').setMinValue(1).setMaxValue(10080))
+    new SlashCommandBuilder().setName('giveaway-create').setDescription('Create a giveaway event')
+        .addStringOption(o => o.setName('prize_name').setDescription('Prize name').setRequired(true))
+        .addIntegerOption(o => o.setName('winners').setDescription('Number of winners').setRequired(true).setMinValue(1).setMaxValue(20))
+        .addStringOption(o => o.setName('prize_info').setDescription('Prize info'))
+        .addIntegerOption(o => o.setName('max_participants').setDescription('Max participants').setMinValue(1).setMaxValue(10000))
+        .addIntegerOption(o => o.setName('min_level').setDescription('Minimum level').setMinValue(0).setMaxValue(100))
+        .addIntegerOption(o => o.setName('entry_lightseeds').setDescription('Entry LightSeeds cost').setMinValue(0))
+        .addIntegerOption(o => o.setName('entry_starcoins').setDescription('Entry StarCoins cost').setMinValue(0))
+        .addIntegerOption(o => o.setName('prize_lightseeds').setDescription('Prize LightSeeds reward').setMinValue(0))
+        .addIntegerOption(o => o.setName('prize_starcoins').setDescription('Prize StarCoins reward').setMinValue(0))
+        .addIntegerOption(o => o.setName('duration').setDescription('Duration in minutes').setMinValue(1).setMaxValue(10080))
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
     new SlashCommandBuilder()
         .setName('giveaway-end')
-        .setDescription('提前結束抽獎')
-        .addStringOption(o => o.setName('id').setDescription('抽獎 ID').setRequired(true))
+        .setDescription('End a giveaway early')
+        .addStringOption(o => o.setName('id').setDescription('Giveaway ID').setRequired(true))
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
     // ─────────────────────────────────────
@@ -1077,26 +1081,32 @@ const allSlashCommands = [
 
     new SlashCommandBuilder()
         .setName('profile')
-        .setDescription('查看個人的完整資料（等級、統計、婚姻、稱號、自我介紹）')
-        .addUserOption(o => o.setName('target').setDescription('查看其他玩家的資料（預設為自己）')),
+        .setDescription('View your full profile')
+        .addUserOption(o => o.setName('target').setDescription('View another player')),
 
     new SlashCommandBuilder()
         .setName('updateprofile')
-        .setDescription('編輯你的個人資料（每天最多 2 次）')
-        .addStringOption(o => o.setName('bio').setDescription('自我介紹（最多 500 字）').setMaxLength(500))
-        .addStringOption(o => o.setName('origin').setDescription('經驗來源 — 你玩過什麼、從哪來（最多 300 字）').setMaxLength(300))
-        .addStringOption(o => o.setName('image_url').setDescription('背景圖片網址（banner，http/https 開頭）'))
-        .addStringOption(o => o.setName('title').setDescription('裝備稱號（留空卸下）')),
+        .setDescription('Edit your profile (max 2 times/day)')
+        .addStringOption(o => o.setName('bio').setDescription('Bio').setMaxLength(500))
+        .addStringOption(o => o.setName('origin').setDescription('Experience origin').setMaxLength(300))
+        .addStringOption(o => o.setName('image_url').setDescription('Banner image URL'))
+        .addStringOption(o => o.setName('title').setDescription('Equip a title'))
+        .addAttachmentOption(o => o.setName('banner').setDescription('Upload a banner image')),
+
+    new SlashCommandBuilder()
+        .setName('setbanner')
+        .setDescription('Upload a banner image')
+        .addAttachmentOption(o => o.setName('banner').setDescription('Choose a banner image to upload').setRequired(true)),
 
     new SlashCommandBuilder()
         .setName('title')
-        .setDescription('查看或裝備你的稱號')
-        .addStringOption(o => o.setName('action').setDescription('操作').setRequired(true).addChoices(
-            { name: '查看稱號列表', value: 'list' },
-            { name: '裝備稱號', value: 'equip' },
-            { name: '卸下稱號', value: 'unequip' },
+        .setDescription('View or equip titles')
+        .addStringOption(o => o.setName('action').setDescription('Action').setRequired(true).addChoices(
+            { name: 'List', value: 'list' },
+            { name: 'Equip', value: 'equip' },
+            { name: 'Unequip', value: 'unequip' },
         ))
-        .addStringOption(o => o.setName('name').setDescription('要裝備的稱號名稱')),
+        .addStringOption(o => o.setName('name').setDescription('Title name')),
 
     // ─────────────────────────────────────
     // 每日簽到
@@ -1104,7 +1114,7 @@ const allSlashCommands = [
 
     new SlashCommandBuilder()
         .setName('checkin')
-        .setDescription('每日簽到，連續天數越多獎勵越豐厚'),
+        .setDescription('Daily check-in (streak bonus)'),
 
 ];
 
@@ -1328,61 +1338,9 @@ client.on(
             return;
         }
 
-        // ── 立即 Loading：指令一進來就先回一句「載入中」，
-        //    之後所有回覆都自動改成編輯這則訊息。
-        //    /announce 要開 Modal，不能先回覆，所以跳過。
-        if (interaction.commandName !== 'announce') {
-            try {
-                await interaction.reply({
-                    content: '⏳ 載入中… Loading…'
-                });
-            } catch (err) {
-                console.warn('[Slash] 載入中提示送出失敗:', err.message);
-            }
-
-            const origReply = interaction.reply.bind(interaction);
-            const origFollowUp = interaction.followUp.bind(interaction);
-
-            const replaceLoading = options => {
-                if (interaction.__loadingDone) return null;
-                interaction.__loadingDone = true;
-
-                const wantsEphemeral =
-                    !!options &&
-                    typeof options === 'object' &&
-                    (options.ephemeral === true ||
-                        (Number(options.flags) & MessageFlags.Ephemeral) === MessageFlags.Ephemeral);
-
-                // 原本「只有自己看得到」的回應：收掉公開的 Loading，改成私下回
-                if (wantsEphemeral) {
-                    return interaction
-                        .deleteReply()
-                        .catch(() => {})
-                        .then(() => interaction.followUp(options));
-                }
-
-                return interaction.editReply(options);
-            };
-
-            interaction.reply = function (options) {
-                if (!interaction.deferred && !interaction.replied) return origReply(options);
-                return replaceLoading(options) || origReply(options);
-            };
-
-            interaction.followUp = function (options) {
-                return replaceLoading(options) || origFollowUp(options);
-            };
-
-            // 指令自己又呼叫 deferReply 時直接略過，避免重複回覆
-            interaction.deferReply = function () {
-                return Promise.resolve();
-            };
-        }
-
         localizeInteraction(
             interaction
         );
-        
 
         // ═════════════════════════════════════
         // /announce
@@ -1634,7 +1592,7 @@ client.on(
             });
         }
 
-        if (interaction.commandName === 'setaichannel') {
+        if (interaction.commandName === 'aipersona') {
                 if (!interaction.guild || !interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
                     return interaction.reply({ content: '此指令僅限伺服器管理員使用。', flags: MessageFlags.Ephemeral });
                 }
@@ -1644,11 +1602,45 @@ client.on(
                 }
                 const persona = interaction.options.getString('persona');
                 AIChatSystem.setAiChannel(interaction.guild.id, channel.id, persona);
-                const patch = { aiChannelId: channel.id };
+                const patch = { aiChannelId: channel.id, aiPersona: persona };
                 saveConfig(patch);
                 const persisted = await saveGuildConfigToDiscord(client, interaction.guild.id, patch);
-                return interaction.reply({ content: '已將 ' + channel + ' 設為 ' + AIChatSystem.getPersonaLabel(persona) + ' AI 頻道。' + (persisted ? '' : '（提醒：尚未設定 Discord 儲存頻道。）'), flags: MessageFlags.Ephemeral });
+                return interaction.reply({ content: '✅ 已將 ' + channel + ' 的 AI 人格切換為 **' + AIChatSystem.getPersonaLabel(persona) + '**。' + (persisted ? '' : '（提醒：尚未設定 Discord 儲存頻道。）'), flags: MessageFlags.Ephemeral });
             }
+
+            // ═════════════════════════════════════
+            // /aimigrate — 把某頻道的 AI 設定 + 共享記憶轉移到另一個頻道
+            // ═════════════════════════════════════
+        if (interaction.commandName === 'aimigrate') {
+            if (!interaction.guild || !interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+                return interaction.reply({ content: '❌ 此指令僅限伺服器管理員使用。', flags: MessageFlags.Ephemeral });
+            }
+            const fromChannel = interaction.options.getChannel('from');
+            const toChannel = interaction.options.getChannel('to');
+            if (!fromChannel || !toChannel || fromChannel.id === toChannel.id) {
+                return interaction.reply({ content: '❌ 來源與目標頻道不可相同，且兩者皆須為文字頻道。', flags: MessageFlags.Ephemeral });
+            }
+            const result = AIChatSystem.migrateAiChannel(interaction.guild.id, fromChannel.id, toChannel.id);
+            if (result.error) {
+                return interaction.reply({ content: `❌ ${result.error}`, flags: MessageFlags.Ephemeral });
+            }
+            // 同步 aiChannelId 到 guild config（若 from 是主 AI 頻道，改成 to）
+            const prevGuild = getGuildConfig(interaction.guild.id);
+            const patch = {};
+            if (prevGuild.aiChannelId === fromChannel.id) patch.aiChannelId = toChannel.id;
+            if (Object.keys(patch).length) {
+                saveConfig(patch);
+                await saveGuildConfigToDiscord(client, interaction.guild.id, patch);
+            }
+            const parts = [];
+            parts.push(result.migratedCfg ? 'AI 頻道設定' : null);
+            parts.push(result.migratedMem ? '共享對話記憶' : null);
+            const done = parts.filter(Boolean).join('、');
+            return interaction.reply({
+                content: `✅ 已將 ${fromChannel} 的${done || 'AI 資料'}轉移到 ${toChannel}。來源頻道的相關資料已清除，可安全刪除。`,
+                flags: MessageFlags.Ephemeral
+            });
+        }
 
             // ═════════════════════════════════════
             // /setchannel
@@ -1707,21 +1699,50 @@ client.on(
             };
 
             // ─────────────────────────────
-            // notify / rateup / news
+            // toggle：同一個頻道再設一次 = 取消
+            // ─────────────────────────────
+            const currentGuildConfig = getGuildConfig(interaction.guild.id);
+            function isAlreadySet(key) {
+                return String(currentGuildConfig[key] || '') === String(targetChannel.id);
+            }
+
+            // ─────────────────────────────
+            // notify / rateup / news / ai / ai-memory
             // ─────────────────────────────
 
             if (
                 configTypeMap[type]
             ) {
+                const cfgKey = configTypeMap[type].key;
+                const already = isAlreadySet(cfgKey);
 
+                if (already) {
+                    // 取消：清空該頻道設定
                     if (type === 'ai') {
-                        AIChatSystem.setAiChannel(interaction.guild.id, targetChannel.id, 'default');
+                        AIChatSystem.setAiChannel(interaction.guild.id, null);
+                    } else if (type === 'ai-memory') {
+                        AIChatSystem.setMemoryChannel(interaction.guild.id, null);
                     }
+                    const clearPatch = { [cfgKey]: '' };
+                    if (type === 'ai') clearPatch.aiPersona = '';
+                    saveConfig(clearPatch);
+                    if (cfgKey === 'notifyChannelId') setNotifyChannel(null);
+                    await saveGuildConfigToDiscord(client, interaction.guild.id, clearPatch);
+                    return interaction.reply({
+                        content: `✅ 已取消 ${configTypeMap[type].label}（原為 ${targetChannel}）。`,
+                        flags: MessageFlags.Ephemeral
+                    });
+                }
+
+                if (type === 'ai') {
+                    AIChatSystem.setAiChannel(interaction.guild.id, targetChannel.id, 'default');
+                }
 
                 const patch = {
-                    [configTypeMap[type].key]:
+                    [cfgKey]:
                         targetChannel.id
                 };
+                if (type === 'ai') patch.aiPersona = 'default';
 
                 // 原本本機 config
                 saveConfig(
@@ -1730,7 +1751,7 @@ client.on(
 
                 // Newscheck notify 同步
                 if (
-                    configTypeMap[type].key ===
+                    cfgKey ===
                     'notifyChannelId'
                 ) {
                     setNotifyChannel(
@@ -1782,6 +1803,17 @@ client.on(
                 type === 'level'
             ) {
 
+                if (isAlreadySet('levelChannelId')) {
+                    _setLvCh(interaction.guild.id, null);
+                    const clearPatch = { levelChannelId: '' };
+                    saveConfig(clearPatch);
+                    await saveGuildConfigToDiscord(client, interaction.guild.id, clearPatch);
+                    return interaction.reply({
+                        content: `✅ 已取消升級公告頻道（原為 ${targetChannel}）。`,
+                        flags: MessageFlags.Ephemeral
+                    });
+                }
+
                 _setLvCh(
                     interaction.guild.id,
                     targetChannel.id
@@ -1818,6 +1850,17 @@ client.on(
             if (
                 type === 'announce'
             ) {
+
+                if (isAlreadySet('announceChannelId')) {
+                    _setAnnCh(interaction.guild.id, null);
+                    const clearPatch = { announceChannelId: '' };
+                    saveConfig(clearPatch);
+                    await saveGuildConfigToDiscord(client, interaction.guild.id, clearPatch);
+                    return interaction.reply({
+                        content: `✅ 已取消Sles 公告接收頻道（原為 ${targetChannel}）。`,
+                        flags: MessageFlags.Ephemeral
+                    });
+                }
 
                 _setAnnCh(
                     interaction.guild.id,
@@ -1856,6 +1899,17 @@ client.on(
                 type === 'starboard'
             ) {
 
+                if (isAlreadySet('starboardChannelId')) {
+                    _setStarboard(interaction.guild.id, null);
+                    const clearPatch = { starboardChannelId: '' };
+                    saveConfig(clearPatch);
+                    await saveGuildConfigToDiscord(client, interaction.guild.id, clearPatch);
+                    return interaction.reply({
+                        content: `✅ 已取消星星榜頻道（原為 ${targetChannel}）。`,
+                        flags: MessageFlags.Ephemeral
+                    });
+                }
+
                 _setStarboard(
                     interaction.guild.id,
                     targetChannel.id
@@ -1892,6 +1946,17 @@ client.on(
             if (
                 type === 'audit'
             ) {
+
+                if (isAlreadySet('auditChannelId')) {
+                    setAuditChannel(interaction.guild.id, null);
+                    const clearPatch = { auditChannelId: '' };
+                    saveConfig(clearPatch);
+                    await saveGuildConfigToDiscord(client, interaction.guild.id, clearPatch);
+                    return interaction.reply({
+                        content: `✅ 已取消紀錄頻道（原為 ${targetChannel}）。`,
+                        flags: MessageFlags.Ephemeral
+                    });
+                }
 
                 setAuditChannel(
                     interaction.guild.id,
@@ -1930,6 +1995,17 @@ client.on(
                 type ===
                 'translate-output'
             ) {
+
+                if (isAlreadySet('translationOutputChannelId')) {
+                    setTranslationOutput(interaction.guild.id, null);
+                    const clearPatch = { translationOutputChannelId: '' };
+                    saveConfig(clearPatch);
+                    await saveGuildConfigToDiscord(client, interaction.guild.id, clearPatch);
+                    return interaction.reply({
+                        content: `✅ 已取消翻譯輸出頻道（原為 ${targetChannel}）。`,
+                        flags: MessageFlags.Ephemeral
+                    });
+                }
 
                 setTranslationOutput(
                     interaction.guild.id,
@@ -2017,6 +2093,8 @@ client.on(
                 'serverconfig',
                 'setlevelchannel',
                 'setannouncechannel',
+                'aipersona',
+                'aimigrate',
                 'givelightseeds',
                 'givestarcoins',
                 'takelightseeds',
@@ -2055,10 +2133,28 @@ client.on(
                 );
             }
 
-            await handleCommands(
-                client,
-                interaction
-            );
+            // Race a deferReply against the handler so Discord never shows
+            // "The application did not respond" when the handler is slow
+            // (cold file reads, data loading, etc.). If the handler calls
+            // interaction.reply() first, the defer is cancelled and has
+            // no effect. If the handler is still working past 2.5s, the
+            // defer fires and the handler's reply becomes an editReply.
+            let deferred = false;
+            const deferTimer = setTimeout(() => {
+                if (!interaction.deferred && !interaction.replied) {
+                    deferred = true;
+                    interaction.deferReply().catch(() => {});
+                }
+            }, 2500);
+
+            try {
+                await handleCommands(
+                    client,
+                    interaction
+                );
+            } finally {
+                clearTimeout(deferTimer);
+            }
 
         } catch (err) {
 
@@ -2237,7 +2333,7 @@ client.on(
 
 client.on(
     Events.ChannelDelete,
-    channel =>
+    async channel => {
         logGuildChange(
             client,
             channel,
@@ -2245,7 +2341,31 @@ client.on(
             '頻道刪除'
         ).catch(
             () => {}
-        )
+        );
+
+        // 清理被刪頻道的 AI 設定 + 共享記憶
+        if (channel?.guild?.id) {
+            try {
+                const r = AIChatSystem.removeAiChannelData(channel.guild.id, channel.id);
+                if (r.clearedCfg) {
+                    const prev = getGuildConfig(channel.guild.id);
+                    const patch = {};
+                    if (prev.aiChannelId === channel.id) patch.aiChannelId = '';
+                    if (prev.aiMemoryChannelId === channel.id) patch.aiMemoryChannelId = '';
+                    if (Object.keys(patch).length) {
+                        saveConfig(patch);
+                        await saveGuildConfigToDiscord(client, channel.guild.id, patch).catch(() => {});
+                    }
+                    console.log(`[ChannelDelete] 已清理 ${channel.guild.id} 的 AI 頻道 ${channel.id} 設定`);
+                }
+                if (r.clearedMem) {
+                    console.log(`[ChannelDelete] 已清理 ${channel.guild.id} 的 AI 頻道 ${channel.id} 共享記憶`);
+                }
+            } catch (e) {
+                console.error('[ChannelDelete] AI 頻道清理失敗:', e.message);
+            }
+        }
+    }
 );
 
 client.on(
@@ -2481,22 +2601,7 @@ client.once(
         // Presence
         // ─────────────────────────────────────
 
-        client.user.setPresence({
-            status: 'idle',
-
-            activities: [
-                {
-                    name:
-                        'customstatus',
-
-                    type:
-                        ActivityType.Custom,
-
-                    state:
-                        '如果我們能早點坐下來，像這樣喝杯茶、聊聊天……事情是不是就不會變得更糟糕了'
-                }
-            ]
-        });
+        AngelaStatusSystem.start(client, 30 * 60 * 1000);
 
         // ─────────────────────────────────────
         // Discord 伺服器設定還原
@@ -2613,6 +2718,16 @@ client.once(
                         guild.id,
                         stored.auditChannelId
                     );
+                }
+
+                if (stored.aiChannelId) {
+                    const persona = stored.aiPersona || 'default';
+                    AIChatSystem.setAiChannel(guild.id, stored.aiChannelId, persona);
+                    console.log(`[Startup] 還原 Guild ${guild.id} AI 頻道: ${stored.aiChannelId}（人格 ${persona}）`);
+                }
+
+                if (stored.aiMemoryChannelId) {
+                    AIChatSystem.setMemoryChannel(guild.id, stored.aiMemoryChannelId);
                 }
 
                 if (
@@ -2857,6 +2972,8 @@ if (
     process.exit(1);
 }
 AIChatSystem.init(client);
+// 伺服器感知：讓 AI 知道全伺服器動態（AI 頻道本身不重複記錄）
+ServerAwareness.init(client, { isAiChannel: function (g, c) { return !!AIChatSystem.getChannelPersona(g, c); } });
 require('./GameSystem/AchievementSystem.js').init(client);
 require('./GameSystem/DailyQuestSystem.js').init(client);
 client.login(
