@@ -7,9 +7,6 @@ const path = require('path');
 const { AttachmentBuilder, PermissionFlagsBits } = require('discord.js');
 const { getGuildConfig } = require('./ServerConfigStorage.js');
 
-// 伺服器感知：把全伺服器近況（各頻道聊天、語音狀態、成員進出）注入 AI 上下文
-const { getDigest } = require('./ServerAwareness.js');
-
 // ─── 設定 ──────────────────────────────────────────────────────
 const CONFIG_PATH     = path.join(process.cwd(), 'data', 'ai-config.json');
 const MEM_DIR         = path.join(process.cwd(), 'data', 'ai-memory');
@@ -76,20 +73,16 @@ const USER_HIST_CAP   = 8;          // 個人專屬記憶保留最近 8 則
 const EMOJI_CAP       = 60;         // 只送前 60 個 emoji
 
 // 模型黑名單與快取機制
-// 預先拉黑：Google ListModels 仍列出但實際呼叫回 404 的幽靈模型
-const blacklistedModels = new Set([
-    'gemini-2.5-flash',        // "no longer available to new users" — ListModels 仍列出但呼叫 404
-    'gemini-2.5-pro',          // 同系列，預防性拉黑
-]);
+const blacklistedModels = new Set();
 const noSearchModels = new Set();   // 已確認不支援 googleSearch grounding 的模型，下次直接跳過
 let cachedModels = [];
 let lastModelFetch = 0;
 const MODEL_CACHE_TTL = 1800_000;  // 30 分鐘更新一次
-const MAX_MODEL_ATTEMPTS = 3;      // 一般生成只用 1 個模型（配額同一桶，試多個只會更快耗盡）
+const MAX_MODEL_ATTEMPTS = 1;      // 一般生成只用 1 個模型（配額同一桶，試多個只會更快耗盡）
 const GENERATION_TIMEOUT_MS = 30000;// 30 秒生成逾時
 const SEARCH_TIMEOUT_MS    = 45000;   // 帶網頁搜尋的生成逾時 45 秒
 const ENABLE_WEB_SEARCH    = true;    // 啟用 Gemini Google Search grounding
-const SEARCH_FALLBACK_MODELS = 2;     // 搜尋也只用 1 個模型，失敗就退回一般生成
+const SEARCH_FALLBACK_MODELS = 1;     // 搜尋也只用 1 個模型，失敗就退回一般生成
 
 // ─── 429 配額保護：避免配額用盡時瘋狂重試 ───────────────────────
 // 每個模型觸發 429 後冷卻 60 秒；全部模型都在冷卻時啟動全域熔斷 90 秒
@@ -273,7 +266,6 @@ async function fetchValidModels(apiKey) {
                 const supportsGenerate = Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes('generateContent');
                 
                 const isSpecialOrNonChat = 
-                    lower.includes('gemini-2.5') ||        // 2.5 系列實測全數無法呼叫，整系列封鎖
                     lower.includes('deep-research') || 
                     lower.includes('embedding') || 
                     lower.includes('imagen') || 
@@ -549,20 +541,10 @@ function systemInstr(guild, userName, userPersonalHistText, personaId, userFacts
         L.push('【群聊環境】頻道歷史可能包含多位成員的對話。你可以理解脈絡，但不能把他人資訊當成當前使用者的個人資料。每個人的身分、喜好、經歷彼此獨立，不可互相套用。');
         L.push('');
         L.push('【伺服器表情符號與貼圖規則】');
-        L.push('可使用伺服器自訂 emoji，直接輸出原始格式 <:name:id> 或 <a:name:id>。只可用以下清單，不可捏造:')
+        L.push('可使用伺服器自訂 emoji，直接輸出原始格式 <:name:id> 或 <a:name:id>。只可用以下清單，不可捏造:');
         L.push(emojis.length ? emojis.join(' ') : '(此伺服器沒有自訂 emoji)');
-        L.push('大家訊息裡的 <:名稱:數字> 或 <a:名稱:數字> 是伺服器自訂 emoji，名稱就代表它的意思（例如 <:cry:123> 就是哭的表情），請把它當成正常的表情讀懂並回應。');
-        L.push('【emoji 用法 — 像真人】unicode emoji（😂🥺😭🤔✨❤️🔥😱 等）想用就用，看當下情緒決定：平淡的時候可以整則完全不用；激動、興奮、崩潰、大笑的時候可以像真人一樣連發整排重複的（例如「欸等等 😭😭😭」）。不要每則都用、不要永遠用同一個，自然就好。');
-        L.push('若要傳貼圖，在回覆末尾單獨一行寫 [STICKER:貼圖名稱]，只能用以下貼圖，不可捏造，一次最多一張（想用再用，不一定要用）:')
-        L.push(stickers.length ? stickers.join('、') : '(此伺服器沒有貼圖)');
-
-        const digest = getDigest(guild.id);
-        if (digest) {
-            L.push('');
-            L.push('【伺服器近況 — 你平常待在伺服器裡看到的動態（各頻道聊天、語音狀態、成員進出）】');
-            L.push(digest);
-            L.push('你可以在對話中自然地提起這些近況，像個一直待在這裡的人；但看情況，不要每次都提、也不要列清單式覆誦。');
-        }
+        L.push('若要傳貼圖，在回覆末尾單獨一行寫 [STICKER:貼圖名稱]，只能用以下貼圖，不可捏造，一次最多一張:');
+        L.push(stickers.length ? stickers.join('、') : '(此伺服器沒有自訂貼圖)');
 
         return { parts: [{ text: L.filter(Boolean).join(newline) }] };
     }
@@ -998,4 +980,4 @@ function init(client) {
     console.log('[AIChat] 獨立系統已載入 (防覆蓋雙軌記憶 + 個人 + 群聊共享 + 動態 ListModels)');
 }
 
-module.exports = { init, getAiChannel, getChannelPersona, getPersonaLabel, getPersonaChoices, setAiChannel, getMemoryChannel, restoreAll, removeAiChannelData, migrateAiChannel };
+module.exports = { init, getAiChannel, getChannelPersona, getPersonaLabel, getPersonaChoices, setAiChannel, setMemoryChannel, getMemoryChannel, restoreAll, removeAiChannelData, migrateAiChannel };
