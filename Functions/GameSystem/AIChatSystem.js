@@ -7,6 +7,9 @@ const path = require('path');
 const { AttachmentBuilder, PermissionFlagsBits } = require('discord.js');
 const { getGuildConfig } = require('./ServerConfigStorage.js');
 
+// 伺服器感知：把全伺服器近況（各頻道聊天、語音狀態、成員進出）注入 AI 上下文
+const { getDigest } = require('./ServerAwareness.js');
+
 // ─── 設定 ──────────────────────────────────────────────────────
 const CONFIG_PATH     = path.join(process.cwd(), 'data', 'ai-config.json');
 const MEM_DIR         = path.join(process.cwd(), 'data', 'ai-memory');
@@ -546,10 +549,20 @@ function systemInstr(guild, userName, userPersonalHistText, personaId, userFacts
         L.push('【群聊環境】頻道歷史可能包含多位成員的對話。你可以理解脈絡，但不能把他人資訊當成當前使用者的個人資料。每個人的身分、喜好、經歷彼此獨立，不可互相套用。');
         L.push('');
         L.push('【伺服器表情符號與貼圖規則】');
-        L.push('可使用伺服器自訂 emoji，直接輸出原始格式 <:name:id> 或 <a:name:id>。只可用以下清單，不可捏造:');
+        L.push('可使用伺服器自訂 emoji，直接輸出原始格式 <:name:id> 或 <a:name:id>。只可用以下清單，不可捏造:')
         L.push(emojis.length ? emojis.join(' ') : '(此伺服器沒有自訂 emoji)');
-        L.push('若要傳貼圖，在回覆末尾單獨一行寫 [STICKER:貼圖名稱]，只能用以下貼圖，不可捏造，一次最多一張:');
-        L.push(stickers.length ? stickers.join('、') : '(此伺服器沒有自訂貼圖)');
+        L.push('大家訊息裡的 <:名稱:數字> 或 <a:名稱:數字> 是伺服器自訂 emoji，名稱就代表它的意思（例如 <:cry:123> 就是哭的表情），請把它當成正常的表情讀懂並回應。');
+        L.push('【emoji 用法 — 像真人】unicode emoji（😂🥺😭🤔✨❤️🔥😱 等）想用就用，看當下情緒決定：平淡的時候可以整則完全不用；激動、興奮、崩潰、大笑的時候可以像真人一樣連發整排重複的（例如「欸等等 😭😭😭」）。不要每則都用、不要永遠用同一個，自然就好。');
+        L.push('若要傳貼圖，在回覆末尾單獨一行寫 [STICKER:貼圖名稱]，只能用以下貼圖，不可捏造，一次最多一張（想用再用，不一定要用）:')
+        L.push(stickers.length ? stickers.join('、') : '(此伺服器沒有貼圖)');
+
+        const digest = getDigest(guild.id);
+        if (digest) {
+            L.push('');
+            L.push('【伺服器近況 — 你平常待在伺服器裡看到的動態（各頻道聊天、語音狀態、成員進出）】');
+            L.push(digest);
+            L.push('你可以在對話中自然地提起這些近況，像個一直待在這裡的人；但看情況，不要每次都提、也不要列清單式覆誦。');
+        }
 
         return { parts: [{ text: L.filter(Boolean).join(newline) }] };
     }
