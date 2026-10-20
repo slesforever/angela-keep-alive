@@ -287,15 +287,11 @@ async function fetchValidModels(apiKey) {
 
         if (!available.length) throw new Error('無可用的標準對話模型');
 
-        // 排序：flash-lite（最便宜）→ flash → pro → 其他
-        function modelTier(name) {
-            const n = name.toLowerCase();
-            if (n.includes('flash-lite')) return 0;
-            if (n.includes('flash')) return 1;
-            if (n.includes('pro')) return 2;
-            return 3;
-        }
-        available.sort((a, b) => modelTier(a) - modelTier(b) || a.localeCompare(b));
+        available.sort((a, b) => {
+            const aFlash = a.toLowerCase().includes('flash') ? 0 : 1;
+            const bFlash = b.toLowerCase().includes('flash') ? 0 : 1;
+            return aFlash - bFlash || a.localeCompare(b);
+        });
 
         cachedModels = available;
         lastModelFetch = now;
