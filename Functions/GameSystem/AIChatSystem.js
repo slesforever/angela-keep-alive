@@ -73,7 +73,11 @@ const USER_HIST_CAP   = 8;          // 個人專屬記憶保留最近 8 則
 const EMOJI_CAP       = 60;         // 只送前 60 個 emoji
 
 // 模型黑名單與快取機制
-const blacklistedModels = new Set();
+// 預先拉黑：Google ListModels 仍列出但實際呼叫回 404 的幽靈模型
+const blacklistedModels = new Set([
+    'gemini-2.5-flash',        // "no longer available to new users" — ListModels 仍列出但呼叫 404
+    'gemini-2.5-pro',          // 同系列，預防性拉黑
+]);
 const noSearchModels = new Set();   // 已確認不支援 googleSearch grounding 的模型，下次直接跳過
 let cachedModels = [];
 let lastModelFetch = 0;
