@@ -78,11 +78,11 @@ const noSearchModels = new Set();   // 已確認不支援 googleSearch grounding
 let cachedModels = [];
 let lastModelFetch = 0;
 const MODEL_CACHE_TTL = 1800_000;  // 30 分鐘更新一次
-const MAX_MODEL_ATTEMPTS = 3;      // 單次對話最多嘗試 3 個模型（降低配額消耗）
+const MAX_MODEL_ATTEMPTS = 1;      // 一般生成只用 1 個模型（配額同一桶，試多個只會更快耗盡）
 const GENERATION_TIMEOUT_MS = 30000;// 30 秒生成逾時
 const SEARCH_TIMEOUT_MS    = 45000;   // 帶網頁搜尋的生成逾時 45 秒
 const ENABLE_WEB_SEARCH    = true;    // 啟用 Gemini Google Search grounding
-const SEARCH_FALLBACK_MODELS = 3;     // 最多對前 N 個模型嘗試搜尋 grounding
+const SEARCH_FALLBACK_MODELS = 1;     // 搜尋也只用 1 個模型，失敗就退回一般生成
 
 // ─── 429 配額保護：避免配額用盡時瘋狂重試 ───────────────────────
 // 每個模型觸發 429 後冷卻 60 秒；全部模型都在冷卻時啟動全域熔斷 90 秒
@@ -741,12 +741,13 @@ async function askGemini(prompt, g, userId, images, guild, client, userName = '�
     };
 
     let lastError = null;
-    const wantsSearch = ENABLE_WEB_SEARCH;
+    // 🔑 只在訊息真的需要查網路時才走搜尋流程，一般對話直接跳過，省下大量配額
+    const wantsSearch = ENABLE_WEB_SEARCH && looksLikeSearchQuery(rawContent);
     let search429Count = 0;
     const searchModels = modelsToTry.slice(0, SEARCH_FALLBACK_MODELS);
 
-    // ── 先嘗試帶 Google Search grounding 的生成（僅當訊息看起來需要查網路）
     if (wantsSearch) {
+        console.log(`🔍 [AIChat] 訊息疑似需要查網路，啟用搜尋 grounding`);
         for (const modelName of searchModels) {
             if (isModelIn429Cooldown(modelName)) { search429Count++; continue; }
             if (noSearchModels.has(modelName)) continue;   // 已確認不支援搜尋，跳過
