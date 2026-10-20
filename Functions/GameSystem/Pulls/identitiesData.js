@@ -519,6 +519,7 @@ function filterIdentities(rarity, keyword) {
 const BANNERS = {
     'haute_ishmael': {
         id: 'haute_ishmael',
+        season: 8,
         name: '高級訂製服::紅櫻精品店 — 以實瑪利 UP',
         description: '［高級訂製服::紅櫻精品店］以實瑪利 出現機率大幅提升！',
         cost: { single: 0, ten: 0 },
@@ -530,6 +531,7 @@ const BANNERS = {
     },
     'haute_ryoshu': {
         id: 'haute_ryoshu',
+        season: 8,
         name: '高級訂製服::漆黑鞋履館 — 良秀 UP',
         description: '［高級訂製服::漆黑鞋履館］良秀 出現機率大幅提升！',
         cost: { single: 0, ten: 0 },
@@ -541,6 +543,7 @@ const BANNERS = {
     },
     'haute_rodion': {
         id: 'haute_rodion',
+        season: 8,
         name: '高級訂製服::修改店 — 羅佳 UP',
         description: '［高級訂製服::修改店］羅佳 出現機率大幅提升！',
         cost: { single: 0, ten: 0 },
@@ -552,6 +555,7 @@ const BANNERS = {
     },
     'haute_donquixote': {
         id: 'haute_donquixote',
+        season: 8,
         name: '高級訂製服::漆黑品牌經理 — 唐吉訶德 UP',
         description: '［高級訂製服::漆黑品牌經理］唐吉訶德 出現機率大幅提升！',
         cost: { single: 0, ten: 0 },
@@ -561,8 +565,39 @@ const BANNERS = {
             S2: []
         }
     },
+    'haute_sinclair': {
+        id: 'haute_sinclair',
+        season: 8,
+        name: '高級訂製服::紅派赤紅之神 — 辛克萊 UP',
+        description: '［高級訂製服::紅派赤紅之神］辛克萊 出現機率大幅提升！',
+        cost: { single: 0, ten: 0 },
+        rateUp: {
+            S3: ['［高級訂製服::紅派赤紅之神］辛克萊 / Haute Couture::The Crimson God of Le Rouge Sinclair'],
+            EGOS: [],
+            S2: []
+        }
+    },
+    'season8_haute': {
+        id: 'season8_haute',
+        season: 8,
+        name: 'S8 PUNCTUM — 高級訂製服綜合 UP',
+        description: 'Season 8 PUNCTUM 機率提升卡池。五件高級訂製服人格全部 UP！',
+        cost: { single: 0, ten: 0 },
+        rateUp: {
+            S3: [
+                '［高級訂製服::紅櫻精品店］以實瑪利 / Haute Couture::Boutique du Rouge Ishmael',
+                '［高級訂製服::漆黑鞋履館］良秀 / Haute Couture::Le Noir Footwear Hall Ryōshū',
+                '［高級訂製服::修改店］羅佳 / Haute Couture::Alteration Shop Rodion',
+                '［高級訂製服::漆黑品牌經理］唐吉訶德 / Haute Couture::Le Noir Brand Manager Don Quixote',
+                '［高級訂製服::紅派赤紅之神］辛克萊 / Haute Couture::The Crimson God of Le Rouge Sinclair'
+            ],
+            EGOS: [],
+            S2: []
+        }
+    },
     'standard': {
         id: 'standard',
+        season: 0,
         name: '常駐提取 — 邊獄公司',
         description: '包含所有基礎人格與 E.G.O 的常駐提取卡池。',
         cost: { single: 0, ten: 0 },

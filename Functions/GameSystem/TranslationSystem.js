@@ -18,17 +18,45 @@
     function getTranslationConfig(guildId) { const value = readConfig()[guildId]; return typeof value === 'object' ? value : { output: value || null, sources: [] }; }
     function getTranslationChannel(guildId) { return getTranslationConfig(guildId).output || null; }
     function remember(key, value) { cache.set(key, value); if (cache.size > 1000) cache.delete(cache.keys().next().value); }
+    // 備用翻譯端點：Google 非官方端點被限流時自動切換到 MyMemory
+    async function translateOneMyMemory(text, target) {
+      const clean = String(text || '').trim().slice(0, 500);
+      if (!clean) return '';
+      const langMap = { 'zh-TW': 'zh-TW', 'en': 'en' };
+      const lang = langMap[target] || target;
+      const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+      try {
+          const url = 'https://api.mymemory.translated.net/get?q=' + encodeURIComponent(clean) + '&langpair=auto|' + encodeURIComponent(lang);
+          const res = await fetch(url, { signal: controller.signal, headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' } });
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          const data = await res.json(); const out = String(data?.responseData?.translatedText || '').trim();
+          if (!out || out === clean) return ''; return out;
+      } catch { return ''; } finally { clearTimeout(timer); }
+    }
     async function translateOne(text, target) {
       const clean = String(text || '').trim().slice(0, 1500); if (!clean) return '';
-      const key = target + ':' + clean; if (cache.has(key)) return cache.get(key); if (Date.now() < disabledUntil) return clean;
+      const key = target + ':' + clean; if (cache.has(key)) return cache.get(key);
+      // Google 非官方端點限流期間直接跳到備用，不浪費時間
+      if (Date.now() < disabledUntil) {
+          const fb = await translateOneMyMemory(clean, target);
+          if (fb) { remember(key, fb); return fb; }
+          return clean;
+      }
       const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
       try {
           const url = 'https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=' + encodeURIComponent(target) + '&dt=t&q=' + encodeURIComponent(clean);
           const res = await fetch(url, { signal: controller.signal, headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' } });
           if (!res.ok) throw new Error('HTTP ' + res.status);
           const data = await res.json(); const out = (Array.isArray(data?.[0]) ? data[0] : []).map(s => Array.isArray(s) ? s[0] : '').join('').trim();
-          if (!out) return clean; remember(key, out); disabledUntil = 0; return out;
-      } catch { disabledUntil = Date.now() + COOLDOWN_MS; return clean; } finally { clearTimeout(timer); }
+          if (!out) throw new Error('空回應');
+          remember(key, out); disabledUntil = 0; return out;
+      } catch {
+          // Google 失敗 → 進入冷卻 + 嘗試 MyMemory 備用
+          disabledUntil = Date.now() + COOLDOWN_MS;
+          const fb = await translateOneMyMemory(clean, target);
+          if (fb) { remember(key, fb); return fb; }
+          return clean;
+      } finally { clearTimeout(timer); }
     }
     async function translateBoth(text) { const clean = String(text || '').trim().slice(0, 1500); if (!clean) return { zh: '', en: '' }; const [zh, en] = await Promise.all([translateOne(clean, 'zh-TW'), translateOne(clean, 'en')]); return { zh, en }; }
     async function handleTranslationMessage(client, message) {

@@ -65,8 +65,12 @@ function createBannerEmbed(banner) {
   const singleCost = banner.cost?.single ?? 130;
   const tenCost = banner.cost?.ten ?? 1300;
 
+  const seasonLabels = { 0: '恆常', 1: 'S1 Orientation', 2: 'S2 Reminiscence', 3: 'S3 Bon Voyage', 4: 'S4 Clear All Cathy', 5: 'S5 Oblivion', 6: 'S6 葬花吟', 7: 'S7 蜘蛛之糸', 8: 'S8 PUNCTUM', walp: '瓦夜 Walpurgis' };
+  const sLabel = seasonLabels[banner.season ?? 0] ?? '';
+  const titlePrefix = sLabel ? `[${sLabel}] ` : '';
+
   return new EmbedBuilder()
-    .setTitle(`🚂 ${banner.name || '未命名卡池'}`)
+    .setTitle(`🚂 ${titlePrefix}${banner.name || '未命名卡池'}`)
     .setDescription(banner.description || '目前沒有提供此卡池的詳細說明。')
     .setColor(0xffa502)
     .addFields(
@@ -91,14 +95,21 @@ function createBannerEmbed(banner) {
 // ─────────────────────────────────────────────
 
 function createBannerSelectMenu(banners) {
+  const seasonLabels = { 0: '恆常', 1: 'S1', 2: 'S2', 3: 'S3', 4: 'S4', 5: 'S5', 6: 'S6', 7: 'S7', 8: 'S8', walp: '瓦夜' };
+  const seasonOrder = (s) => { const n = Number(s); if (!isNaN(n)) return n; return 999; };
   const options = Object.entries(banners)
     .filter(([bannerKey, banner]) => banner && bannerKey)
+    .sort(([, a], [, b]) => seasonOrder(a.season ?? 0) - seasonOrder(b.season ?? 0))
     .slice(0, 25)
-    .map(([bannerKey, banner]) => ({
-      label: String(banner.name || banner.id || bannerKey).slice(0, 100),
-      description: String(banner.description || '沒有卡池說明').slice(0, 100),
-      value: String(bannerKey),
-    }));
+    .map(([bannerKey, banner]) => {
+      const sLabel = seasonLabels[banner.season ?? 0] ?? '';
+      const prefix = sLabel ? `[${sLabel}] ` : '';
+      return {
+        label: String(prefix + (banner.name || banner.id || bannerKey)).slice(0, 100),
+        description: String(banner.description || '沒有卡池說明').slice(0, 100),
+        value: String(bannerKey),
+      };
+    });
 
   const menu = new StringSelectMenuBuilder()
     .setCustomId('pull_select_banner')
@@ -157,6 +168,10 @@ function disableComponents(components) {
 // ─────────────────────────────────────────────
 
 function getDefaultBanner(banners) {
+  // 優先回 standard（恆常），沒有才取第一個
+  if (banners.standard) {
+    return { key: 'standard', banner: banners.standard };
+  }
   const entry = Object.entries(banners).find(([bannerKey, banner]) => banner && bannerKey);
 
   if (!entry) {
