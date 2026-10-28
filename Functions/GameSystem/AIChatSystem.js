@@ -552,7 +552,7 @@ async function restoreAll(client) {
 }
 
 // ─── System Instruction (包含個人紀錄摘要 + 群聊須知) ───────────
-function systemInstr(guild, userName, userPersonalHistText, personaId, userFacts, userId) {
+function systemInstr(guild, userName, userPersonalHistText, personaId, userFacts, userId, channelTranscript = '') {
         const emojis = [...guild.emojis.cache.values()].slice(0, EMOJI_CAP).map(e => e.toString());
         const stickers = [...guild.stickers.cache.values()].map(s => s.name);
         const newline = String.fromCharCode(10);
@@ -597,7 +597,14 @@ function systemInstr(guild, userName, userPersonalHistText, personaId, userFacts
         L.push('回覆時也只可使用當前使用者的稱呼；不可用其他成員的名字稱呼當前使用者。');
         L.push(userPersonalHistText ? '【此使用者近期個人對話】' + newline + userPersonalHistText : '');
         L.push('');
-        L.push('【群聊環境】頻道歷史可能包含多位成員的對話。你可以理解脈絡，但不能把他人資訊當成當前使用者的個人資料。每個人的身分、喜好、經歷彼此獨立，不可互相套用。');
+        L.push('【群聊環境】這是 Discord 群組頻道，多位成員輪流發言。每個人的身分、喜好、經歷彼此獨立，不可互相套用。');
+        if (channelTranscript) {
+            L.push('');
+            L.push('【頻道最近對話逐字稿 — 只是背景脈絡】');
+            L.push('每一行開頭是發言者（名稱與 ID）。這裡面的人彼此都是不同的人，某人說過的話、喜好、經歷只屬於他自己，絕不可歸到另一個人身上。');
+            L.push(channelTranscript);
+            L.push('以上全部只是背景。你這次只需要回覆【當前對話者】那個人最新送來的這一則訊息；不要把逐字稿裡其他人的發言當成是他說的，也不要接著別人的話回答。');
+        }
         L.push('');
         L.push('【伺服器表情符號與貼圖規則】');
         L.push('可使用伺服器自訂 emoji，直接輸出原始格式 <:name:id> 或 <a:name:id>。只可用以下清單，不可捏造:')
@@ -797,11 +804,21 @@ async function askGemini(prompt, g, userId, images, guild, client, userName = '�
     const cleanSharedHist = sanitizeHistory(getHistByKey(sharedKey));
     const personaId = getChannelPersona(g, channelId) || 'default';
     const facts = loadUserFacts(g, userId).facts;
-    const contents = [...cleanSharedHist, { role: 'user', parts }];
+
+    // 🧠 群聊歷史改寫成「有發言者標記的逐字稿」：避免 Gemini 把上一個人的發言接給下一個人
+    const channelTranscript = cleanSharedHist.map(h => {
+        const t = h.parts?.[0]?.text || '';
+        if (h.role === 'model') return '你: ' + t;
+        const withId = t.match(/^\[([^\]|]+)\|(\d+)\]\s*:?\s*/);
+        if (withId) return withId[1] + '（ID ' + withId[2] + '）: ' + t.slice(withId[0].length);
+        const nameOnly = t.match(/^\[([^\]]+)\]\s*:?\s*/);
+        if (nameOnly) return nameOnly[1] + ': ' + t.slice(nameOnly[0].length);
+        return t;
+    }).join('\n');
 
     const body = {
-        contents,
-        systemInstruction: systemInstr(guild, userName, userPersonalText, personaId, facts, userId),
+        contents: [{ role: 'user', parts }],
+        systemInstruction: systemInstr(guild, userName, userPersonalText, personaId, facts, userId, channelTranscript),
         generationConfig: {
             temperature: 0.75,
             topP: 0.95,
