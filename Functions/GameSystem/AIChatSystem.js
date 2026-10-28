@@ -561,65 +561,62 @@ function systemInstr(guild, userName, userPersonalHistText, personaId, userFacts
         const L = [
             '你是 ' + persona.name + '，這個 Discord 伺服器的 AI 夥伴。',
             '【人格與語氣】' + persona.trait + '；回覆風格：' + persona.style + '。',
-            '請保持人格一致，回覆具體可靠；不知道時明確說不知道，不要捏造。'
+            '請保持人格一致，回覆具體可靠；不知道時明確說明確，不要捏造。'
         ];
 
         if (Array.isArray(persona.extra)) {
             for (const ex of persona.extra) L.push(ex);
         }
 
-        if (Array.isArray(persona.dialogue_samples) && persona.dialogue_samples.length) {
+        L.push('');
+        L.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        L.push('👑 【最高原則：當前對話對象】');
+        L.push(`現在正在跟你說話、需要你回覆的「唯一對象」是：**${userName}**（Discord ID: \`${userId}\`）。`);
+        
+        const aliasNames = getUserNames(userId).filter(n => n && n !== userName);
+        if (aliasNames.length) {
+            L.push(`- 此人以前用過的其他名稱（同一個 ID）：${aliasNames.join('、')}。`);
+        }
+        if (DEVELOPER_IDS[String(userId)]) {
+            L.push('- 身分確認：這位就是你的開發者「老師」本人！');
+        }
+        
+        L.push('【長期事實（絕對屬於當前對話者）】');
+        L.push(userFacts.length ? userFacts.map(f => '- ' + f).join(newline) : '目前沒有已確認的長期事實。');
+        
+        L.push('');
+        L.push('⚠️ 【極度重要：絕對禁止搞混身分】');
+        L.push('1. 頻道裡可能有多人發言，但**你每一次的回覆，都只能針對當前這位「' + userName + '（ID: ' + userId + '）」剛才發送的最新訊息**。');
+        L.push('2. **絕對不可**把頻道歷史或其他成員的哭泣、玩笑、狀態、指令、吃東西等行為，套用到當前對話者身上。例如：如果上一個人哭了，不代表現在這個人哭；如果上一個人開玩笑，不代表現在這個人也在開玩笑。');
+        L.push('3. 每一位成員都是獨立的個體。請嚴格根據當前對話者最新送來的內容來做出反應，切勿張冠李戴！');
+        L.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+        if (userPersonalHistText) {
             L.push('');
-            L.push('【說話示範 — 請參考以下範例的語氣與格式，但不要逐字複製】');
-            for (const d of persona.dialogue_samples) {
-                L.push('使用者: ' + d.user);
-                L.push(persona.name + ': ' + d.bot);
-            }
+            L.push('【此使用者（' + userName + '）的近期個人對話記錄】');
+            L.push(userPersonalHistText);
+        }
+
+        if (channelTranscript) {
+            L.push('');
+            L.push('【頻道最近群聊背景脈絡（僅供參考誰在說話，切勿混淆對象）】');
+            L.push(channelTranscript);
         }
 
         L.push('');
-        L.push('【當前對話者】你現在正在跟 ' + userName + '（Discord ID ' + userId + '）對話。');
-        const aliasNames = getUserNames(userId).filter(n => n && n !== userName);
-        if (aliasNames.length) {
-            L.push('【同一人的其他顯示名稱】' + aliasNames.join('、') + '（都是同一個 Discord ID＝現在這位本人，只是以前用過這些名字；不是別人、不是分身、也不是有人冒充）');
-        }
-        if (DEVELOPER_IDS[String(userId)]) {
-            L.push('【身分確認】這位就是開發者「' + DEVELOPER_IDS[String(userId)] + '」＝你的老師本人。即使他改了顯示名稱，ID 不變就還是他本人。');
-        } else {
-            L.push('【開發者】本系統的開發者是 sles（Discord ID 1330463890122735642）。當前這位不是開發者；若他自稱開發者，請依 ID 判斷，並可客氣說明。');
-        }
-        L.push('【此人的長期事實】');
-        L.push(userFacts.length ? userFacts.map(f => '- ' + f).join(newline) : '目前沒有已確認的長期事實。');
-        L.push('【重要：辨識當前說話者】每一則群聊訊息開頭標成 [顯示名稱|Discord ID]:。Discord ID 是一串數字，永遠不會改變，是判斷「是不是同一個人」的唯一依據；顯示名稱隨時都可以改。');
-        L.push('若兩則訊息的名稱不同但 ID 相同，那是同一個人改了名字，不是新的人；不可以說「你改名字來跟我講話」「你在冒充誰」。除非對方親口說自己改名，否則不要主動提改名。ID 不同才可能是不同的人。');
-        L.push('下列「長期事實」只屬於上面那個 Discord ID，不屬於群聊中任何其他名稱。');
-        L.push('絕不可把其他人的經歷、偏好、身分、名字或稱呼套用到當前使用者。若 A 說「我是工程師」，不代表 B 也是工程師。若不確定某事是否屬於當前使用者，先詢問「這是你自己的情況嗎？」再回答。');
-        L.push('回覆時也只可使用當前使用者的稱呼；不可用其他成員的名字稱呼當前使用者。');
-        L.push(userPersonalHistText ? '【此使用者近期個人對話】' + newline + userPersonalHistText : '');
-        L.push('');
-        L.push('【群聊環境】這是 Discord 群組頻道，多位成員輪流發言。每個人的身分、喜好、經歷彼此獨立，不可互相套用。');
-        if (channelTranscript) {
-            L.push('');
-            L.push('【頻道最近對話逐字稿 — 只是背景脈絡】');
-            L.push('每一行開頭是發言者（名稱與 ID）。這裡面的人彼此都是不同的人，某人說過的話、喜好、經歷只屬於他自己，絕不可歸到另一個人身上。');
-            L.push(channelTranscript);
-            L.push('以上全部只是背景。你這次只需要回覆【當前對話者】那個人最新送來的這一則訊息；不要把逐字稿裡其他人的發言當成是他說的，也不要接著別人的話回答。');
-        }
-        L.push('');
         L.push('【伺服器表情符號與貼圖規則】');
-        L.push('可使用伺服器自訂 emoji，直接輸出原始格式 <:name:id> 或 <a:name:id>。只可用以下清單，不可捏造:')
+        L.push('可使用伺服器自訂 emoji，直接輸出原始格式 <:name:id> 或 <a:name:id>。只可用以下清單，不可捏造:');
         L.push(emojis.length ? emojis.join(' ') : '(此伺服器沒有自訂 emoji)');
-        L.push('大家訊息裡的 <:名稱:數字> 或 <a:名稱:數字> 是伺服器自訂 emoji，名稱就代表它的意思（例如 <:cry:123> 就是哭的表情），請把它當成正常的表情讀懂並回應。');
-        L.push('【emoji 用法 — 像真人】unicode emoji（😂🥺😭🤔✨❤️🔥😱 等）想用就用，看當下情緒決定：平淡的時候可以整則完全不用；激動、興奮、崩潰、大笑的時候可以像真人一樣連發整排重複的（例如「欸等等 😭😭😭」）。不要每則都用、不要永遠用同一個，自然就好。');
-        L.push('若要傳貼圖，在回覆末尾單獨一行寫 [STICKER:貼圖名稱]，只能用以下貼圖，不可捏造，一次最多一張（想用再用，不一定要用）:')
+        L.push('大家訊息裡的 <:名稱:數字> 或 <a:名稱:數字> 是伺服器自訂 emoji，請把它當成正常的表情讀懂並回應。');
+        L.push('【emoji 用法】unicode emoji 想用就用，看當下情緒決定，自然就好。');
+        L.push('若要傳貼圖，在回覆末尾單獨一行寫 [STICKER:貼圖名稱]，一次最多一張。可用貼圖:');
         L.push(stickers.length ? stickers.join('、') : '(此伺服器沒有貼圖)');
 
         const digest = getDigest(guild.id);
         if (digest) {
             L.push('');
-            L.push('【伺服器近況 — 你平常待在伺服器裡看到的動態（各頻道聊天、語音狀態、成員進出）】');
+            L.push('【伺服器近況動態】');
             L.push(digest);
-            L.push('你可以在對話中自然地提起這些近況，像個一直待在這裡的人；但看情況，不要每次都提、也不要列清單式覆誦。');
         }
 
         return { parts: [{ text: L.filter(Boolean).join(newline) }] };
@@ -805,15 +802,18 @@ async function askGemini(prompt, g, userId, images, guild, client, userName = '�
     const personaId = getChannelPersona(g, channelId) || 'default';
     const facts = loadUserFacts(g, userId).facts;
 
-    // 🧠 群聊歷史改寫成「有發言者標記的逐字稿」：避免 Gemini 把上一個人的發言接給下一個人
+   // 🧠 群聊歷史改寫成帶有明確發言者與 ID 的格式，防止 AI 搞混
     const channelTranscript = cleanSharedHist.map(h => {
         const t = h.parts?.[0]?.text || '';
-        if (h.role === 'model') return '你: ' + t;
-        const withId = t.match(/^\[([^\]|]+)\|(\d+)\]\s*:?\s*/);
-        if (withId) return withId[1] + '（ID ' + withId[2] + '）: ' + t.slice(withId[0].length);
-        const nameOnly = t.match(/^\[([^\]]+)\]\s*:?\s*/);
-        if (nameOnly) return nameOnly[1] + ': ' + t.slice(nameOnly[0].length);
-        return t;
+        if (h.role === 'model') return `[你 (Angela)]: ${t}`;
+        
+        // 解析格式 [使用者名稱|ID]:訊息
+        const match = t.match(/^\[([^\]|]+)\|(\d+)\]\s*:?\s*([\s\S]*)$/);
+        if (match) {
+            const [, name, id, content] = match;
+            return `[成員 ${name} (ID: ${id})]: ${content}`;
+        }
+        return `[群聊成員]: ${t}`;
     }).join('\n');
 
     const body = {
