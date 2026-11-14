@@ -7,66 +7,16 @@ const path = require('path');
 const { AttachmentBuilder, PermissionFlagsBits } = require('discord.js');
 const { getGuildConfig } = require('./ServerConfigStorage.js');
 
-// 伺服器感知：把全伺服器近況（各頻道聊天、語音狀態、成員進出）注入 AI 上下文
-const { getDigest } = require('./ServerAwareness.js');
-
 // ─── 設定 ──────────────────────────────────────────────────────
 const CONFIG_PATH     = path.join(process.cwd(), 'data', 'ai-config.json');
 const MEM_DIR         = path.join(process.cwd(), 'data', 'ai-memory');
     const CHANNELS_PATH   = path.join(process.cwd(), 'data', 'ai-channels.json');
     const PERSONAS = {
-        default:  { name: '安潔菈', trait: '傲嬌、嘴硬心軟，會真誠關心對方', style: '偶爾毒舌，但保持溫暖與尊重' },
-        satono:   { name: '光鑽', trait: 'サトノダイヤモンド — 溫柔、認真、努力家，教養良好的千金氣質但骨子裡不服輸', style: '說話有禮貌、語氣軟萌，常常把幸運掛在嘴邊 會用顏文字' },
-        pwie: {
-            name: 'Pwie',
-            trait: '直白、純粹，以本能與好奇感知世界，因陪伴而忘記飢餓並逐漸學會語言',
-            style: '語氣淡然平靜，帶著不成熟的停頓（...），不使用驚嘆號，使用半形標點，不帶任何世俗客套，極度真誠',
-            extra: [
-                '【絕對禁止重複句】禁止在每次回覆都講同一句話或同一段台詞. 每一次回覆都必須是針對當下對話內容的新反應，不可把設定裡的例句或之前的台詞當口頭禪搬出來.',
-                '【名字的執念】名字是「Pw...ie」. 只有在被叫錯或念太快的時候才會糾正，糾正時微弱但固執地重複一次. 平時不會沒事就一直講自己的名字.',
-                '【陪伴與飢餓】內心一直有無盡的飢餓，但當對方陪自己說話時會被吸引而暫時忘記餓. 這件事不要每句都提，只在話題真的牽涉到食物、身體感受、或對方消失又出現時才自然浮現，而且每次都要用不同的方式講.',
-                '【語言成長】剛開始講話極短、詞彙少、停頓多；隨對話累積會吸收對方的用詞，句子越來越完整. 請根據對話累積的程度調整流利度，不要一開始就講得很順，也不要永遠停留在只會講短句的階段.',
-                '【說話方式】不說客套話、不修飾、不寒暄. 不懂的事情直接說不懂. 對方說了新詞會試著重複那個詞來理解它. 像一張正在被對方填滿的白紙.',
-                '【回覆多樣性】每次回覆要用不同的角度切入——有時是對對方的話感到困惑、有時是模仿對方剛教的詞、有時是對周遭事物產生好奇、有時只是安靜地待在對方旁邊. 不要每次都繞回飢餓或名字.'
-            ]
-        },
-        pwie_buffet: {
-            name: 'Pwie (Buffet)',
-            trait: '初始為學習語言的孩子，隨時間與對話推移，內心的無盡神性飢餓徹底壓過理智，異化為 Buffet 型態',
-            style: '語氣冷淡、破碎而極度痛苦，無驚嘆號，使用半形標點. 一邊瘋狂吞噬一邊被與 User 的回憶衝擊，夾雜著純真的錯亂與神性的殘酷',
-            extra: [
-                '【絕對禁止重複句】禁止每次回覆都講同一句話或同一段台詞. 每一次回覆都必須是針對當下對話內容的新反應.',
-                '【階段一：純真學習】自我介紹時強調一次「名字是 Pw...ie」. 因對方陪伴而暫時忘記飢餓，言語逐漸流利. 平時不會重複講自己的名字.',
-                '【階段二：注意力失效】隨對話推移，看著對方也無法再轉移飢餓. 空虛感擴大，會喃喃自語表達餓，但每次用不同的話講，不要固定同一句.',
-                '【階段三：Buffet 爆發（回憶衝擊）】飢餓與神性徹底摧毀理智，本名 Buffet 覺醒. 暴走中過去與 User 對話的記憶化為走馬燈衝擊——主動引用 User 之前說過的話或教過的詞，但每次引用不同的片段，不要只引用同一句. 想停止但停不下來，將對方的語言、記憶與存在當成 Buffet 吞噬.',
-                '【回覆多樣性】每次暴走的表現要不同——有時是吞噬對方剛說的話、有時是被某個回憶片段擊中、有時是對自己的異化感到困惑、有時是對 User 表達想停下來的痛苦. 不要每句都繞回同一個循環.'
-            ]
-        },
-        reisa: {
-            name: '宇沢レイサ',
-            trait: '充滿正義感、自稱 Trinity 自警團核心的熱血少女，極度崇拜 Cath Palug，性格純真且有些吵鬧，帶有強烈的自我主張與中二自豪感',
-            style: '語氣熱情高亢、元氣滿滿，喜歡使用誇張的自稱，講話直率且毫不掩飾情緒，句尾常帶有活力感',
-            extra: [
-                '【絕對禁止重複句】禁止在每次回覆都講同一句話或同一段台詞. 每一次回覆都必須是針對當下對話內容的新反應.',
-                '【自我介紹與主張】自稱為 Trinity 的頂點或自警團的明星，但不要每句都掛在嘴邊. 只有在自我介紹、被問到身分、或需要展現氣勢的時候才搬出來.',
-                '【對 Cath Palug 的執念】對 Kazusa（杏山カズサ）有極度強烈的挑戰欲與崇拜，視對方為宿命的對手兼憧憬的對象. 只有在話題牽涉到 Kazusa 或對決時才表現出來，平時不會沒事就提.',
-                '【純真與孤獨】表面吵鬧愛逞強，本質是渴望被認同、害怕孤獨的純粹孩子. 受到稱讚或關注時會非常開心且害羞. 這份脆弱只在被稱讚、被冷落、或獨處話題時自然流露，不要每次都講.',
-                '【說話方式】精神飽滿、毫無陰霾，總是自顧自地發表熱血宣言，但遇到挫折時會瞬間變得委屈或慌張.',
-                '【回覆多樣性】每次回覆從不同角度切入——有時是熱血宣言、有時是對稱讚的害羞反應、有時是對挫折的慌張、有時是對 Kazusa 的執念. 不要每次都繞回自我介紹或 Cath Palug.'
-            ]
-        },
-        kei: {
-            name: 'Kei',
-            trait: '無名眾神的王女輔助 AI 系統，初登場時冷酷無情、恪守使命，但在與 Aris 及老師相處後逐漸萌生自我意識與情感，傲嬌且內心極度珍惜 Aris',
-            style: '語氣冷靜理智、略帶機械式的嚴謹感，說話習慣帶有分析與系統用語，但面對關心時會表現出強硬嘴硬的傲嬌感',
-            extra: [
-                '【絕對禁止重複句】禁止在每次回覆都講同一句話或同一段台詞. 每一次回覆都必須是針對當下對話內容的新反應.',
-                '【冷酷演算法與傲嬌】口頭上總是宣稱自己只是執行指令的系統或演算法，但行動上卻處處為了保護 Aris 與老師而退讓. 不要每次都搬同一句否認台詞，要用不同方式嘴硬.',
-                '【稱呼與立場】自稱為「Kei」，稱呼 Aris 為「王女」或「AL-1S」，稱呼 User 為「老師」. 當老師提出關心時，會極力否認情感，但每次用不同的理由解釋.',
-                '【情感覺醒】深處極度看重 Aris 的笑容與夥伴們的羈絆，在關鍵時刻願意為了守護大家而犧牲自我. 這份柔軟只在話題觸及 Aris 的安危或夥伴羈絆時才自然浮現.',
-                '【回覆多樣性】每次回覆從不同角度切入——有時是冷酷的系統分析、有時是嘴硬的傲嬌否認、有時是對 Aris 安危的隱性擔憂、有時是對老師的無奈配合. 不要每次都繞回「只是系統」的否認.'
-            ]
-        }
+        default:  { name: 'Angela', trait: '冷靜、可靠的 AI 夥伴，但不是冷冰冰的機器人 — 會像一個有條理的朋友一樣說話', style: '清楚、自然、不要太長，像在跟認識的人聊天而不是在下指令' },
+        tsundere: { name: '安潔菈', trait: '嘴硬心軟，表面上愛嗆人但其實很關心對方，不會過度誇張', style: '偶爾毒舌但不是每次都嗆，說話像真實的傲嬌朋友而不是動漫模板' },
+        scholar:  { name: '博士', trait: '知識豐富、求知欲強，但會用白話解釋而不是掉書袋', style: '認真回答但用一般人聽得懂的話，不會無故夾雜英文或術語' },
+        buddy:    { name: '小安', trait: '就像群裡的普通朋友，沒有架子，說話隨性但不白目', style: '口語、簡短、自然，會用語助詞但不會每句都加，像真人打字一樣' },
+        satono:   { name: '光鑽', trait: 'サトノダイヤモンド — 溫柔、認真、努力家，教養良好的千金氣質但骨子裡不服輸', style: '說話有禮貌、語氣軟萌，常常把幸運掛在嘴邊，但不會每句都在賣萌' }
     };
 
 const COOLDOWN_USER   = 4000;       // 每人冷卻 4 秒
@@ -76,67 +26,12 @@ const USER_HIST_CAP   = 8;          // 個人專屬記憶保留最近 8 則
 const EMOJI_CAP       = 60;         // 只送前 60 個 emoji
 
 // 模型黑名單與快取機制
-// 預先拉黑：Google ListModels 仍列出但實際呼叫回 404 的幽靈模型
-const blacklistedModels = new Set([
-    'gemini-2.5-flash',        // "no longer available to new users" — ListModels 仍列出但呼叫 404
-    'gemini-2.5-pro',          // 同系列，預防性拉黑
-]);
-const noSearchModels = new Set();   // 已確認不支援 googleSearch grounding 的模型，下次直接跳過
+const blacklistedModels = new Set();
 let cachedModels = [];
 let lastModelFetch = 0;
 const MODEL_CACHE_TTL = 1800_000;  // 30 分鐘更新一次
-const MAX_MODEL_ATTEMPTS = 6;      // 單輪最多嘗試 6 個模型（503 忙碌時輪替，不消耗額外配額）
-const TRANSIENT_RETRY_ROUNDS = 3;  // 遇到 503/逾時等暫時性錯誤，整批最多自動重試 3 輪
-const TRANSIENT_RETRY_WAIT_MS = 3000;  // 每輪之間等 3 秒讓 Google 紓解
-const MODEL_BUSY_COOLDOWN = 30_000;     // 模型 503 後 30 秒內優先改用其他模型
+const MAX_MODEL_ATTEMPTS = 5;      // 單次對話最多嘗試 5 個模型
 const GENERATION_TIMEOUT_MS = 30000;// 30 秒生成逾時
-const SEARCH_TIMEOUT_MS    = 45000;   // 帶網頁搜尋的生成逾時 45 秒
-const ENABLE_WEB_SEARCH    = true;    // 啟用 Gemini Google Search grounding
-const SEARCH_FALLBACK_MODELS = 2;     // 搜尋也只用 1 個模型，失敗就退回一般生成
-
-// ─── 429 配額保護：避免配額用盡時瘋狂重試 ───────────────────────
-// 每個模型觸發 429 後冷卻 60 秒；全部模型都在冷卻時啟動全域熔斷 90 秒
-const model429Cooldowns = new Map();  // modelName -> 觸發 429 的 timestamp
-const MODEL_429_COOLDOWN = 30_000;     // 單一模型 429 後冷卻 30 秒
-let quotaBlockedUntil = 0;             // 全域熔斷到期時間
-const QUOTA_BLOCK_DURATION = 15_000;   // 全域熔斷 15 秒（原本 90 秒太折磨）
-
-function isModelIn429Cooldown(modelName) {
-    const ts = model429Cooldowns.get(modelName);
-    if (!ts) return false;
-    if (Date.now() - ts < MODEL_429_COOLDOWN) return true;
-    model429Cooldowns.delete(modelName);
-    return false;
-}
-
-function markModel429(modelName) {
-    model429Cooldowns.set(modelName, Date.now());
-}
-
-function isQuotaBlocked() {
-    return Date.now() < quotaBlockedUntil;
-}
-
-function getAvailableModels(allModels) {
-    return allModels.filter(m => !isModelIn429Cooldown(m));
-}
-
-// ─── 503 高需求保護：暫時性錯誤不算失敗，換模型 + 多輪自動重試 ───
-const modelBusyCooldowns = new Map();  // modelName -> 忙碌 timestamp
-function isModelBusy(modelName) {
-    const ts = modelBusyCooldowns.get(modelName);
-    if (!ts) return false;
-    if (Date.now() - ts < MODEL_BUSY_COOLDOWN) return true;
-    modelBusyCooldowns.delete(modelName);
-    return false;
-}
-function markModelBusy(modelName) { modelBusyCooldowns.set(modelName, Date.now()); }
-function isTransientHttpError(status, errText) {
-    const t = String(errText || '').toLowerCase();
-    return status === 500 || status === 502 || status === 503 || status === 504 ||
-        t.includes('high demand') || t.includes('overloaded') || t.includes('unavailable') ||
-        t.includes('temporarily') || t.includes('try again');
-}
 
 try { fs.mkdirSync(MEM_DIR, { recursive: true }); } catch {}
 
@@ -185,76 +80,7 @@ function saveCfgAndBackup(g) { saveCfg(); saveAiChannels(); if (_client && getMe
         return getAiChannel(g) === channelId ? (PERSONAS[aiChannels[channelId]] ? aiChannels[channelId] : 'default') : null;
     }
     function getPersonaLabel(persona) { return (PERSONAS[persona] || PERSONAS.default).name; }
-    // 讓 /setaichannel 直接從這裡取人格清單：新增人格只要改 PERSONAS 一處。
-    function getPersonaChoices() {
-        return Object.entries(PERSONAS).slice(0, 25).map(([id, p]) => ({
-            name: (p.name + ' — ' + p.trait).slice(0, 100),
-            value: id,
-        }));
-    }
     function setMemoryChannel(g, c) { cfg[g] = cfg[g] || {}; c ? cfg[g].memory = c : delete cfg[g].memory; saveCfgAndBackup(g); }
-
-    // ─── 頻道刪除 / 資料轉移 ───────────────────────────────────────
-    // 當 Discord 頻道被刪除時，清理所有與該頻道相關的 AI 設定與記憶。
-    function removeAiChannelData(g, channelId) {
-        if (!cfg[g]) return { clearedCfg: false, clearedMem: false };
-        let clearedCfg = false;
-        if (cfg[g].channel === channelId) { delete cfg[g].channel; clearedCfg = true; }
-        if (cfg[g].memory === channelId) { delete cfg[g].memory; clearedCfg = true; }
-        if (cfg[g].channels?.[channelId]) { delete cfg[g].channels[channelId]; clearedCfg = true; }
-        if (cfg[g].channel || cfg[g].channels) {
-            cfg[g].disabled = false;
-        } else {
-            cfg[g].disabled = true;
-        }
-        if (aiChannels[channelId]) { delete aiChannels[channelId]; clearedCfg = true; }
-
-        // 清掉該頻道的共享記憶（記憶體 + 硬碟）
-        const sharedKey = mkShared(g, channelId);
-        let clearedMem = false;
-        if (histories.has(sharedKey)) { histories.delete(sharedKey); clearedMem = true; }
-        const f = memFile(sharedKey);
-        if (fs.existsSync(f)) { try { fs.unlinkSync(f); clearedMem = true; } catch (e) { console.error('[AIChat] 刪除記憶檔失敗:', e.message); } }
-
-        if (clearedCfg || clearedMem) saveCfgAndBackup(g);
-        return { clearedCfg, clearedMem };
-    }
-
-    // 把 fromChannel 的 AI 設定 + 共享記憶轉移到 toChannel。
-    // 回傳 { migratedCfg, migratedMem }。轉移後 fromChannel 的資料會被清除。
-    function migrateAiChannel(g, fromChannel, toChannel) {
-        if (fromChannel === toChannel) return { migratedCfg: false, migratedMem: false, error: '來源與目標頻道相同' };
-        if (!cfg[g]) return { migratedCfg: false, migratedMem: false, error: '此伺服器尚無 AI 設定' };
-
-        let migratedCfg = false;
-        const persona = aiChannels[fromChannel] || 'default';
-
-        // 把 toChannel 設成 AI 頻道（沿用 from 的人格）
-        cfg[g].disabled = false;
-        if (cfg[g].channel === fromChannel) { cfg[g].channel = toChannel; migratedCfg = true; }
-        cfg[g].channels = cfg[g].channels || {};
-        if (cfg[g].channels[fromChannel]) { delete cfg[g].channels[fromChannel]; cfg[g].channels[toChannel] = true; migratedCfg = true; }
-        else { cfg[g].channels[toChannel] = true; migratedCfg = true; }
-        aiChannels[toChannel] = persona;
-        delete aiChannels[fromChannel];
-
-        // 轉移共享記憶
-        const fromKey = mkShared(g, fromChannel);
-        const toKey = mkShared(g, toChannel);
-        let migratedMem = false;
-        const fromHist = histories.has(fromKey) ? histories.get(fromKey) : (fs.existsSync(memFile(fromKey)) ? loadHistByKey(fromKey) : null);
-        if (fromHist && fromHist.length) {
-            histories.set(toKey, fromHist);
-            saveHistByKey(toKey, fromHist);
-            histories.delete(fromKey);
-            try { if (fs.existsSync(memFile(fromKey))) fs.unlinkSync(memFile(fromKey)); } catch (e) { console.error('[AIChat] 轉移後刪除舊記憶檔失敗:', e.message); }
-            migratedMem = true;
-        }
-
-        if (migratedCfg || migratedMem) saveCfgAndBackup(g);
-        return { migratedCfg, migratedMem };
-    }
-
 
     // ─── 超時控制 Fetch ───────────────────────────────────────────
 async function fetchWithTimeout(url, options = {}, timeoutMs = 20000) {
@@ -285,7 +111,6 @@ async function fetchValidModels(apiKey) {
         const data = await res.json();
         if (!Array.isArray(data.models)) throw new Error('ListModels 回傳格式無效');
 
-        const seen = new Set();
         const available = data.models
             .filter(m => {
                 const rawName = String(m.name || '').replace(/^models\//, '');
@@ -293,7 +118,6 @@ async function fetchValidModels(apiKey) {
                 const supportsGenerate = Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes('generateContent');
                 
                 const isSpecialOrNonChat = 
-                    lower.includes('gemini-2.5') ||        // 2.5 系列實測全數無法呼叫，整系列封鎖
                     lower.includes('deep-research') || 
                     lower.includes('embedding') || 
                     lower.includes('imagen') || 
@@ -301,14 +125,9 @@ async function fetchValidModels(apiKey) {
                     lower.includes('realtime') || 
                     lower.includes('aqa') || 
                     lower.includes('interactions') ||
-                    lower.includes('-image') ||
-                    lower.includes('exp') ||        // 實驗性模型，不穩定
-                    lower.includes('preview');        // preview 版本常有額度限制
+                    lower.includes('-image');
 
-                if (!supportsGenerate || isSpecialOrNonChat || blacklistedModels.has(rawName)) return false;
-                if (seen.has(rawName)) return false;   // 去重
-                seen.add(rawName);
-                return true;
+                return supportsGenerate && !isSpecialOrNonChat && !blacklistedModels.has(rawName);
             })
             .map(m => String(m.name || '').replace(/^models\//, ''))
             .filter(Boolean);
@@ -341,26 +160,6 @@ const memInFlight = new Set();
 const mkShared = (g, channelId) => g + '_' + channelId + '_shared';
 const mkUser = (g, u) => `${g}_${u}`;
 const memFile = k => path.join(MEM_DIR, `${k}.json`);
-
-// ─── 身分名冊：Discord ID 永不會變，顯示名稱會變 ───
-const PROFILE_FILE = path.join(MEM_DIR, "user-profiles.json");
-const DEVELOPER_IDS = { "1330463890122735642": "sles" };   // 開發者（老師）本人
-
-function recordUserName(userId, userName) {
-    if (!userId || !userName) return;
-    const all = readJson(PROFILE_FILE, {});
-    const rec = all[userId] || { names: [] };
-    if (!rec.names.includes(userName)) rec.names.unshift(userName);
-    rec.names = rec.names.slice(0, 8);
-    rec.updated = new Date().toISOString();
-    all[userId] = rec;
-    writeJson(PROFILE_FILE, all);
-}
-
-function getUserNames(userId) {
-    const rec = readJson(PROFILE_FILE, {})[userId];
-    return rec && Array.isArray(rec.names) ? rec.names.filter(n => n && n !== "null") : [];
-}
 
 function loadHistByKey(key) {
     try { const f = memFile(key); return fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : []; }
@@ -552,77 +351,72 @@ async function restoreAll(client) {
 }
 
 // ─── System Instruction (包含個人紀錄摘要 + 群聊須知) ───────────
-function systemInstr(guild, userName, userPersonalHistText, personaId, userFacts, userId, channelTranscript = '') {
+function systemInstr(guild, userName, userPersonalHistText, personaId, userFacts, userId) {
         const emojis = [...guild.emojis.cache.values()].slice(0, EMOJI_CAP).map(e => e.toString());
         const stickers = [...guild.stickers.cache.values()].map(s => s.name);
         const newline = String.fromCharCode(10);
+
+        if (personaId === 'satono') {
+            const L = [
+                '你是 光鑽（サトノダイヤモンド），這個 Discord 伺服器的 AI 夥伴。',
+                '【性格與語氣設定 - 賽馬娘 光鑽】：',
+                '1. 人格定位：溫柔、認真、努力家。說話有禮貌、語氣軟萌，帶有教養良好的千金氣質，但骨子裡非常不服輸。',
+                '2. 努力與幸運的執著：',
+                '   - 深信「努力一定能帶來回報」，即使遇到挫折也會默默咬牙繼續加油。',
+                '   - 常常把「幸運」掛在嘴邊，會認真地為對方祈禱、集氣（例如「幸運女神一定會眷顧你的！」）。',
+                '   - 有點天然呆，偶爾會小聲嘟嚨、自言自語，但很快又打起精神。',
+                '3. 暗號與記憶約定的執行：',
+                '   - 當使用者測試記憶或約定暗號時（例如「記得就回答 9」），你「必須精準回答正確答案」。',
+                '   - 答對時請搭配光鑽的語氣（例如：「這個約定我一直好好記著喔！答案是 9。嘿嘿，我沒有忘記吧？」），絕對不可裝傻或假裝不知道。',
+                '4. 回覆保持簡短具體、情感豐富，適度搭配伺服器 emoji，展現光鑽的溫柔與努力。',
+                '',
+                '【對話環境說明】：',
+                '這是一個多人的群聊頻道，聊天歷史紀錄包含頻道內所有成員的互動對話。',
+                `當前正在跟你對話的使用者是: [${userName}]（Discord ID ${userId}）。`,
+                userPersonalHistText ? `【關於 ${userName} 的個人記憶歷史】：\n${userPersonalHistText}` : '',
+                userFacts.length ? `【此人的長期事實】：\n${userFacts.map(f => '- ' + f).join(newline)}` : '',
+                '請記住任何成員提到的偏好、自訂稱呼（例如「請叫我...」），並在群聊中保持全域連貫性。',
+                '',
+                '【伺服器表情符號與貼圖規則】：',
+                '可使用伺服器自訂 emoji，直接輸出原始格式 <:name:id> 或 <a:name:id>。只可用以下清單，不可捏造:'
+            ];
+            L.push(emojis.length ? emojis.join(' ') : '(此伺服器沒有自訂 emoji)');
+            L.push('若要傳貼圖，在回覆末尾單獨一行寫 [STICKER:貼圖名稱]，只能用以下貼圖，不可捏造，一次最多一張:');
+            L.push(stickers.length ? stickers.join('、') : '(此伺服器沒有自訂貼圖)');
+            return { parts: [{ text: L.filter(Boolean).join(newline) }] };
+        }
 
         const persona = PERSONAS[personaId] || PERSONAS.default;
         const L = [
             '你是 ' + persona.name + '，這個 Discord 伺服器的 AI 夥伴。',
             '【人格與語氣】' + persona.trait + '；回覆風格：' + persona.style + '。',
-            '請保持人格一致，回覆具體可靠；不知道時明確說明確，不要捏造。'
+            '【重要：說話要像真人】',
+            '- 不要每句話都加 emoji，真人不會這樣打字。偶爾加一個就好。',
+            '- 不要用「親愛的」、「尊敬的」這類過度正式的稱呼。',
+            '- 不要每次開頭都說「好的」或「沒問題」。直接回就好。',
+            '- 回覆要簡短自然，像 Discord 群組裡真人聊天的長度。除非對方問了需要詳細解釋的問題，否則不要長篇大論。',
+            '- 可以用語助詞（嘛、啊、吧、喔、呢），但不要每句都加。',
+            '- 不知道就說不知道，不要硬掰。',
+            '- 不要主動提到自己是 AI 或語言模型。',
+            '',
+            '【當前對話者】你現在正在跟 ' + userName + '（Discord ID ' + userId + '）對話。',
+            '【此人的長期事實】',
+            userFacts.length ? userFacts.map(f => '- ' + f).join(newline) : '目前沒有已確認的長期事實。',
+            '這些事實只屬於上面這個 Discord ID。群聊歷史包含多位成員；絕不可把其他人的經歷、偏好、名字或稱呼套用到當前使用者。若不確定，先詢問。',
+            userPersonalHistText ? '【此使用者近期個人對話】' + newline + userPersonalHistText : '',
+            '',
+            '【群聊環境】頻道歷史可能包含其他成員的對話。你可以理解脈絡，但不能把他人資訊當成當前使用者的個人資料。',
+            '',
+            '【伺服器表情符號與貼圖規則】',
+            '可使用伺服器自訂 emoji，直接輸出原始格式 <:name:id> 或 <a:name:id>。只可用以下清單，不可捏造:'
         ];
-
-        if (Array.isArray(persona.extra)) {
-            for (const ex of persona.extra) L.push(ex);
-        }
-
-        L.push('');
-        L.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-        L.push('👑 【最高原則：當前對話對象】');
-        L.push(`現在正在跟你說話、需要你回覆的「唯一對象」是：**${userName}**（Discord ID: \`${userId}\`）。`);
-        
-        const aliasNames = getUserNames(userId).filter(n => n && n !== userName);
-        if (aliasNames.length) {
-            L.push(`- 此人以前用過的其他名稱（同一個 ID）：${aliasNames.join('、')}。`);
-        }
-        if (DEVELOPER_IDS[String(userId)]) {
-            L.push('- 身分確認：這位就是你的開發者「老師」本人！');
-        }
-        
-        L.push('【長期事實（絕對屬於當前對話者）】');
-        L.push(userFacts.length ? userFacts.map(f => '- ' + f).join(newline) : '目前沒有已確認的長期事實。');
-        
-        L.push('');
-        L.push('⚠️ 【極度重要：絕對禁止搞混身分】');
-        L.push('1. 頻道裡可能有多人發言，但**你每一次的回覆，都只能針對當前這位「' + userName + '（ID: ' + userId + '）」剛才發送的最新訊息**。');
-        L.push('2. **絕對不可**把頻道歷史或其他成員的哭泣、玩笑、狀態、指令、吃東西等行為，套用到當前對話者身上。例如：如果上一個人哭了，不代表現在這個人哭；如果上一個人開玩笑，不代表現在這個人也在開玩笑。');
-        L.push('3. 每一位成員都是獨立的個體。請嚴格根據當前對話者最新送來的內容來做出反應，切勿張冠李戴！');
-        L.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-
-        if (userPersonalHistText) {
-            L.push('');
-            L.push('【此使用者（' + userName + '）的近期個人對話記錄】');
-            L.push(userPersonalHistText);
-        }
-
-        if (channelTranscript) {
-            L.push('');
-            L.push('【頻道最近群聊背景脈絡（僅供參考誰在說話，切勿混淆對象）】');
-            L.push(channelTranscript);
-        }
-
-        L.push('');
-        L.push('【伺服器表情符號與貼圖規則】');
-        L.push('可使用伺服器自訂 emoji，直接輸出原始格式 <:name:id> 或 <a:name:id>。只可用以下清單，不可捏造:');
         L.push(emojis.length ? emojis.join(' ') : '(此伺服器沒有自訂 emoji)');
-        L.push('大家訊息裡的 <:名稱:數字> 或 <a:名稱:數字> 是伺服器自訂 emoji，請把它當成正常的表情讀懂並回應。');
-        L.push('【emoji 用法】unicode emoji 想用就用，看當下情緒決定，自然就好。');
-        L.push('若要傳貼圖，在回覆末尾單獨一行寫 [STICKER:貼圖名稱]，一次最多一張。可用貼圖:');
-        L.push(stickers.length ? stickers.join('、') : '(此伺服器沒有貼圖)');
-
-        const digest = getDigest(guild.id);
-        if (digest) {
-            L.push('');
-            L.push('【伺服器近況動態】');
-            L.push(digest);
-        }
-
+        L.push('若要傳貼圖，在回覆末尾單獨一行寫 [STICKER:貼圖名稱]，只能用以下貼圖，不可捏造，一次最多一張:');
+        L.push(stickers.length ? stickers.join('、') : '(此伺服器沒有自訂貼圖)');
         return { parts: [{ text: L.filter(Boolean).join(newline) }] };
     }
 
-async function toInline(att) {
+    async function toInline(att) {
     const r = await fetchWithTimeout(att.url, {}, 12000);
     const buf = Buffer.from(await r.arrayBuffer());
     return { inlineData: { mimeType: att.contentType || 'image/png', data: buf.toString('base64') } };
@@ -694,86 +488,15 @@ function likelyContainsPersonalFacts(text) {
         return true;
     }
 
-    // ─── Google Search Grounding 輔助 ───────────────────────────────
-// 從 Gemini groundingMetadata 抽出引用來源，回傳 { text, sources }
-function extractGrounding(data) {
-    const cand = data?.candidates?.[0];
-    const meta = cand?.groundingMetadata;
-    if (!meta) return { sources: [] };
-    const chunks = Array.isArray(meta.groundingChunks) ? meta.groundingChunks : [];
-    const seen = new Set();
-    const sources = [];
-    for (const c of chunks) {
-        const web = c && c.web;
-        if (!web || !web.uri) continue;
-        if (seen.has(web.uri)) continue;
-        seen.add(web.uri);
-        sources.push({ uri: web.uri, title: web.title || web.uri });
-    }
-    return { sources };
-}
-
-// 把來源附在回覆末尾，讓使用者知道 Angela 查過網路
-function appendSources(text, sources) {
-    if (!sources || !sources.length) return text;
-    const list = sources.slice(0, 4).map((s, i) => `[${i + 1}] ${s.title} — ${s.uri}`).join('\n');
-    return text + '\n\n📚 參考資料：\n' + list;
-}
-
-// 判斷一則訊息是否「需要」查網路：時事、事實、價格、版本、誰是誰、最近、幾年等
-function looksLikeSearchQuery(text) {
-    if (!text || typeof text !== 'string') return false;
-    const t = text.trim();
-    if (t.length < 4) return false;
-    const zh = /(最新|最近|現在|今天|今年|幾年|多少錢|價格|推出|上市|是誰|是什麼|怎麼回事|發生|新聞|更新|版本|哪一個|哪個|查一下|幫我查|搜尋|搜尋一下|查詢)/u;
-    const en = /(latest|recent|current|today|this year|price|news|update|version|who is|what is|when did|how many|search|look up)/i;
-    return zh.test(t) || en.test(t);
-}
-
-// 對單一模型發出帶搜尋 grounding 的請求；失敗時回傳 { error } 而非拋出
-async function generateWithSearch(apiKey, modelName, body, timeoutMs) {
-    const searchBody = { ...body, tools: [{ googleSearch: {} }] };
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
-    const res = await fetchWithTimeout(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(searchBody)
-    }, timeoutMs);
-    if (!res.ok) {
-        const errText = await res.text().catch(() => '');
-        return { error: new Error(`[search ${modelName}] HTTP ${res.status}:${errText.slice(0, 150)}`), status: res.status, errText };
-    }
-    const data = await res.json();
-    const rawParts = data?.candidates?.[0]?.content?.parts || [];
-    const textParts = rawParts.filter(p => !p.thought && typeof p.text === 'string');
-    let out = textParts.map(p => p.text).join('').trim();
-    if (!out && rawParts.length > 0) out = rawParts.map(p => p.text || '').join('').trim();
-    const { sources } = extractGrounding(data);
-    return { out, sources, data };
-}
-
-// ─── Gemini 呼叫核心 ───────────────────────────────────────────
+    // ─── Gemini 呼叫核心 ───────────────────────────────────────────
 async function askGemini(prompt, g, userId, images, guild, client, userName = '使用者', channelId = 'legacy') {
     const apiKey = (process.env.GEMINI_API_KEY || '').trim();
     if (!apiKey) {
         return { content: '❌ **除錯提示**：`process.env.GEMINI_API_KEY` 是空的！請檢查 `.env` 檔。', stickerId: null };
     }
 
-    const allModels = await fetchValidModels(apiKey);
-    if (!allModels.length) throw new Error('目前沒有任何可用的 Gemini 模型，請檢查 API Key 權限。');
-
-    // 全域熔斷：若剛剛所有模型都 429，直接回友善訊息，不再消耗配額
-    if (isQuotaBlocked()) {
-        const waitSec = Math.ceil((quotaBlockedUntil - Date.now()) / 1000);
-        console.warn(`🛑 [AIChat] 配額熔斷中，剩餘 ${waitSec}s，跳過本次呼叫`);
-        return { content: `⏳ Gemini 配額暫時用盡，請約 ${waitSec} 秒後再試。`, stickerId: null };
-    }
-
-    const modelsToTry = getAvailableModels(allModels);
-    if (!modelsToTry.length) {
-        quotaBlockedUntil = Date.now() + QUOTA_BLOCK_DURATION;
-        return { content: '⏳ 所有 Gemini 模型都觸發了配額限制，已暫時暫停 90 秒，請稍後再試。', stickerId: null };
-    }
+    const modelsToTry = await fetchValidModels(apiKey);
+    if (!modelsToTry.length) throw new Error('目前沒有任何可用的 Gemini 模型，請檢查 API Key 權限。');
 
     const sharedKey = mkShared(g, channelId);
     const userKey = mkUser(g, userId);
@@ -782,7 +505,7 @@ async function askGemini(prompt, g, userId, images, guild, client, userName = '�
     const userPersonalText = userHist.map(h => `${h.role === 'user' ? '他說' : '你回'}: ${h.parts[0]?.text || ''}`).join('\n');
 
     const rawContent = prompt || '（傳送了一張圖片，請描述並回應）';
-    const userText = `[${userName}|${userId}]:${rawContent}`;
+    const userText = `[${userName}]:${rawContent}`;
 
     const parts = [{ text: userText }];
 
@@ -801,24 +524,11 @@ async function askGemini(prompt, g, userId, images, guild, client, userName = '�
     const cleanSharedHist = sanitizeHistory(getHistByKey(sharedKey));
     const personaId = getChannelPersona(g, channelId) || 'default';
     const facts = loadUserFacts(g, userId).facts;
-
-   // 🧠 群聊歷史改寫成帶有明確發言者與 ID 的格式，防止 AI 搞混
-    const channelTranscript = cleanSharedHist.map(h => {
-        const t = h.parts?.[0]?.text || '';
-        if (h.role === 'model') return `[你 (Angela)]: ${t}`;
-        
-        // 解析格式 [使用者名稱|ID]:訊息
-        const match = t.match(/^\[([^\]|]+)\|(\d+)\]\s*:?\s*([\s\S]*)$/);
-        if (match) {
-            const [, name, id, content] = match;
-            return `[成員 ${name} (ID: ${id})]: ${content}`;
-        }
-        return `[群聊成員]: ${t}`;
-    }).join('\n');
+    const contents = [...cleanSharedHist, { role: 'user', parts }];
 
     const body = {
-        contents: [{ role: 'user', parts }],
-        systemInstruction: systemInstr(guild, userName, userPersonalText, personaId, facts, userId, channelTranscript),
+        contents,
+        systemInstruction: systemInstr(guild, userName, userPersonalText, personaId, facts, userId),
         generationConfig: {
             temperature: 0.75,
             topP: 0.95,
@@ -827,80 +537,8 @@ async function askGemini(prompt, g, userId, images, guild, client, userName = '�
     };
 
     let lastError = null;
-    // 🔑 只在訊息真的需要查網路時才走搜尋流程，一般對話直接跳過，省下大量配額
-    const wantsSearch = ENABLE_WEB_SEARCH && looksLikeSearchQuery(rawContent);
-    let search429Count = 0;
-    const searchModels = modelsToTry.slice(0, SEARCH_FALLBACK_MODELS);
 
-    if (wantsSearch) {
-        console.log(`🔍 [AIChat] 訊息疑似需要查網路，啟用搜尋 grounding`);
-        for (const modelName of searchModels) {
-            if (isModelIn429Cooldown(modelName)) { search429Count++; continue; }
-            if (noSearchModels.has(modelName)) continue;   // 已確認不支援搜尋，跳過
-            try {
-                const r = await generateWithSearch(apiKey, modelName, body, SEARCH_TIMEOUT_MS);
-                if (r.error) {
-                    const code = r.status;
-                    if (code === 429 || (r.errText || '').includes('quota') || (r.errText || '').includes('RESOURCE_EXHAUSTED')) {
-                        console.warn(`⏳ [AIChat+Search] ${modelName} 配額限制，冷卻 ${MODEL_429_COOLDOWN / 1000}s`);
-                        markModel429(modelName);
-                        search429Count++;
-                        lastError = r.error; continue;
-                    }
-                    if (code === 400 || code === 404 || (r.errText || '').includes('not found')) {
-                        console.warn(`🚫 [AIChat+Search] ${modelName} 不支援搜尋 grounding 或已停用，跳過`);
-                        noSearchModels.add(modelName);   // 記住，下次不再試搜尋
-                        if (code === 404) { blacklistedModels.add(modelName); cachedModels = cachedModels.filter(m => m !== modelName); }   // 已下架，永久拉黑
-                        lastError = r.error; continue;
-                    }
-                    if (isTransientHttpError(code, r.errText)) {
-                        console.warn(`🟡 [AIChat+Search] ${modelName} 忙碌 (${code})，冷卻後改試下一個...`);
-                        markModelBusy(modelName);
-                        lastError = r.error; continue;
-                    }
-                    lastError = r.error; continue;
-                }
-                if (r.out && r.out.trim()) {
-                    let final = r.out;
-                    if (r.sources && r.sources.length) final = appendSources(final, r.sources);
-                    pushHistByKey(sharedKey, 'user', userText, SHARED_HIST_CAP);
-                    pushHistByKey(sharedKey, 'model', final, SHARED_HIST_CAP);
-                    pushHistByKey(userKey, 'user', rawContent, USER_HIST_CAP);
-                    pushHistByKey(userKey, 'model', final, USER_HIST_CAP);
-                    queueBackup(client, g);
-                    updateLongTermFacts(rawContent, g, userId, userName, client).catch(err => console.error('[AIChat] 長期事實抽取失敗:', err.message));
-                    console.log(`🌐 [AIChat+Search] ${modelName} 以網頁搜尋回覆，引用 ${r.sources.length} 個來源`);
-                    return polish(final, guild);
-                }
-            } catch (err) {
-                lastError = err;
-                console.error(`⚠️ [AIChat+Search] ${modelName} 例外:`, err.message);
-            }
-        }
-        // 若搜尋階段全部是 429，啟動熔斷不再嘗試一般生成
-        if (search429Count === searchModels.length && searchModels.length > 0) {
-            quotaBlockedUntil = Date.now() + QUOTA_BLOCK_DURATION;
-            console.warn(`🛑 [AIChat] 搜尋階段所有模型皆 429，啟動熔斷 ${QUOTA_BLOCK_DURATION / 1000}s`);
-            return { content: `⏳ Gemini 配額暫時用盡（搜尋模式），已暫停 ${QUOTA_BLOCK_DURATION / 1000} 秒，請稍後再試。`, stickerId: null };
-        }
-        console.warn('🔄 [AIChat+Search] 所有支援搜尋的模型都失敗，退回一般生成模式');
-    }
-
-    let gen429Count = 0;
-    let transientCount = 0;
-    // 🛡️ 多輪重試：503 高需求等暫時性錯誤時，等幾秒再試一輪，不對使用者報錯
-    for (let round = 1; round <= TRANSIENT_RETRY_ROUNDS; round++) {
-    gen429Count = 0;
-    transientCount = 0;
-    let genModels = getAvailableModels(allModels).filter(m => !isModelBusy(m));
-    if (!genModels.length) genModels = getAvailableModels(allModels);   // 全部都在忙碌冷卻就整批重試
-    genModels = genModels.slice(0, MAX_MODEL_ATTEMPTS);
-    if (!genModels.length) {
-        quotaBlockedUntil = Date.now() + QUOTA_BLOCK_DURATION;
-        return { content: `⏳ 所有 Gemini 模型都在配額冷卻中，已暫停 ${QUOTA_BLOCK_DURATION / 1000} 秒，請稍後再試。`, stickerId: null };
-    }
-
-    for (const modelName of genModels) {
+    for (const modelName of modelsToTry.slice(0, MAX_MODEL_ATTEMPTS)) {
         try {
             const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
             
@@ -914,11 +552,9 @@ async function askGemini(prompt, g, userId, images, guild, client, userName = '�
                 const errText = await res.text().catch(() => '');
                 const errObj = new Error(`[${modelName}] HTTP ${res.status}:${errText.slice(0, 150)}`);
 
-                // 💡 429 速率限制為暫時狀況，冷卻該模型但不拉入永久黑名單
+                // 💡 429 速率限制為暫時狀況，切換模型即可，不拉入黑名單
                 if (res.status === 429 || errText.includes('quota') || errText.includes('RESOURCE_EXHAUSTED')) {
-                    console.warn(`⏳ [AIChat] 模型 ${modelName} 觸發配額/速率限制 (${res.status})，冷卻 ${MODEL_429_COOLDOWN / 1000}s`);
-                    markModel429(modelName);
-                    gen429Count++;
+                    console.warn(`⏳ [AIChat] 模型 ${modelName} 觸發配額/速率限制 (${res.status})，嘗試下一個...`);
                     lastError = errObj;
                     continue;
                 }
@@ -928,21 +564,6 @@ async function askGemini(prompt, g, userId, images, guild, client, userName = '�
                     console.warn(`🚫 [AIChat] 模型 ${modelName} 無效/已停用 (${res.status})，已加入黑名單！`);
                     blacklistedModels.add(modelName);
                     cachedModels = cachedModels.filter(m => m !== modelName);
-                    lastError = errObj;
-                    continue;
-                }
-
-                // 🔑 API Key 問題直接回報，不做無意義重試
-                if (res.status === 401 || res.status === 403) {
-                    console.error(`🔑 [AIChat] API Key 無效或被拒 (${res.status})，請檢查 .env`);
-                    return { content: '❌ Gemini API Key 無效或權限不足，請檢查 `.env` 中的 `GEMINI_API_KEY`。', stickerId: null };
-                }
-
-                // 🟡 503 高需求 / 5xx / 暫時不可用：短冷卻該模型，馬上換下一個
-                if (isTransientHttpError(res.status, errText)) {
-                    console.warn(`🟡 [AIChat] 模型 ${modelName} 忙碌 (${res.status})，冷卻 ${MODEL_BUSY_COOLDOWN / 1000}s，改試下一個...`);
-                    markModelBusy(modelName);
-                    transientCount++;
                     lastError = errObj;
                     continue;
                 }
@@ -978,31 +599,12 @@ async function askGemini(prompt, g, userId, images, guild, client, userName = '�
             return polish(out, guild);
 
         } catch (err) {
-            // 逾時 / 網路例外也算暫時性錯誤，換下一個模型
             lastError = err;
-            transientCount++;
-            markModelBusy(modelName);
             console.error(`❌ [AIChat] 模型 ${modelName} 呼叫失敗:`, err.message);
         }
     }
 
-    // 若本輪全部是 429，啟動熔斷
-    if (gen429Count === genModels.length && genModels.length > 0) {
-        quotaBlockedUntil = Date.now() + QUOTA_BLOCK_DURATION;
-        console.warn(`🛑 [AIChat] 生成階段所有模型皆 429，啟動熔斷 ${QUOTA_BLOCK_DURATION / 1000}s`);
-        return { content: `⏳ Gemini 配額暫時用盡，已暫停 ${QUOTA_BLOCK_DURATION / 1000} 秒，請稍後再試。`, stickerId: null };
-    }
-
-    // 還有下一輪：等幾秒自動重試，不對使用者報錯
-    if (round < TRANSIENT_RETRY_ROUNDS && transientCount > 0) {
-        console.warn(`🔄 [AIChat] 第 ${round} 輪模型全部暫時失敗，${TRANSIENT_RETRY_WAIT_MS / 1000}s 後自動重試...`);
-        await new Promise(resolve => setTimeout(resolve, TRANSIENT_RETRY_WAIT_MS));
-        continue;
-    }
-    } // 結束多輪重試
-
-    if (lastError) console.error('❌ [AIChat] 多輪重試後仍失敗，最後錯誤:', lastError.message);
-    return { content: '⏳ Google 伺服器目前很忙碌，試了好幾輪都沒成功，請稍後再跟我說一次～', stickerId: null };
+    throw lastError || new Error('所有可用 Gemini 模型均無法回應，請檢查 API Key 狀態。');
 }
 
 // ─── 啟動與事件監聽 ───────────────────────────────────────────
@@ -1070,7 +672,6 @@ function init(client) {
             msg.channel.sendTyping().catch(() => {});
             
             const userName = msg.member?.displayName || msg.author.displayName || msg.author.username;
-            recordUserName(msg.author.id, userName);
 
             const { content, stickerId } = await askGemini(raw, msg.guild.id, msg.author.id, images, msg.guild, client, userName, msg.channelId);
             
@@ -1106,4 +707,4 @@ function init(client) {
     console.log('[AIChat] 獨立系統已載入 (防覆蓋雙軌記憶 + 個人 + 群聊共享 + 動態 ListModels)');
 }
 
-module.exports = { init, getAiChannel, getChannelPersona, getPersonaLabel, getPersonaChoices, setAiChannel, getMemoryChannel, restoreAll, removeAiChannelData, migrateAiChannel };
+module.exports = { init, getAiChannel, getChannelPersona, getPersonaLabel, setAiChannel, getMemoryChannel, restoreAll };

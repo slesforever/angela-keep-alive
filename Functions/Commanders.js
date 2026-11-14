@@ -24,6 +24,8 @@ const MusicSystem = require('./GameSystem/MusicSystem.js');
     const DailyQuestSystem = require('./GameSystem/DailyQuestSystem.js');
     const ProfileSystem = require('./GameSystem/ProfileSystem.js');
     const CheckInSystem = require('./GameSystem/CheckInSystem.js');
+const RandomWifeSystem = require('./GameSystem/RandomWifeSystem.js');
+const ServerAwareness = require('./GameSystem/ServerAwareness.js');
 
 const SUPER_ADMIN_ID = '1330463890122735642';
 
@@ -85,18 +87,6 @@ function createPseudoMessage(interaction) {
 async function handleSlashCommands(client, interaction) {
     const { commandName, user } = interaction;
     const uid = user.id;
-
-    // If the Startup.js auto-defer timer already fired, redirect
-    // interaction.reply → editReply so handlers that call reply()
-    // directly don't throw "Interaction has already been deferred".
-    const origReply = interaction.reply.bind(interaction);
-    interaction.reply = function (options) {
-        if (interaction.deferred && !interaction.replied) {
-            return interaction.editReply(options);
-        }
-        return origReply(options);
-    };
-
     const fakeMessage = createPseudoMessage(interaction);
 
     try {
@@ -106,19 +96,19 @@ async function handleSlashCommands(client, interaction) {
             if (pullCommand && typeof pullCommand.execute === 'function') {
                 return pullCommand.execute(interaction);
             }
-            return interaction.reply({ content: '❌ 抽卡系統模組尚未成功載入。', ephemeral: true });
+            return interaction.reply({ content: '抽卡系統還沒準備好，可能還在載入中。', ephemeral: true });
         }
 
         // ─── 背包 / 機率表 ───────────────────────────────────────
         if (commandName === 'list_limbuscompany') {
             fakeMessage.content = '!list';
-            if (isOnCooldown(uid, 'list', 3000)) return interaction.reply({ content: '⏳ 清單冷卻中，請稍後再試。', flags: MessageFlags.Ephemeral });
+            if (isOnCooldown(uid, 'list', 3000)) return interaction.reply({ content: '等一下下再試喔，清單還在冷卻中。', flags: MessageFlags.Ephemeral });
             return handleList(client, fakeMessage);
         }
         if (commandName === 'pack_limbuscompany') {
             fakeMessage.content = '!pack';
             if (isOnCooldown(uid, 'pack')) {
-                return interaction.reply({ content: '⏳ 指令冷卻中，請稍後再試。', flags: MessageFlags.Ephemeral });
+                return interaction.reply({ content: '慢一點嘛，指令還在冷卻中。', flags: MessageFlags.Ephemeral });
             }
             return PacksAndData.handleInventory
                 ? PacksAndData.handleInventory(client, fakeMessage)
@@ -129,7 +119,7 @@ async function handleSlashCommands(client, interaction) {
         if (commandName === 'battle') {
             fakeMessage.content = '!battle';
             if (isOnCooldown(uid, 'battle', 5000)) {
-                return interaction.reply({ content: '⏳ 戰鬥冷卻中，請稍後再試。', flags: MessageFlags.Ephemeral });
+                return interaction.reply({ content: '剛打完一場，讓罪人們喘口氣再試吧。', flags: MessageFlags.Ephemeral });
             }
             return BattleSystem.handleBattle
                 ? BattleSystem.handleBattle(client, fakeMessage)
@@ -145,10 +135,9 @@ async function handleSlashCommands(client, interaction) {
         }
 
         // ─── 罪人系統 ────────────────────────────────────────────
-        if (['sinner', 'uptie', 'equip', 'threads'].includes(commandName)) {
+        if (['sinner', 'equip', 'threads'].includes(commandName)) {
             fakeMessage.content = `!${commandName}`;
             if (commandName === 'sinner')  return CharacterSystem.handleSinner  ? CharacterSystem.handleSinner(client, fakeMessage)  : CharacterSystem(client, fakeMessage);
-            if (commandName === 'uptie')   return CharacterSystem.handleUptie   ? CharacterSystem.handleUptie(client, fakeMessage)   : CharacterSystem(client, fakeMessage);
             if (commandName === 'equip')   return CharacterSystem.handleEquip   ? CharacterSystem.handleEquip(client, fakeMessage)   : CharacterSystem(client, fakeMessage);
             if (commandName === 'threads') return CharacterSystem.handleThreads ? CharacterSystem.handleThreads(client, fakeMessage) : CharacterSystem(client, fakeMessage);
         }
@@ -157,7 +146,7 @@ async function handleSlashCommands(client, interaction) {
         if (commandName === 'md') {
             fakeMessage.content = '!md';
             if (isOnCooldown(uid, 'md', 2000)) {
-                return interaction.reply({ content: '⏳ 指令冷卻中，請稍後再試。', flags: MessageFlags.Ephemeral });
+                return interaction.reply({ content: '鏡牢還在重置中，等一下再進去。', flags: MessageFlags.Ephemeral });
             }
             return MirrorDungeon.handleMirrorDungeon
                 ? MirrorDungeon.handleMirrorDungeon(client, fakeMessage)
@@ -193,8 +182,8 @@ async function handleSlashCommands(client, interaction) {
             if (target.id === SUPER_ADMIN_ID) rate = 0;
             const bar = createProgressBar(rate);
             const comment = target.id === SUPER_ADMIN_ID
-                ? '「主管專屬認證：鋼鐵般的絕對 0% 直男，系統數據無法改寫。」'
-                : (rate < 20 ? '「數據顯示：鋼鐵般堅硬直男。」' : rate < 50 ? '「有些許隱藏屬性。」' : rate < 80 ? '「成分相當濃烈。」' : '「100% 純度純真男同！」');
+                ? '主管認證，絕對鋼鐵直男，改不了的。'
+                : (rate < 20 ? '鋼鐵直男，沒得商量。' : rate < 50 ? '好像有一點點……不確定。' : rate < 80 ? '成分相當濃厚了。' : '100% 純的，服了。');
             addXp(client, uid, user.username, 1, interaction.guildId, 'command').catch(() => {});
             return interaction.reply({
                 embeds: [new EmbedBuilder()
@@ -211,8 +200,8 @@ async function handleSlashCommands(client, interaction) {
             if (target.id === SUPER_ADMIN_ID) rate = 0;
             const bar = createProgressBar(rate);
             const comment = target.id === SUPER_ADMIN_ID
-                ? '「主管專屬認證：絕對 0% 直直到發光，姬圈屬性完全免疫。」'
-                : (rate < 20 ? '「姬圈指數較低，極度純粹直女。」' : rate < 50 ? '「有些許潛質。」' : rate < 80 ? '「能量爆棚！」' : '「100% 頂級女同霸主！」');
+                ? '主管認證，絕對直到底，姬圈完全免疫。'
+                : (rate < 20 ? '非常純粹的直女。' : rate < 50 ? '有一點潛質。' : rate < 80 ? '能量很強！' : '頂級女同霸主，服了。');
             addXp(client, uid, user.username, 1, interaction.guildId, 'command').catch(() => {});
             return interaction.reply({
                 embeds: [new EmbedBuilder()
@@ -229,7 +218,7 @@ async function handleSlashCommands(client, interaction) {
             const member = await interaction.guild.members.fetch(uid).catch(() => interaction.member);
             const voiceChannel = member?.voice?.channel;
             if (!voiceChannel) {
-                return interaction.reply({ content: '❌ 你必須先加入一個語音頻道。', flags: MessageFlags.Ephemeral });
+                return interaction.reply({ content: '你得先進一個語音頻道，我才能跟過去啊。', flags: MessageFlags.Ephemeral });
             }
             joinVoiceChannel({
                 channelId: voiceChannel.id,
@@ -244,11 +233,11 @@ async function handleSlashCommands(client, interaction) {
         if (commandName === 'leave') {
             const connection = getVoiceConnection(interaction.guild.id);
             if (!connection) {
-                return interaction.reply({ content: '❌ 機器人目前不在任何語音頻道中。', flags: MessageFlags.Ephemeral });
+                return interaction.reply({ content: '我現在沒有在任何語音頻道裡喔。', flags: MessageFlags.Ephemeral });
             }
             MusicSystem.stop(interaction.guild.id);
             connection.destroy();
-            return interaction.reply({ content: '👋 已離開語音頻道並清空播放佇列。' });
+            return interaction.reply({ content: '好啦，我先走啦，音樂也停了。' });
         }
 
         if (commandName === 'status') {
@@ -371,7 +360,7 @@ async function handleSlashCommands(client, interaction) {
         // ─── 抽獎 ────────────────────────────────────────────────
         if (commandName === 'giveaway-create') {
             if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
-                return interaction.reply({ content: '❌ 此指令僅限伺服器管理員使用。', flags: MessageFlags.Ephemeral });
+                return interaction.reply({ content: '抽獎功能只有管理員能建立喔。', flags: MessageFlags.Ephemeral });
             }
             return GiveawaySystem.createGiveaway(client, interaction, {
                 prizeName: interaction.options.getString('prize_name'),
@@ -396,11 +385,16 @@ async function handleSlashCommands(client, interaction) {
             // ─── 個人資料 ────────────────────────────────────────────
             if (commandName === 'profile') return ProfileSystem.handleProfile(client, interaction);
             if (commandName === 'updateprofile') return ProfileSystem.handleUpdateProfile(client, interaction);
-            if (commandName === 'setbanner') return ProfileSystem.handleSetBanner(client, interaction);
             if (commandName === 'title') return ProfileSystem.handleTitle(client, interaction);
 
             // ─── 每日簽到 ────────────────────────────────────────────
             if (commandName === 'checkin') return CheckInSystem.handleCheckIn(client, interaction);
+
+            // ─── 隨機老婆（純娛樂）─────────────────────────────────
+            if (commandName === 'randomlywifu') return RandomWifeSystem.handleRandomWife(client, interaction);
+
+            // ─── 伺服器近況 ────────────────────────────────────────
+            if (commandName === 'whatsup') return ServerAwareness.handleWhatsUp(client, interaction);
 
             // ─── 等級排行榜 ────────────────────────────────────────
             if (commandName === 'leaderboard') {
@@ -425,25 +419,26 @@ async function handleSlashCommands(client, interaction) {
 
 async function sendHelp(interaction) {
     const embed = new EmbedBuilder()
-        .setTitle('📋 Angela Command List')
+        .setTitle('📋 Angela 指令清單')
         .setColor(0x00b4d8)
         .addFields(
-            { name: '🎰 Gacha & Inventory',     value: '`/pull_limbuscompany` — Pull ｜ `/pack_limbuscompany` — Inventory ｜ `/list_limbuscompany` — Rates' },
-            { name: '⚔️ Battle & Party',        value: '`/battle` — Enter battle ｜ `/party` — Party management' },
-            { name: '👤 Sinners & Resources',    value: '`/sinner` — Sinner overview ｜ `/uptie` — Uptie upgrade\n`/equip` — Equip identity ｜ `/threads` — Thread check' },
-            { name: '🪞 Mirror Dungeon',        value: '`/md` — Mirror Dungeon system' },
-            { name: '📋 Profile',               value: '`/profile` — View full profile ｜ `/updateprofile` — Edit bio/image/title\n`/setbanner` — Upload banner ｜ `/title` — Equip or view titles' },
-            { name: '📊 Level System',          value: '`/rank` — Check level & XP ｜ `/leaderboard` — XP leaderboard' },
-            { name: '📅 Check-in',              value: '`/checkin` — Daily check-in with streak bonus' },
-            { name: '🎰 Gamble',                value: '`/gamble <amount>` — Bet Starcoins, 50/50' },
-            { name: '🎲 Fun',                   value: '`/gayrate` — Gay rate ｜ `/lesbianrate` — Lesbian rate' },
-            { name: '🔊 Voice',                 value: '`/join` ｜ `/leave` ｜ `/status`' },
-            { name: '🏆 Achievements & Quests', value: '`/achievements` ｜ `/dailyquest`' },
-            { name: '📰 Social Checks (Admin)', value: '`/steam` ｜ `/tweet` ｜ `/youtube`\n`/setchannel` — Set all notification channels' },
-            { name: '🛒 Shop & Giveaways',      value: '`/shop` ｜ `/giveaway-create` ｜ `/giveaway-end`' },
-            { name: '👑 Admin (Sles only)',     value: '`/givelightseeds` ｜ `/givefragments` ｜ `/givescrolls`\n`/givethreads` ｜ `/updaterewards` ｜ `/updatebuff`\n`/announce` — Global announcement' }
+            { name: '🎰 抽卡與背包',        value: '`/pull_limbuscompany` — 抽卡 ｜ `/pack_limbuscompany` — 背包 ｜ `/list_limbuscompany` — 機率清單' },
+            { name: '⚔️ 戰鬥與隊伍',        value: '`/battle` — 出戰關卡 ｜ `/party` — 隊伍管理' },
+            { name: '👤 罪人與資源',          value: '`/sinner` — 罪人全覽 ｜ `/equip` — 裝備人格\n`/threads` — 絲線查詢 ｜ 連結提升在 `/pack_limbuscompany` 內' },
+            { name: '🪞 鏡光迷宮',           value: '`/md` — 鏡光迷宮系統' },
+            { name: '📋 個人資料',           value: '`/profile` — 查看完整個人資料 ｜ `/updateprofile` — 編輯自我介紹/圖片/稱號\n`/title` — 裝備或查看稱號' },
+            { name: '📊 等級系統',           value: '`/rank` — 查看等級與 XP 進度 ｜ `/leaderboard` — 等級排行榜' },
+            { name: '📅 簽到',              value: '`/checkin` — 每日簽到，連續天數加成' },
+            { name: '🎰 賭博',              value: '`/gamble <金額>` — 下注 🌱 LightSeeds，50/50 勝負' },
+            { name: '🎲 娛樂功能',           value: '`/gayrate` — 男同指數 ｜ `/lesbianrate` — 姬圈指數\n`/randomlywifu` — 從伺服器隨機抽一個人當老婆（純娛樂）' },
+            { name: '👀 伺服器近況',          value: '`/whatsup` — 看看伺服器現在在聊什麼、誰在語音' },
+            { name: '🔊 語音控制',           value: '`/join` ｜ `/leave` ｜ `/status`' },
+            { name: '🏆 成就與任務', value: '`/achievements` ｜ `/dailyquest`' },
+            { name: '📰 社群檢測 (伺服器管理員)', value: '`/steam` ｜ `/tweet` ｜ `/youtube`\n`/setchannel` — 統一設定所有通知/功能頻道' },
+            { name: '🛒 商城與抽獎', value: '`/shop` ｜ `/giveaway-create` ｜ `/giveaway-end`' },
+            { name: '👑 最高主管特權 (Sles 專屬)', value: '`/givelightseeds` ｜ `/givefragments` ｜ `/givescrolls`\n`/givethreads` ｜ `/updaterewards` ｜ `/updatebuff`\n`/announce` — 全伺服器公告' }
         )
-        .setFooter({ text: 'Type / to see the command menu ｜ All admin commands are Sles-only' });
+        .setFooter({ text: '輸入 / 即可喚出選單 ｜ 所有特權指令已鎖定為 Sles 專屬' });
 
     return interaction.reply({ embeds: [embed] });
 }

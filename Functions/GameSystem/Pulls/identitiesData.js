@@ -161,6 +161,11 @@ const identityRegistry = {
         { name: "［高級訂製服::漆黑鞋履館］良秀 / Haute Couture::Le Noir Footwear Hall Ryōshū" },
         { name: "［高級訂製服::修改店］羅佳 / Haute Couture::Alteration Shop Rodion" },
         { name: "［高級訂製服::漆黑品牌經理］唐吉訶德 / Haute Couture::Le Noir Brand Manager Don Quixote" },
+        { name: "［楔事務所代表］奧提斯 / Wedge Office Representative Outis" },
+        { name: "［楔事務所收尾人］堂吉訶德 / Wedge Office Fixer Don Quixote" },
+        { name: "［楔事務所收尾人］辛克萊 / Wedge Office Fixer Sinclair" },
+        { name: "［高級訂製服::漆黑 3F 廣播室］鴻璐 / Haute Couture::Le Noir 3F Public Address Room Hong Lu" },
+        { name: "［高級訂製服::緋紅 針線之王］希斯克利夫 / Haute Couture::Le Rouge King of Needles and Thread Heathcliff" },
     ],
     '00': [
         { name: "［中指 小弟］默爾索 / Middle Brother Meursault" },
@@ -351,6 +356,7 @@ const identityRegistry = {
     { name: "[WAW] 荊棘之園 - 格里高爾 / [WAW] Garden of Thorns - Gregor" },
     { name: "[WAW] 無光榮輝 - 格里高爾 / [WAW] Unbrilliant Glory - Gregor" },
     { name: "[TETH] 租借申請 - 格里高爾 / [TETH] Move-in Reg - Gregor" },
+    { name: "［淚鋒之劍］鴻璐 / [HE] The Sword Sharpened with Tears - Hong Lu" },
 ],
     'ABN_ZAYIN': [
     /* 腦葉公司 原版 */
@@ -499,11 +505,15 @@ const identityDetails = {
 
 // ─── Rate Up 對象（Pickup）────────────────────────────────────
 const upTargets = {
-    'Color Fixer': [
-        "［蒼藍殘響］阿爾加利亞 / The Blue Reverberation Argalia",
-    ], 
     '000': [
-        "［次元折斷者］李箱 / Dimension Shredder Yi Sang",
+        '［楔事務所代表］奧提斯 / Wedge Office Representative Outis',
+        '［楔事務所收尾人］堂吉訶德 / Wedge Office Fixer Don Quixote',
+        '［楔事務所收尾人］辛克萊 / Wedge Office Fixer Sinclair',
+        '［高級訂製服::漆黑 3F 廣播室］鴻璐 / Haute Couture::Le Noir 3F Public Address Room Hong Lu',
+        '［高級訂製服::緋紅 針線之王］希斯克利夫 / Haute Couture::Le Rouge King of Needles and Thread Heathcliff',
+    ],
+    'Egos': [
+        '［淚鋒之劍］鴻璐 / [HE] The Sword Sharpened with Tears - Hong Lu',
     ],
 };
 
@@ -517,87 +527,27 @@ function filterIdentities(rarity, keyword) {
 
 // ─── 🎯 卡池設定檔 ──────────────────────────────────────────────
 const BANNERS = {
-    'haute_ishmael': {
-        id: 'haute_ishmael',
-        season: 8,
-        name: '高級訂製服::紅櫻精品店 — 以實瑪利 UP',
-        description: '［高級訂製服::紅櫻精品店］以實瑪利 出現機率大幅提升！',
-        cost: { single: 0, ten: 0 },
-        rateUp: {
-            S3: ['［高級訂製服::紅櫻精品店］以實瑪利 / Haute Couture::Boutique du Rouge Ishmael'],
-            EGOS: [],
-            S2: []
-        }
-    },
-    'haute_ryoshu': {
-        id: 'haute_ryoshu',
-        season: 8,
-        name: '高級訂製服::漆黑鞋履館 — 良秀 UP',
-        description: '［高級訂製服::漆黑鞋履館］良秀 出現機率大幅提升！',
-        cost: { single: 0, ten: 0 },
-        rateUp: {
-            S3: ['［高級訂製服::漆黑鞋履館］良秀 / Haute Couture::Le Noir Footwear Hall Ryōshū'],
-            EGOS: [],
-            S2: []
-        }
-    },
-    'haute_rodion': {
-        id: 'haute_rodion',
-        season: 8,
-        name: '高級訂製服::修改店 — 羅佳 UP',
-        description: '［高級訂製服::修改店］羅佳 出現機率大幅提升！',
-        cost: { single: 0, ten: 0 },
-        rateUp: {
-            S3: ['［高級訂製服::修改店］羅佳 / Haute Couture::Alteration Shop Rodion'],
-            EGOS: [],
-            S2: []
-        }
-    },
-    'haute_donquixote': {
-        id: 'haute_donquixote',
-        season: 8,
-        name: '高級訂製服::漆黑品牌經理 — 唐吉訶德 UP',
-        description: '［高級訂製服::漆黑品牌經理］唐吉訶德 出現機率大幅提升！',
-        cost: { single: 0, ten: 0 },
-        rateUp: {
-            S3: ['［高級訂製服::漆黑品牌經理］唐吉訶德 / Haute Couture::Le Noir Brand Manager Don Quixote'],
-            EGOS: [],
-            S2: []
-        }
-    },
-    'haute_sinclair': {
-        id: 'haute_sinclair',
-        season: 8,
-        name: '高級訂製服::紅派赤紅之神 — 辛克萊 UP',
-        description: '［高級訂製服::紅派赤紅之神］辛克萊 出現機率大幅提升！',
-        cost: { single: 0, ten: 0 },
-        rateUp: {
-            S3: ['［高級訂製服::紅派赤紅之神］辛克萊 / Haute Couture::The Crimson God of Le Rouge Sinclair'],
-            EGOS: [],
-            S2: []
-        }
-    },
-    'season8_haute': {
-        id: 'season8_haute',
-        season: 8,
-        name: 'S8 PUNCTUM — 高級訂製服綜合 UP',
-        description: 'Season 8 PUNCTUM 機率提升卡池。五件高級訂製服人格全部 UP！',
+    'wannight_10': {
+        id: 'wannight_10',
+        name: '第十次瓦夜 — 楔事務所 & 高級訂製服',
+        description: '第十次瓦夜（2026年11月12日開啟）。楔事務所代表奧提斯、楔事務所收尾人堂吉訶德 & 辛克萊，以及鴻璐 淚鋒之劍 E.G.O 同期登場！新賽季高級訂製服人格也在此池。',
         cost: { single: 0, ten: 0 },
         rateUp: {
             S3: [
-                '［高級訂製服::紅櫻精品店］以實瑪利 / Haute Couture::Boutique du Rouge Ishmael',
-                '［高級訂製服::漆黑鞋履館］良秀 / Haute Couture::Le Noir Footwear Hall Ryōshū',
-                '［高級訂製服::修改店］羅佳 / Haute Couture::Alteration Shop Rodion',
-                '［高級訂製服::漆黑品牌經理］唐吉訶德 / Haute Couture::Le Noir Brand Manager Don Quixote',
-                '［高級訂製服::紅派赤紅之神］辛克萊 / Haute Couture::The Crimson God of Le Rouge Sinclair'
+                '［楔事務所代表］奧提斯 / Wedge Office Representative Outis',
+                '［楔事務所收尾人］堂吉訶德 / Wedge Office Fixer Don Quixote',
+                '［楔事務所收尾人］辛克萊 / Wedge Office Fixer Sinclair',
+                '［高級訂製服::漆黑 3F 廣播室］鴻璐 / Haute Couture::Le Noir 3F Public Address Room Hong Lu',
+                '［高級訂製服::緋紅 針線之王］希斯克利夫 / Haute Couture::Le Rouge King of Needles and Thread Heathcliff',
             ],
-            EGOS: [],
+            EGOS: [
+                '［淚鋒之劍］鴻璐 / [HE] The Sword Sharpened with Tears - Hong Lu',
+            ],
             S2: []
         }
     },
     'standard': {
         id: 'standard',
-        season: 0,
         name: '常駐提取 — 邊獄公司',
         description: '包含所有基礎人格與 E.G.O 的常駐提取卡池。',
         cost: { single: 0, ten: 0 },
