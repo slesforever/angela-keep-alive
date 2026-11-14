@@ -529,14 +529,26 @@ function filterIdentities(rarity, keyword) {
 const BANNERS = {
     'wannight_10': {
         id: 'wannight_10',
-        name: '第十次瓦夜 — 楔事務所 & 高級訂製服',
-        description: '第十次瓦夜（2026年11月12日開啟）。楔事務所代表奧提斯、楔事務所收尾人堂吉訶德 & 辛克萊，以及鴻璐 淚鋒之劍 E.G.O 同期登場！新賽季高級訂製服人格也在此池。',
+        name: '第十次瓦夜 — 楔事務所',
+        description: '第十次瓦夜（2026年11月12日開啟）。楔事務所代表奧提斯、楔事務所收尾人堂吉訶德 & 辛克萊同期登場！',
         cost: { single: 0, ten: 0 },
         rateUp: {
             S3: [
                 '［楔事務所代表］奧提斯 / Wedge Office Representative Outis',
                 '［楔事務所收尾人］堂吉訶德 / Wedge Office Fixer Don Quixote',
                 '［楔事務所收尾人］辛克萊 / Wedge Office Fixer Sinclair',
+            ],
+            EGOS: [],
+            S2: []
+        }
+    },
+    'season_haute_couture': {
+        id: 'season_haute_couture',
+        name: '新賽季 — 高級訂製服',
+        description: '新賽季高級訂製服人格登場！漆黑 3F 廣播室鴻璐、緋紅針線之王希斯克利夫，以及鴻璐 淚鋒之劍 E.G.O。',
+        cost: { single: 0, ten: 0 },
+        rateUp: {
+            S3: [
                 '［高級訂製服::漆黑 3F 廣播室］鴻璐 / Haute Couture::Le Noir 3F Public Address Room Hong Lu',
                 '［高級訂製服::緋紅 針線之王］希斯克利夫 / Haute Couture::Le Rouge King of Needles and Thread Heathcliff',
             ],
