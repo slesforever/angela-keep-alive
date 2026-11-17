@@ -200,7 +200,8 @@ const {
 );
 
 const {
-    localizeInteraction
+    localizeInteraction,
+    localizeCommandData
 } = require(
     './GameSystem/LanguageSystem.js'
 );
@@ -1232,6 +1233,7 @@ async function announceCurrentRateUps(botClient) {
 client.on(
     Events.InteractionCreate,
     async interaction => {
+        localizeInteraction(interaction);
 
         // ═════════════════════════════════════
         // /announce Modal Submit
@@ -2386,9 +2388,11 @@ client.once(
         // ─────────────────────────────────────
 
         const commandData =
-            allSlashCommands.map(
-                cmd =>
-                    cmd.toJSON()
+            await localizeCommandData(
+                allSlashCommands.map(
+                    cmd =>
+                        cmd.toJSON()
+                )
             );
 
         // 舊指令清理失敗不能阻斷新指令註冊。

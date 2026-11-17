@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const { AttachmentBuilder, PermissionFlagsBits } = require('discord.js');
 const { getGuildConfig } = require('./ServerConfigStorage.js');
+const { getLanguage } = require('./LanguageSystem.js');
 
 // ─── 設定 ──────────────────────────────────────────────────────
 const CONFIG_PATH     = path.join(process.cwd(), 'data', 'ai-config.json');
@@ -525,10 +526,15 @@ async function askGemini(prompt, g, userId, images, guild, client, userName = '�
     const personaId = getChannelPersona(g, channelId) || 'default';
     const facts = loadUserFacts(g, userId).facts;
     const contents = [...cleanSharedHist, { role: 'user', parts }];
+    const systemInstruction = systemInstr(guild, userName, userPersonalText, personaId, facts, userId);
+    const responseLanguageInstruction = getLanguage(userId) === 'en'
+        ? 'Response language: Reply in English by default, even when the user writes in another language. This rule overrides the persona description, examples, and previous chat history. Use another language only when the user explicitly asks for that language.'
+        : '回覆語言：預設使用繁體中文。只有當使用者明確要求其他語言時，才改用其他語言。';
+    systemInstruction.parts[0].text += '\n\n' + responseLanguageInstruction;
 
     const body = {
         contents,
-        systemInstruction: systemInstr(guild, userName, userPersonalText, personaId, facts, userId),
+        systemInstruction,
         generationConfig: {
             temperature: 0.75,
             topP: 0.95,

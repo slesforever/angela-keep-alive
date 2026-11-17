@@ -1348,7 +1348,7 @@ function buildListPages() {
 
 function renderPage(pages, idx, userId) {
     const p = pages[idx];
-    const lang = userId ? getLanguage(userId) : 'zh';
+    const lang = userId ? getLanguage(userId) : 'en';
     const foot = `分頁 ${idx + 1}/${pages.length}`;
 
     if (p.type === 'summary') {

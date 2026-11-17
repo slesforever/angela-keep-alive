@@ -8,6 +8,7 @@ const {
     PermissionFlagsBits,
     ChannelType
 } = require('discord.js');
+const { localizeCommandData } = require('./GameSystem/LanguageSystem.js');
 
 const admin = PermissionFlagsBits.Administrator;
 const commands = [
@@ -87,13 +88,14 @@ if (!token) {
 
     client.once(Events.ClientReady, async () => {
         try {
+            const localizedCommands = await localizeCommandData(commands);
             // 由登入後的 client.application.id 識別 App，
             // 不再要求另外設定 CLIENT_ID。
             await client.application.commands.set([]);
 
             let registeredGuilds = 0;
             for (const guild of client.guilds.cache.values()) {
-                await guild.commands.set(commands);
+                await guild.commands.set(localizedCommands);
                 registeredGuilds++;
             }
 
