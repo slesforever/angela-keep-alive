@@ -1,5 +1,20 @@
 // Functions/LimbusNewscheck.js
 // Twitter Nitter RSS + Steam 官方新聞 API + YouTube 頻道網址動態監測
+//
+// 本版為優化版，與原版行為一致，差別在：
+//   1. 狀態檔改存 PLAYER_DATA_DIR，重啟不再遺失去重進度
+//   2. 狀態改為 debounce + 原子寫入（.tmp → rename），不再卡 event loop
+//   3. Nitter 節點加入失敗退避，避免失敗時每輪硬打
+//   4. Twitter / Steam / YouTube 各自獨立輪詢節奏
+//   5. 影片改挑接近 2Mbps 的畫質，不再先抓最大檔
+//   6. 手動測試不再下載影片，避免 interaction 逾時
+//   7. 通知頻道只 fetch 一次，不再每個帳號抓一次
+//   8. Steam 抓 10 則（靠 recentIds 去重），降低漏新聞機率
+//   9. 移除已停用的 X 直抓解析程式碼
+//  10. lastFetchedId 一律取最大 snowflake，避免排序不一致造成漏抓
+//
+// 可直接覆蓋 Functions/LimbusNewscheck.js
+
 const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
@@ -18,40 +33,53 @@ const MONITORED_USERS = (process.env.TARGET_USERS || 'LimbusCompany_B,ProjMoonSt
 let notifyChannelId = process.env.NOTIFY_CHANNEL_ID || '1402282604165730348';
 const PING_ROLE = process.env.PING_ROLE_MENTION || '<@&1406984068725211177>';
 const STEAM_APP_ID = '1973530';
+
+// 各來源獨立節奏
 const CHECK_INTERVAL = Number(process.env.CHECK_INTERVAL_MS || 2 * 60 * 1000);
-const TWITTER_MIN_FETCH_GAP_MS = Number(process.env.TWITTER_MIN_FETCH_GAP_MS || 90 * 1000);
+const TWITTER_CHECK_INTERVAL = Number(process.env.TWITTER_CHECK_INTERVAL_MS || 5 * 60 * 1000);
+const TWITTER_MIN_FETCH_GAP_MS = Number(process.env.TWITTER_MIN_FETCH_GAP_MS || 4 * 60 * 1000);
 const TWITTER_CACHE_TTL_MS = Number(process.env.TWITTER_CACHE_TTL_MS || 10 * 60 * 1000);
 
-// 自動監測預設抓少一點，速度更快；手動測試可多抓
-const STEAM_NEWS_COUNT_AUTO = Number(process.env.STEAM_NEWS_COUNT_AUTO || 3);
+const STEAM_NEWS_COUNT_AUTO = Number(process.env.STEAM_NEWS_COUNT_AUTO || 10);
 const STEAM_NEWS_COUNT_MANUAL = Number(process.env.STEAM_NEWS_COUNT_MANUAL || 5);
 const STEAM_FETCH_TIMEOUT_MS = Number(process.env.STEAM_FETCH_TIMEOUT_MS || 5000);
 
-// Steam 圖片前綴
+// 影片目標碼率：挑最接近這個值的變體，避免先抓最大檔而超限失敗
+const TARGET_VIDEO_BITRATE = Number(process.env.TARGET_VIDEO_BITRATE || 2000000);
+const MAX_VIDEO_BYTES = 24 * 1024 * 1024;
+
 const STEAM_CLAN_IMAGE_BASE = 'https://steamcdn-a.akamaihd.net/steamcommunity/public/images/clans/';
 
-// 🎯 YouTube 設定：完全使用頻道網址進行解析與監測
 const YOUTUBE_HANDLE = (process.env.YOUTUBE_HANDLE || 'ProjectMoonOfficial').replace(/^@/, '');
 const YOUTUBE_PAGE_URL = process.env.YOUTUBE_PAGE_URL || `https://www.youtube.com/@${YOUTUBE_HANDLE}`;
 
-// X 已關閉公開 syndication timeline。改用仍存活、且支援 RSS 的 Nitter 實例。
-// 以 {user} 代表帳號名稱，多個來源用逗號分隔（全部並行，任一成功即可）。
 const TIMELINE_ENDPOINTS = (process.env.X_TIMELINE_ENDPOINTS ||
     'https://nitter.meowing.monster/{user}/rss,https://shitter.thepixora.com/{user}/rss,https://nitter.netbub.com/{user}/rss')
     .split(',')
     .map(s => s.trim().replace(/\/$/, ''))
     .filter(Boolean);
 
-const STATE_FILE = path.join(process.cwd(), 'data', 'newscheck-state.json');
+// 狀態檔跟著其他玩家資料一起走，Render 重啟不會清空
+const DATA_DIR = process.env.PLAYER_DATA_DIR || path.join(process.cwd(), 'data');
+const STATE_FILE = path.join(DATA_DIR, 'newscheck-state.json');
 const RECENT_TTL_MS = 30 * 60 * 1000;
 
+const TWITTER_NODE_MIN_COOLDOWN_MS = Number(process.env.TWITTER_NODE_MIN_COOLDOWN_MS || 2 * 60 * 1000);
+const TWITTER_NODE_MAX_COOLDOWN_MS = Number(process.env.TWITTER_NODE_MAX_COOLDOWN_MS || 30 * 60 * 1000);
+
 let loopTimer = null;
+let twitterTimer = null;
 let twitterLock = false;
 let steamLock = false;
 let youtubeLock = false;
 
-const userStates = new Map(); // userId -> { lastFetchedId, recentIds: Map<id, ts> }
+const userStates = new Map(); // userId -> { lastFetchedId, recentIds, lastRequestAt }
 const feedCache = new Map(); // userId -> { fetchedAt, items }
+
+// Nitter 節點退避
+const nodeFailures = new Map();
+const nodeCooldownUntil = new Map();
+
 const steamState = {
     lastSteamNewsId: null,
     recentIds: new Map()
@@ -64,9 +92,8 @@ const youtubeState = {
 };
 
 function ensureStateDir() {
-    const dir = path.dirname(STATE_FILE);
-    if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
+    if (!fs.existsSync(DATA_DIR)) {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
     }
 }
 
@@ -74,7 +101,8 @@ function getUserState(userId) {
     if (!userStates.has(userId)) {
         userStates.set(userId, {
             lastFetchedId: null,
-            recentIds: new Map()
+            recentIds: new Map(),
+            lastRequestAt: 0
         });
     }
     return userStates.get(userId);
@@ -241,6 +269,8 @@ async function buildSteamAnnouncementPayload(item) {
     return { embeds, files: attachments };
 }
 
+// ── 狀態持久化 ───────────────────────────────────────────────
+
 function loadState() {
     try {
         if (!fs.existsSync(STATE_FILE)) return;
@@ -290,42 +320,66 @@ function loadState() {
     }
 }
 
+function serializeState() {
+    const users = {};
+    for (const [userId, state] of userStates.entries()) {
+        cleanupRecent(state.recentIds);
+        users[userId] = {
+            lastFetchedId: state.lastFetchedId,
+            recentIds: [...state.recentIds.keys()].slice(-20)
+        };
+    }
+
+    cleanupRecent(steamState.recentIds);
+    cleanupRecent(youtubeState.recentIds);
+
+    return {
+        users,
+        steam: {
+            lastSteamNewsId: steamState.lastSteamNewsId,
+            recentIds: [...steamState.recentIds.keys()].slice(-20)
+        },
+        youtube: {
+            channelId: youtubeState.channelId,
+            lastVideoId: youtubeState.lastVideoId,
+            lastPublishedAt: youtubeState.lastPublishedAt,
+            recentIds: [...youtubeState.recentIds.keys()].slice(-20)
+        },
+        savedAt: new Date().toISOString()
+    };
+}
+
+// debounce：一輪內多次呼叫只寫一次，且不阻塞 event loop
+let saveTimer = null;
+let savePending = false;
+
 function saveState() {
+    savePending = true;
+    if (saveTimer) return;
+
+    saveTimer = setTimeout(() => {
+        saveTimer = null;
+        void flushState();
+    }, 1500);
+
+    if (typeof saveTimer.unref === 'function') saveTimer.unref();
+}
+
+async function flushState() {
+    if (!savePending) return;
+    savePending = false;
+
+    const tmpFile = `${STATE_FILE}.tmp`;
     try {
         ensureStateDir();
-
-        const users = {};
-        for (const [userId, state] of userStates.entries()) {
-            cleanupRecent(state.recentIds);
-            users[userId] = {
-                lastFetchedId: state.lastFetchedId,
-                recentIds: [...state.recentIds.keys()].slice(-20)
-            };
-        }
-
-        cleanupRecent(steamState.recentIds);
-        cleanupRecent(youtubeState.recentIds);
-
-        const data = {
-            users,
-            steam: {
-                lastSteamNewsId: steamState.lastSteamNewsId,
-                recentIds: [...steamState.recentIds.keys()].slice(-20)
-            },
-            youtube: {
-                channelId: youtubeState.channelId,
-                lastVideoId: youtubeState.lastVideoId,
-                lastPublishedAt: youtubeState.lastPublishedAt,
-                recentIds: [...youtubeState.recentIds.keys()].slice(-20)
-            },
-            savedAt: new Date().toISOString()
-        };
-
-        fs.writeFileSync(STATE_FILE, JSON.stringify(data, null, 2), 'utf8');
+        await fs.promises.writeFile(tmpFile, JSON.stringify(serializeState(), null, 2), 'utf8');
+        await fs.promises.rename(tmpFile, STATE_FILE);
     } catch (err) {
         console.warn(`[LimbusNewscheck] 儲存狀態失敗：${err.message}`);
     }
 }
+
+// ── 共用工具 ─────────────────────────────────────────────────
 
 function fetchWithTimeout(url, options = {}, timeoutMs = 4500) {
     const controller = new AbortController();
@@ -349,17 +403,6 @@ function withTimeout(promise, timeoutMs, label) {
     return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-function compareTweetFreshness(a, b) {
-    const aTime = Date.parse(a?.createdAt || '');
-    const bTime = Date.parse(b?.createdAt || '');
-
-    if (Number.isFinite(aTime) && Number.isFinite(bTime) && aTime !== bTime) {
-        return bTime - aTime;
-    }
-
-    return compareSnowflakeIds(b?.id || '', a?.id || '');
-}
-
 function compareSnowflakeIds(a, b) {
     if (a === b) return 0;
 
@@ -374,6 +417,51 @@ function compareSnowflakeIds(a, b) {
 
     return String(a).localeCompare(String(b));
 }
+
+function compareTweetFreshness(a, b) {
+    const aTime = Date.parse(a?.createdAt || '');
+    const bTime = Date.parse(b?.createdAt || '');
+
+    if (Number.isFinite(aTime) && Number.isFinite(bTime) && aTime !== bTime) {
+        return bTime - aTime;
+    }
+
+    return compareSnowflakeIds(b?.id || '', a?.id || '');
+}
+
+// 一律取最大 snowflake，不依賴排序結果
+function pickNewestId(items) {
+    if (!items?.length) return null;
+    return items
+        .map(item => String(item.id))
+        .reduce((a, b) => (compareSnowflakeIds(a, b) >= 0 ? a : b));
+}
+
+// ── Nitter 節點退避 ──────────────────────────────────────────
+
+function isNodeReady(nodeTemplate) {
+    return (nodeCooldownUntil.get(nodeTemplate) || 0) <= Date.now();
+}
+
+function markNodeOk(nodeTemplate) {
+    nodeFailures.delete(nodeTemplate);
+    nodeCooldownUntil.delete(nodeTemplate);
+}
+
+function markNodeFailed(nodeTemplate) {
+    const failures = (nodeFailures.get(nodeTemplate) || 0) + 1;
+    nodeFailures.set(nodeTemplate, failures);
+
+    const backoff = Math.min(
+        TWITTER_NODE_MAX_COOLDOWN_MS,
+        TWITTER_NODE_MIN_COOLDOWN_MS * 2 ** (failures - 1)
+    );
+
+    nodeCooldownUntil.set(nodeTemplate, Date.now() + backoff);
+    console.warn(`⚠️ [Twitter] ${nodeTemplate} 失敗 ${failures} 次，冷卻 ${Math.round(backoff / 1000)}s`);
+}
+
+// ── 解析 ─────────────────────────────────────────────────────
 
 function parseTwitterItems(xml) {
     const blocks = extractBlock(xml, 'item');
@@ -441,154 +529,7 @@ function extractTweetKey(urlOrId) {
     return text.replace(/^https:\/\/[^/]+/, '').split('?')[0].split('#')[0];
 }
 
-function extractJsonObjectsByMarker(html, marker) {
-    const objects = [];
-    let cursor = 0;
-
-    while (true) {
-        const start = html.indexOf(marker, cursor);
-        if (start < 0) break;
-
-        let depth = 0;
-        let inString = false;
-        let escaped = false;
-        let end = -1;
-
-        for (let index = start; index < html.length; index += 1) {
-            const char = html[index];
-
-            if (inString) {
-                if (escaped) escaped = false;
-                else if (char === '\\') escaped = true;
-                else if (char === '"') inString = false;
-                continue;
-            }
-
-            if (char === '"') inString = true;
-            else if (char === '{') depth += 1;
-            else if (char === '}' && --depth === 0) {
-                end = index + 1;
-                break;
-            }
-        }
-
-        if (end < 0) break;
-
-        try {
-            objects.push(JSON.parse(html.slice(start, end)));
-        } catch (_) {
-            // Ignore unrelated or truncated embedded objects.
-        }
-
-        cursor = end;
-    }
-
-    return objects;
-}
-
-function parseSyndicationTimeline(raw, fallbackUserId) {
-    const marker = '{"type":"tweet","entry_id":"tweet-';
-    const entries = extractJsonObjectsByMarker(String(raw || ''), marker);
-    const seen = new Set();
-
-    return entries
-        .map(entry => entry?.content?.tweet)
-        .filter(tweet => tweet?.id_str)
-        .map(tweet => {
-            const id = String(tweet.id_str);
-            const screenName = tweet.user?.screen_name || fallbackUserId;
-            const text = decodeXmlEntities(tweet.full_text || tweet.text || '').trim();
-
-            return {
-                id,
-                link: `https://x.com/${screenName}/status/${id}`,
-                title: text || `@${screenName} 發布了新訊息`,
-                createdAt: tweet.created_at || null,
-            };
-        })
-        .filter(item => {
-            if (seen.has(item.id)) return false;
-            seen.add(item.id);
-            return true;
-        });
-}
-
-function decodeXEmbeddedString(value) {
-    try {
-        return JSON.parse(`"${value}"`);
-    } catch (_) {
-        return String(value || '')
-            .replace(/\\n/g, '\n')
-            .replace(/\\r/g, '\r')
-            .replace(/\\t/g, '\t')
-            .replace(/\\"/g, '"')
-            .replace(/\\u([0-9a-f]{4})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
-    }
-}
-
-function parseXProfilePage(raw, fallbackUserId) {
-    const html = String(raw || '');
-    const detailStart = /"client:VHdlZXQ6([^\"]+):details"\s*:\$R\[\d+\]=\{/g;
-    const items = [];
-    let match;
-
-    while ((match = detailStart.exec(html))) {
-        const blockStart = detailStart.lastIndex;
-        const nextBlock = html.indexOf('},"client:', blockStart);
-        const block = html.slice(blockStart, nextBlock >= 0 ? nextBlock : html.length);
-        const textMatch = block.match(/full_text:"((?:\\.|[^"\\])*)"/);
-        const timeMatch = block.match(/created_at_ms:(\d+)/);
-        if (!textMatch) continue;
-
-        let id = '';
-        try {
-            id = Buffer.from(match[1], 'base64').toString('utf8');
-        } catch (_) {
-            continue;
-        }
-        if (!/^\d+$/.test(id)) continue;
-
-        items.push({
-            id,
-            link: `https://x.com/${fallbackUserId}/status/${id}`,
-            title: decodeXEmbeddedString(textMatch[1]).trim() || `@${fallbackUserId} 發布了新訊息`,
-            createdAt: timeMatch ? new Date(Number(timeMatch[1])).toUTCString() : null,
-        });
-    }
-
-    const videoVariantsByTweet = new Map();
-    const variantPattern = /"client:VHdlZXQ6([^"]+):media_entities2:(\d+):video_info:variants:\d+":\$R\[\d+\]=\{([^}]*)\}/g;
-    let variantMatch;
-    while ((variantMatch = variantPattern.exec(html))) {
-        let tweetId = '';
-        try {
-            tweetId = Buffer.from(variantMatch[1], 'base64').toString('utf8');
-        } catch (_) {
-            continue;
-        }
-        if (!/^\d+$/.test(tweetId)) continue;
-        const block = variantMatch[3];
-        const contentType = block.match(/content_type:"([^"]+)"/)?.[1] || '';
-        const url = block.match(/url:"([^"]+)"/)?.[1] || '';
-        const bitrate = Number(block.match(/bitrate:(\d+)/)?.[1] || 0);
-        if (!url || !/^video\/mp4$/i.test(contentType)) continue;
-        if (!videoVariantsByTweet.has(tweetId)) videoVariantsByTweet.set(tweetId, []);
-        videoVariantsByTweet.get(tweetId).push({ url, bitrate });
-    }
-
-    for (const item of items) {
-        const variants = [...new Map((videoVariantsByTweet.get(item.id) || []).map(v => [v.url, v])).values()]
-            .sort((a, b) => b.bitrate - a.bitrate);
-        if (variants.length) {
-            item.videoVariants = variants;
-            item.videoUrl = variants[0].url;
-        }
-    }
-
-    const unique = [...new Map(items.map(item => [item.id, item])).values()];
-    unique.sort(compareTweetFreshness);
-    return unique;
-}
+// ── 影片下載 ─────────────────────────────────────────────────
 
 async function downloadTweetVideo(item) {
     const variants = Array.isArray(item?.videoVariants) && item.videoVariants.length
@@ -596,9 +537,13 @@ async function downloadTweetVideo(item) {
         : (item?.videoUrl ? [{ url: item.videoUrl, bitrate: 0 }] : []);
     if (!variants.length) return null;
 
+    // 由接近目標碼率排起，避免先抓最大檔而超限
+    const ordered = [...new Map(variants.map(v => [v.url, v])).values()]
+        .sort((a, b) => Math.abs((a.bitrate || 0) - TARGET_VIDEO_BITRATE) - Math.abs((b.bitrate || 0) - TARGET_VIDEO_BITRATE));
+
     const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'angela-x-video-'));
     try {
-        for (const [index, variant] of variants.entries()) {
+        for (const [index, variant] of ordered.entries()) {
             const outputPath = path.join(tempDir, `tweet-${item.id}-${index}.mp4`);
             try {
                 await execFileAsync('curl', [
@@ -608,7 +553,7 @@ async function downloadTweetVideo(item) {
                     '--location',
                     '--connect-timeout', '5',
                     '--max-time', '45',
-                    '--max-filesize', '24000000',
+                    '--max-filesize', String(MAX_VIDEO_BYTES),
                     '--user-agent', 'Mozilla/5.0',
                     '--output', outputPath,
                     variant.url,
@@ -617,11 +562,11 @@ async function downloadTweetVideo(item) {
                     killSignal: 'SIGKILL',
                 });
                 const stat = await fs.promises.stat(outputPath);
-                if (!stat.size || stat.size > 24 * 1024 * 1024) continue;
+                if (!stat.size || stat.size > MAX_VIDEO_BYTES) continue;
                 const buffer = await fs.promises.readFile(outputPath);
                 return new AttachmentBuilder(buffer, { name: `x-${item.id}.mp4` });
             } catch (_) {
-                // 高畫質超過 Discord 附件上限或下載失敗時，嘗試下一個較低畫質。
+                // 這個畫質失敗就試下一個
             }
         }
         return null;
@@ -629,6 +574,8 @@ async function downloadTweetVideo(item) {
         await fs.promises.rm(tempDir, { recursive: true, force: true }).catch(() => {});
     }
 }
+
+// ── Twitter 抓取 ─────────────────────────────────────────────
 
 async function fetchTweetItemsFromNode(nodeTemplate, userId) {
     const url = nodeTemplate.replace('{user}', encodeURIComponent(userId));
@@ -679,11 +626,23 @@ async function fetchTweetItemsFromNode(nodeTemplate, userId) {
 }
 
 async function fetchTweetItemsFromAllNodes(userId) {
+    const ready = TIMELINE_ENDPOINTS.filter(isNodeReady);
+
+    if (!ready.length) {
+        throw new Error('所有 Nitter 來源都在冷卻中');
+    }
+
     const results = await Promise.allSettled(
-        TIMELINE_ENDPOINTS.map(async (nodeTemplate) => ({
-            nodeTemplate,
-            items: await fetchTweetItemsFromNode(nodeTemplate, userId)
-        }))
+        ready.map(async (nodeTemplate) => {
+            try {
+                const items = await fetchTweetItemsFromNode(nodeTemplate, userId);
+                markNodeOk(nodeTemplate);
+                return { nodeTemplate, items };
+            } catch (error) {
+                markNodeFailed(nodeTemplate);
+                throw error;
+            }
+        })
     );
 
     const merged = [];
@@ -712,58 +671,8 @@ async function fetchTweetItemsFromAllNodes(userId) {
     return merged;
 }
 
-// 🌐 直接從 YouTube 頻道網址 (https://www.youtube.com/@ProjectMoonOfficial) 動態解析 Channel ID
-async function resolveYouTubeChannelId(pageUrl = YOUTUBE_PAGE_URL) {
-    const candidates = [
-        `${pageUrl}/videos`,
-        pageUrl,
-    ];
-
-    const patterns = [
-        /"channelId":"(UC[^"]+)"/,
-        /"channelId\\":\\"(UC[^\\"]+)\\"/,
-        /"externalId":"(UC[^"]+)"/,
-        /"browseId":"(UC[^"]+)"/,
-        /https:\/\/www\.youtube\.com\/channel\/(UC[\w-]+)/,
-        /canonical" href="https:\/\/www\.youtube\.com\/channel\/(UC[\w-]+)"/,
-        /itemprop="identifier" content="(UC[\w-]+)"/
-    ];
-
-    for (const targetUrl of candidates) {
-        try {
-            const response = await fetchWithTimeout(targetUrl, {}, 12000);
-            if (!response.ok) continue;
-
-            const html = await response.text();
-            for (const pattern of patterns) {
-                const match = html.match(pattern);
-                if (match?.[1]) return match[1];
-            }
-        } catch (_) {}
-    }
-
-    return null;
-}
-
-async function fetchYouTubeItems(channelId) {
-    const url = `https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`;
-    const response = await fetchWithTimeout(url, {}, 12000);
-
-    if (!response.ok) {
-        throw new Error(`YouTube RSS HTTP 錯誤! 狀態碼: ${response.status} ( Channel ID: ${channelId} )`);
-    }
-
-    const xml = await response.text();
-    const items = parseYouTubeItems(xml);
-
-    if (!items.length) {
-        throw new Error('YouTube RSS 解析失敗');
-    }
-
-    return items;
-}
-
 // ── Twitter 監測 ─────────────────────────────────────────────
+
 async function checkTwitterUpdates(client, isManual = false, messageContext = null, targetUserId = null) {
     if (twitterLock) {
         if (!isManual) console.log('⏳ [Twitter] 上一輪尚未完成，略過本輪');
@@ -782,6 +691,8 @@ async function checkTwitterUpdates(client, isManual = false, messageContext = nu
         const manualLines = [];
         const manualFiles = [];
         const manualErrors = [];
+
+        let channel = null;
 
         for (const userId of usersToCheck) {
             const state = getUserState(userId);
@@ -822,24 +733,21 @@ async function checkTwitterUpdates(client, isManual = false, messageContext = nu
             }
 
             if (!state.lastFetchedId && !isManual) {
-                state.lastFetchedId = feedItems[0].id;
-                rememberRecent(state.recentIds, feedItems[0].id);
+                state.lastFetchedId = pickNewestId(feedItems);
+                rememberRecent(state.recentIds, state.lastFetchedId);
                 saveState();
-                console.log(`📦 [Twitter][${userId}] 建立初始推文快取：${feedItems[0].id}`);
+                console.log(`📦 [Twitter][${userId}] 建立初始推文快取：${state.lastFetchedId}`);
                 continue;
             }
 
             if (isManual) {
+                // 手動測試不下載影片，避免 interaction 逾時
                 const previewItems = feedItems.slice(0, 3);
                 const preview = previewItems.map((item, idx) => {
                     const titlePart = item.title ? `**${truncateText(item.title, 100)}**\n` : '';
                     const datePart = item.createdAt ? `\n🕒 ${item.createdAt}` : '';
                     return `${idx + 1}. ${titlePart}${item.link}${datePart}`;
                 });
-                for (const item of previewItems) {
-                    const file = await downloadTweetVideo(item);
-                    if (file) manualFiles.push(file);
-                }
                 manualLines.push(`**@${userId}**\n${preview.join('\n\n')}`);
                 continue;
             }
@@ -853,7 +761,8 @@ async function checkTwitterUpdates(client, isManual = false, messageContext = nu
                 newItems = feedItems.filter(item => compareSnowflakeIds(item.id, state.lastFetchedId) > 0);
             }
 
-            newItems = [...new Map(newItems.map(item => [item.id, item])).values()];
+            newItems = [...new Map(newItems.map(item => [item.id, item])).values()]
+                .filter(item => !isRecent(state.recentIds, item.id));
             newItems.sort((a, b) => compareSnowflakeIds(a.id, b.id));
 
             if (!newItems.length) {
@@ -861,12 +770,14 @@ async function checkTwitterUpdates(client, isManual = false, messageContext = nu
                 continue;
             }
 
-            state.lastFetchedId = feedItems[0].id;
+            state.lastFetchedId = pickNewestId(feedItems);
             for (const item of newItems) rememberRecent(state.recentIds, item.id);
             saveState();
 
             try {
-                const channel = await client.channels.fetch(notifyChannelId);
+                if (!channel) {
+                    channel = await client.channels.fetch(notifyChannelId);
+                }
                 if (channel) {
                     let isFirst = true;
                     for (const item of newItems) {
@@ -913,7 +824,8 @@ async function checkTwitterUpdates(client, isManual = false, messageContext = nu
     }
 }
 
-// ── Steam 官方新聞 API ─────────────────────────────────────
+// ── Steam 官方新聞 API ──────────────────────────────────────
+
 async function checkSteamUpdates(client, isManual = false, messageContext = null) {
     if (steamLock) {
         if (!isManual) console.log('⏳ [Steam] 上一輪尚未完成，略過本輪');
@@ -972,7 +884,8 @@ async function checkSteamUpdates(client, isManual = false, messageContext = null
             }
         }
 
-        const uniqueUnseen = [...new Map(unseen.map(item => [String(item.gid), item])).values()];
+        const uniqueUnseen = [...new Map(unseen.map(item => [String(item.gid), item])).values()]
+            .filter(item => !isRecent(steamState.recentIds, String(item.gid)));
         uniqueUnseen.sort((a, b) => compareSnowflakeIds(String(a.gid), String(b.gid)));
 
         if (isManual) {
@@ -1054,6 +967,57 @@ async function checkSteamUpdates(client, isManual = false, messageContext = null
 }
 
 // ── YouTube 頻道監測 (透過網址進行) ────────────────────────
+
+async function resolveYouTubeChannelId(pageUrl = YOUTUBE_PAGE_URL) {
+    const candidates = [
+        `${pageUrl}/videos`,
+        pageUrl,
+    ];
+
+    const patterns = [
+        /"channelId":"(UC[^"]+)"/,
+        /"channelId\\":\\"(UC[^\\"]+)\\"/,
+        /"externalId":"(UC[^"]+)"/,
+        /"browseId":"(UC[^"]+)"/,
+        /https:\/\/www\.youtube\.com\/channel\/(UC[\w-]+)/,
+        /canonical" href="https:\/\/www\.youtube\.com\/channel\/(UC[\w-]+)"/,
+        /itemprop="identifier" content="(UC[\w-]+)"/
+    ];
+
+    for (const targetUrl of candidates) {
+        try {
+            const response = await fetchWithTimeout(targetUrl, {}, 12000);
+            if (!response.ok) continue;
+
+            const html = await response.text();
+            for (const pattern of patterns) {
+                const match = html.match(pattern);
+                if (match?.[1]) return match[1];
+            }
+        } catch (_) {}
+    }
+
+    return null;
+}
+
+async function fetchYouTubeItems(channelId) {
+    const url = `https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`;
+    const response = await fetchWithTimeout(url, {}, 12000);
+
+    if (!response.ok) {
+        throw new Error(`YouTube RSS HTTP 錯誤! 狀態碼: ${response.status} ( Channel ID: ${channelId} )`);
+    }
+
+    const xml = await response.text();
+    const items = parseYouTubeItems(xml);
+
+    if (!items.length) {
+        throw new Error('YouTube RSS 解析失敗');
+    }
+
+    return items;
+}
+
 async function checkYouTubeUpdates(client, isManual = false, messageContext = null) {
     if (youtubeLock) {
         if (!isManual) console.log('⏳ [YouTube] 上一輪尚未完成，略過本輪');
@@ -1063,7 +1027,6 @@ async function checkYouTubeUpdates(client, isManual = false, messageContext = nu
     youtubeLock = true;
 
     try {
-        // 🎯 1. 每次皆從 YouTube 頻道網址動態抓取 Channel ID
         let channelId = youtubeState.channelId;
 
         if (!channelId) {
@@ -1080,7 +1043,6 @@ async function checkYouTubeUpdates(client, isManual = false, messageContext = nu
             throw new Error(`無法從網址 ${YOUTUBE_PAGE_URL} 取得頻道 ID`);
         }
 
-        // 🎯 2. 獲取 RSS，若失效則自動重新連線網址重新解析 ID
         let feedItems;
         try {
             feedItems = await fetchYouTubeItems(channelId);
@@ -1145,7 +1107,8 @@ async function checkYouTubeUpdates(client, isManual = false, messageContext = nu
             });
         }
 
-        newItems = [...new Map(newItems.map(item => [item.id, item])).values()];
+        newItems = [...new Map(newItems.map(item => [item.id, item])).values()]
+            .filter(item => !isRecent(youtubeState.recentIds, item.id));
         newItems.reverse();
 
         if (!newItems.length) {
@@ -1201,6 +1164,7 @@ async function checkYouTubeUpdates(client, isManual = false, messageContext = nu
 }
 
 // ── 頻道動態設定功能 ──────────────────────────────────────────
+
 function setNotifyChannel(channelId) {
     if (!channelId) return false;
     notifyChannelId = String(channelId);
@@ -1212,6 +1176,7 @@ function getNotifyChannel() {
 }
 
 // ── 啟動定時循環 ─────────────────────────────────────────────
+
 function startNewsCheckLoop(client) {
     if (globalThis.__NEWSCHECK_LOOP_STARTED__) {
         console.log('ℹ️ [LimbusNewscheck] 已啟動過，略過重複初始化');
@@ -1221,17 +1186,26 @@ function startNewsCheckLoop(client) {
 
     loadState();
 
-    void checkTwitterUpdates(client, false, null);
+    // 啟動時先各跑一次
     void checkSteamUpdates(client, false, null);
     void checkYouTubeUpdates(client, false, null);
+    void checkTwitterUpdates(client, false, null);
 
+    // Steam / YouTube 較便宜，維持 2 分鐘
     loopTimer = setInterval(() => {
-        void checkTwitterUpdates(client, false, null);
         void checkSteamUpdates(client, false, null);
         void checkYouTubeUpdates(client, false, null);
     }, CHECK_INTERVAL);
 
-    console.log(`✅ [LimbusNewscheck] 監測循環啟動，間隔 ${CHECK_INTERVAL / 1000}s`);
+    // Twitter 走 Nitter，拉長到 5 分鐘
+    twitterTimer = setInterval(() => {
+        void checkTwitterUpdates(client, false, null);
+    }, TWITTER_CHECK_INTERVAL);
+
+    if (typeof loopTimer.unref === 'function') loopTimer.unref();
+    if (typeof twitterTimer.unref === 'function') twitterTimer.unref();
+
+    console.log(`✅ [LimbusNewscheck] 監測循環啟動，Steam/YouTube ${CHECK_INTERVAL / 1000}s、Twitter ${TWITTER_CHECK_INTERVAL / 1000}s`);
 }
 
 module.exports = {
