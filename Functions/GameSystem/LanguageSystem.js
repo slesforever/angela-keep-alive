@@ -7,11 +7,50 @@ const { Message } = require('discord.js');
 const CONFIG_PATH = path.join(process.cwd(), 'data', 'language-preferences.json');
 const COMMAND_TRANSLATIONS_PATH = path.join(process.cwd(), 'data', 'command-translations.json');
 const DEFAULT_LANGUAGE = 'en';
+const LANGUAGE_RESET_VERSION = 1;
 
 function read() { try { return fs.existsSync(CONFIG_PATH) ? JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) : {}; } catch { return {}; } }
 function write(data) { fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true }); fs.writeFileSync(CONFIG_PATH, JSON.stringify(data, null, 2), 'utf8'); }
 function readCommandTranslations() { try { return fs.existsSync(COMMAND_TRANSLATIONS_PATH) ? JSON.parse(fs.readFileSync(COMMAND_TRANSLATIONS_PATH, 'utf8')) : {}; } catch { return {}; } }
 function writeCommandTranslations(data) { fs.mkdirSync(path.dirname(COMMAND_TRANSLATIONS_PATH), { recursive: true }); fs.writeFileSync(COMMAND_TRANSLATIONS_PATH, JSON.stringify(data, null, 2), 'utf8'); }
+
+function migrateLanguagePreferencesToEnglish() {
+    let data;
+    try {
+        data = fs.existsSync(CONFIG_PATH)
+            ? JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'))
+            : {};
+    } catch (error) {
+        console.warn('[Language] Could not reset saved language preferences:', error.message);
+        return;
+    }
+
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+        console.warn('[Language] Saved language preferences have an invalid format; reset skipped.');
+        return;
+    }
+    if (Number(data.__languageResetVersion) >= LANGUAGE_RESET_VERSION) return;
+
+    let updated = 0;
+    for (const userId of Object.keys(data)) {
+        if (userId === '__languageResetVersion') continue;
+        if (data[userId] !== 'en') {
+            data[userId] = 'en';
+            updated++;
+        }
+    }
+    data.__languageResetVersion = LANGUAGE_RESET_VERSION;
+
+    try {
+        write(data);
+        console.info(`[Language] Reset ${updated} saved user preference(s) to English.`);
+    } catch (error) {
+        console.warn('[Language] Could not save the English preference reset:', error.message);
+    }
+}
+
+migrateLanguagePreferencesToEnglish();
+
 function getLanguage(userId) { const language = read()[userId]; return language === 'zh' ? 'zh' : DEFAULT_LANGUAGE; }
 function setLanguage(userId, language) { const data = read(); data[userId] = language === 'zh' ? 'zh' : 'en'; write(data); return data[userId]; }
 function languageName(language) { return language === 'en' ? 'English' : '繁體中文'; }

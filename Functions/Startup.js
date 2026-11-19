@@ -5,7 +5,6 @@ const {
     Client,
     GatewayIntentBits,
     EmbedBuilder,
-    ActivityType,
     Events,
     SlashCommandBuilder,
     PermissionFlagsBits,
@@ -21,6 +20,7 @@ const {
 const express = require('express');
 const fs      = require('fs');
 const path    = require('path');
+const AngelaStatusSystem = require('./GameSystem/AngelaStatusSystem.js');
 
 // ─── 確保資料目錄與設定檔存在 ─────────────────────────────────
 
@@ -2450,22 +2450,7 @@ client.once(
         // Presence
         // ─────────────────────────────────────
 
-        client.user.setPresence({
-            status: 'idle',
-
-            activities: [
-                {
-                    name:
-                        'customstatus',
-
-                    type:
-                        ActivityType.Custom,
-
-                    state:
-                        '羅蘭。我不能在這裡停下。哪怕這是一條沒有盡頭的荊棘之路，哪怕最後只能迎來毫無意義的毀滅……我也要親手為這長達百年的悲劇畫上句號'
-                }
-            ]
-        });
+        AngelaStatusSystem.start(client, 600000);
 
         // ─────────────────────────────────────
         // Discord 伺服器設定還原
