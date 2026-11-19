@@ -12,6 +12,24 @@ const {
 const identitiesData = require('./GameSystem/Pulls/identitiesData.js');
 
 const { executePull } = require('./GameSystem/Pulls/PullSystem.js');
+const { getLanguage } = require('./GameSystem/LanguageSystem.js');
+
+function localizedIdentityName(value, language) {
+  const name = String(value || '');
+  const parts = name.split(' / ');
+  if (parts.length < 2) return name;
+  return language === 'en' ? parts.slice(1).join(' / ').trim() : parts[0].trim();
+}
+
+function bannerName(banner, language, fallback = '') {
+  if (language === 'en' && banner?.nameEn) return banner.nameEn;
+  return localizedIdentityName(banner?.name || fallback, language);
+}
+
+function bannerDescription(banner, language) {
+  if (language === 'en' && banner?.descriptionEn) return banner.descriptionEn;
+  return localizedIdentityName(banner?.description || '', language);
+}
 
 // ─────────────────────────────────────────────
 // 工具：取得所有有效卡池
@@ -25,20 +43,23 @@ function getBanners() {
 // 建立卡池資訊 Embed
 // ─────────────────────────────────────────────
 
-function createBannerEmbed(banner) {
+function createBannerEmbed(banner, language = 'zh') {
+  const en = language === 'en';
   if (!banner) {
     return new EmbedBuilder()
-      .setTitle('🚂 LightSeeds 提取')
+      .setTitle(en ? '🚂 LightSeeds Pulls' : '🚂 LightSeeds 提取')
       .setColor(0xff0000)
-      .setDescription('❌ 目前沒有可用的提取卡池。');
+      .setDescription(en ? '❌ No pull banners are currently available.' : '❌ 目前沒有可用的提取卡池。');
   }
 
   const rateUp = banner.rateUp || {};
 
-  const rateUpS3 = Array.isArray(rateUp.S3) ? rateUp.S3.filter(Boolean) : [];
-  const rateUpS2 = Array.isArray(rateUp.S2) ? rateUp.S2.filter(Boolean) : [];
-  const rateUpEGO = Array.isArray(rateUp.EGOS) ? rateUp.EGOS.filter(Boolean) : [];
-  const rateUpSpecial = Array.isArray(rateUp.SPECIAL) ? rateUp.SPECIAL.filter(Boolean) : [];
+  const displayNames = values => (Array.isArray(values) ? values.filter(Boolean) : [])
+    .map(value => localizedIdentityName(value, language));
+  const rateUpS3 = displayNames(rateUp.S3);
+  const rateUpS2 = displayNames(rateUp.S2);
+  const rateUpEGO = displayNames(rateUp.EGOS);
+  const rateUpSpecial = displayNames(rateUp.SPECIAL);
 
   let rateUpText = '';
 
@@ -59,19 +80,22 @@ function createBannerEmbed(banner) {
   }
 
   if (!rateUpText) {
-    rateUpText = '目前沒有設定 Rate Up 對象。';
+    rateUpText = en ? 'No rate-up identities are configured.' : '目前沒有設定 Rate Up 對象。';
   }
 
   const singleCost = banner.cost?.single ?? 130;
   const tenCost = banner.cost?.ten ?? 1300;
 
-  const seasonLabels = { 0: '恆常', 1: 'S1 Orientation', 2: 'S2 Reminiscence', 3: 'S3 Bon Voyage', 4: 'S4 Clear All Cathy', 5: 'S5 Oblivion', 6: 'S6 葬花吟', 7: 'S7 蜘蛛之糸', 8: 'S8 PUNCTUM', walp: '瓦夜 Walpurgis' };
+  const seasonLabels = en
+    ? { 0: 'Standard', 1: 'S1 Orientation', 2: 'S2 Reminiscence', 3: 'S3 Bon Voyage', 4: 'S4 Clear All Cathy', 5: 'S5 Oblivion', 6: 'S6 The Flower Song', 7: 'S7 Spider’s Thread', 8: 'S8 PUNCTUM', walp: 'Walpurgis Night' }
+    : { 0: '恆常', 1: 'S1 Orientation', 2: 'S2 Reminiscence', 3: 'S3 Bon Voyage', 4: 'S4 Clear All Cathy', 5: 'S5 Oblivion', 6: 'S6 葬花吟', 7: 'S7 蜘蛛之糸', 8: 'S8 PUNCTUM', walp: '瓦夜 Walpurgis' };
   const sLabel = seasonLabels[banner.season ?? 0] ?? '';
   const titlePrefix = sLabel ? `[${sLabel}] ` : '';
+  const name = bannerName(banner, language, en ? 'Untitled Banner' : '未命名卡池');
 
   return new EmbedBuilder()
-    .setTitle(`🚂 ${titlePrefix}${banner.name || '未命名卡池'}`)
-    .setDescription(banner.description || '目前沒有提供此卡池的詳細說明。')
+    .setTitle(`🚂 ${titlePrefix}${name}`)
+    .setDescription(bannerDescription(banner, language) || (en ? 'No details are available for this banner.' : '目前沒有提供此卡池的詳細說明。'))
     .setColor(0xffa502)
     .addFields(
       {
@@ -80,13 +104,15 @@ function createBannerEmbed(banner) {
         inline: false,
       },
       {
-        name: '💰 提取花費',
-        value: `單抽：**${singleCost} LightSeeds**\n` + `十連：**${tenCost} LightSeeds**`,
+        name: en ? '💰 Pull Cost' : '💰 提取花費',
+        value: en
+          ? `Single: **${singleCost} LightSeeds**\nTen pulls: **${tenCost} LightSeeds**`
+          : `單抽：**${singleCost} LightSeeds**\n十連：**${tenCost} LightSeeds**`,
         inline: false,
       }
     )
     .setFooter({
-      text: '選擇下方按鈕進行提取｜抽卡結果將只顯示給你',
+      text: en ? 'Use the controls below to pull. Results are only visible to you.' : '選擇下方按鈕進行提取｜抽卡結果將只顯示給你',
     });
 }
 
@@ -94,8 +120,11 @@ function createBannerEmbed(banner) {
 // 建立卡池選擇器
 // ─────────────────────────────────────────────
 
-function createBannerSelectMenu(banners) {
-  const seasonLabels = { 0: '恆常', 1: 'S1', 2: 'S2', 3: 'S3', 4: 'S4', 5: 'S5', 6: 'S6', 7: 'S7', 8: 'S8', walp: '瓦夜' };
+function createBannerSelectMenu(banners, language = 'zh') {
+  const en = language === 'en';
+  const seasonLabels = en
+    ? { 0: 'Standard', 1: 'S1', 2: 'S2', 3: 'S3', 4: 'S4', 5: 'S5', 6: 'S6', 7: 'S7', 8: 'S8', walp: 'Walpurgis' }
+    : { 0: '恆常', 1: 'S1', 2: 'S2', 3: 'S3', 4: 'S4', 5: 'S5', 6: 'S6', 7: 'S7', 8: 'S8', walp: '瓦夜' };
   const seasonOrder = (s) => { const n = Number(s); if (!isNaN(n)) return n; return 999; };
   const options = Object.entries(banners)
     .filter(([bannerKey, banner]) => banner && bannerKey)
@@ -105,15 +134,15 @@ function createBannerSelectMenu(banners) {
       const sLabel = seasonLabels[banner.season ?? 0] ?? '';
       const prefix = sLabel ? `[${sLabel}] ` : '';
       return {
-        label: String(prefix + (banner.name || banner.id || bannerKey)).slice(0, 100),
-        description: String(banner.description || '沒有卡池說明').slice(0, 100),
+        label: String(prefix + bannerName(banner, language, banner.id || bannerKey)).slice(0, 100),
+        description: String(bannerDescription(banner, language) || (en ? 'No banner details' : '沒有卡池說明')).slice(0, 100),
         value: String(bannerKey),
       };
     });
 
   const menu = new StringSelectMenuBuilder()
     .setCustomId('pull_select_banner')
-    .setPlaceholder('🚂 選擇要進行提取的卡池...');
+    .setPlaceholder(en ? '🚂 Select a pull banner...' : '🚂 選擇要進行提取的卡池...');
 
   if (options.length > 0) {
     menu.addOptions(options);
@@ -128,7 +157,8 @@ function createBannerSelectMenu(banners) {
 // 建立抽卡按鈕
 // ─────────────────────────────────────────────
 
-function createPullButtons(banner, bannerKey) {
+function createPullButtons(banner, bannerKey, language = 'zh') {
+  const en = language === 'en';
   const finalBannerKey = String(bannerKey || 'standard');
 
   const singleCost = banner?.cost?.single ?? 130;
@@ -137,12 +167,12 @@ function createPullButtons(banner, bannerKey) {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId(`pull_execute_${finalBannerKey}_1`)
-      .setLabel(`單抽 (${singleCost} LightSeeds)`)
+      .setLabel(`${en ? 'Single pull' : '單抽'} (${singleCost} LightSeeds)`)
       .setStyle(ButtonStyle.Primary),
 
     new ButtonBuilder()
       .setCustomId(`pull_execute_${finalBannerKey}_10`)
-      .setLabel(`十連 (${tenCost} LightSeeds)`)
+      .setLabel(`${en ? '10 pulls' : '十連'} (${tenCost} LightSeeds)`)
       .setStyle(ButtonStyle.Success)
   );
 }
@@ -192,6 +222,8 @@ module.exports = {
   data: new SlashCommandBuilder().setName('pull_limbuscompany').setDescription('開啟 LightSeeds 提取介面'),
 
   async execute(interaction) {
+    const language = getLanguage(interaction.user.id);
+    const en = language === 'en';
     // ─────────────────────────────────
     // 取得卡池
     // ─────────────────────────────────
@@ -200,7 +232,7 @@ module.exports = {
 
     if (!Object.keys(banners).length) {
       return interaction.reply({
-        content: '❌ 目前沒有任何可用的抽卡卡池。',
+        content: en ? '❌ No pull banners are currently available.' : '❌ 目前沒有任何可用的抽卡卡池。',
         ephemeral: true,
       });
     }
@@ -213,7 +245,7 @@ module.exports = {
 
     if (!defaultBannerData) {
       return interaction.reply({
-        content: '❌ 找不到可用的抽卡卡池。',
+        content: en ? '❌ No usable pull banner was found.' : '❌ 找不到可用的抽卡卡池。',
         ephemeral: true,
       });
     }
@@ -225,10 +257,10 @@ module.exports = {
     // 建立 UI
     // ─────────────────────────────────
 
-    const selectRow = createBannerSelectMenu(banners);
-    let buttonRow = createPullButtons(defaultBanner, defaultBannerKey);
+    const selectRow = createBannerSelectMenu(banners, language);
+    let buttonRow = createPullButtons(defaultBanner, defaultBannerKey, language);
 
-    const embed = createBannerEmbed(defaultBanner);
+    const embed = createBannerEmbed(defaultBanner, language);
 
     // ─────────────────────────────────
     // 發送抽卡介面
@@ -255,7 +287,7 @@ module.exports = {
 
       if (componentInteraction.user.id !== interaction.user.id) {
         return componentInteraction.reply({
-          content: '❌ 這不是你的抽卡介面。',
+          content: en ? '❌ This pull menu belongs to another user.' : '❌ 這不是你的抽卡介面。',
           ephemeral: true,
         });
       }
@@ -273,7 +305,7 @@ module.exports = {
 
           if (!bannerKey) {
             return componentInteraction.reply({
-              content: '❌ 無法取得選擇的卡池。',
+              content: en ? '❌ Could not read the selected banner.' : '❌ 無法取得選擇的卡池。',
               ephemeral: true,
             });
           }
@@ -282,13 +314,13 @@ module.exports = {
 
           if (!selectedBanner) {
             return componentInteraction.reply({
-              content: '❌ 找不到這個卡池。',
+              content: en ? '❌ This banner could not be found.' : '❌ 找不到這個卡池。',
               ephemeral: true,
             });
           }
 
-          const newEmbed = createBannerEmbed(selectedBanner);
-          const newButtons = createPullButtons(selectedBanner, bannerKey);
+          const newEmbed = createBannerEmbed(selectedBanner, language);
+          const newButtons = createPullButtons(selectedBanner, bannerKey, language);
 
           buttonRow = newButtons; // keep collector's "end" handler in sync
 
@@ -322,7 +354,7 @@ module.exports = {
 
           if (!Number.isInteger(count) || ![1, 10].includes(count)) {
             return componentInteraction.reply({
-              content: '❌ 無效的抽卡次數。',
+              content: en ? '❌ Invalid pull count.' : '❌ 無效的抽卡次數。',
               ephemeral: true,
             });
           }
@@ -333,7 +365,7 @@ module.exports = {
 
           if (!banners[bannerKey]) {
             return componentInteraction.reply({
-              content: '❌ 找不到指定的卡池。',
+              content: en ? '❌ The selected banner could not be found.' : '❌ 找不到指定的卡池。',
               ephemeral: true,
             });
           }
@@ -364,7 +396,7 @@ module.exports = {
         console.error('[PullMenu] Component Error:', error);
 
         const errorMessage = {
-          content: `❌ 抽卡介面發生錯誤：\n` + `\`${error.message}\``,
+          content: (en ? '❌ The pull menu encountered an error:\n' : '❌ 抽卡介面發生錯誤：\n') + `\`${error.message}\``,
         };
 
         if (componentInteraction.deferred || componentInteraction.replied) {

@@ -31,7 +31,7 @@ const identityRegistry = {
         { name: "[NULL] 這裡沒有任何東西 / theres nothing" },
         { name: "[Touhou Project] 芙蘭朵露·斯卡蕾特 / Flandre Scarlet" },
         { name: "[Touhou Project] 芙蘭朵露·蕾米莉亞 / Remilia Scarlet" },
-        { name: "[赤月の破片] Fragment of Chaos." },
+        { name: "[赤月の破片] Fragment of Chaos.", nameEn: 'Fragment of Chaos.' },
     ],
     '0000': [
         { name: "［竹帽］金 / Bamboo-hatted Kim" }, 
@@ -531,6 +531,8 @@ const BANNERS = {
         id: 'wannight_10',
         name: '第十次瓦夜 — 楔事務所',
         description: '第十次瓦夜（2026年11月12日開啟）。楔事務所代表奧提斯、楔事務所收尾人堂吉訶德 & 辛克萊同期登場！',
+        nameEn: 'Walpurgis Night 10 — Wedge Office',
+        descriptionEn: '10th Walpurgis Night (opened November 12, 2026): Wedge Office Representative Outis and Fixers Don Quixote and Sinclair debut together.',
         cost: { single: 0, ten: 0 },
         rateUp: {
             S3: [
@@ -546,6 +548,8 @@ const BANNERS = {
         id: 'season_haute_couture',
         name: '新賽季 — 高級訂製服',
         description: '新賽季高級訂製服人格登場！漆黑 3F 廣播室鴻璐、緋紅針線之王希斯克利夫，以及鴻璐 淚鋒之劍 E.G.O。',
+        nameEn: 'New Season — Haute Couture',
+        descriptionEn: 'New-season Haute Couture identities debut: Le Noir 3F Public Address Room Hong Lu, Le Rouge King of Needles and Thread Heathcliff, and Hong Lu’s The Sword Sharpened with Tears E.G.O.',
         cost: { single: 0, ten: 0 },
         rateUp: {
             S3: [
@@ -562,6 +566,8 @@ const BANNERS = {
         id: 'standard',
         name: '常駐提取 — 邊獄公司',
         description: '包含所有基礎人格與 E.G.O 的常駐提取卡池。',
+        nameEn: 'Standard Extraction — Limbus Company',
+        descriptionEn: 'The standard banner includes all base identities and E.G.O.',
         cost: { single: 0, ten: 0 },
         rateUp: { S3: [], EGOS: [], S2: [] }
     }

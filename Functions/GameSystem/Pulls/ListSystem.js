@@ -15,6 +15,12 @@ const {
 const PullSystem = require('./PullSystem.js');
 const identitiesData = require('./identitiesData.js');
 const { getLanguage } = require('../LanguageSystem.js');
+const ENGLISH_IDENTITY_NAMES = new Map(
+    Object.values(identitiesData.registry || {})
+        .flat()
+        .filter(identity => identity?.name && identity?.nameEn)
+        .map(identity => [identity.name, identity.nameEn])
+);
 
 const TIER_ORDER = [
     'COLOR_FIXER', 'ABN_ANGELA', 'ABN_ALEPH', 'ABN_WAW', 'ABN_HE',
@@ -66,6 +72,9 @@ const BUTTON_LABELS_EN = {
 };
 
 function displayName(name, language) {
+    if (language === 'en' && ENGLISH_IDENTITY_NAMES.has(name)) {
+        return ENGLISH_IDENTITY_NAMES.get(name);
+    }
     const parts = String(name || '').split(' / ');
     return language === 'en' && parts.length > 1 ? parts[parts.length - 1] : parts[0];
 }
@@ -134,11 +143,13 @@ function buildRarityRows(active, language, disabled = false) {
 }
 
 function render(entries, filter, query, page, timerUsed = false, disabled = false, expiresAt = Date.now() + 60000, language = 'en') {
+    const en = language === 'en';
+    const tierLabels = en ? TIER_LABELS_EN : TIER_LABELS;
     const filtered = entries.filter(item =>
         (filter === 'ALL' || item.tier === filter) &&
         (!query ||
-            item.name.toLowerCase().includes(query.toLowerCase()) ||
-            TIER_LABELS[item.tier].toLowerCase().includes(query.toLowerCase()))
+            displayName(item.name, language).toLowerCase().includes(query.toLowerCase()) ||
+            tierLabels[item.tier].toLowerCase().includes(query.toLowerCase()))
     );
 
     const perPage = 12;
@@ -154,13 +165,13 @@ function render(entries, filter, query, page, timerUsed = false, disabled = fals
             ' (' + formatRate(item.rate) + ')' +
             (item.isUp ? ' **[UP!]**' : '')
         ).join('\n')
-        : '沒有符合的資料。';
+        : (en ? 'No matching entries.' : '沒有符合的資料。');
 
     const title = query
-        ? (language === 'en' ? '🔎 Rate Search: ' : '🔎 機率查詢：') + query
+        ? (en ? '🔎 Rate Search: ' : '🔎 機率查詢：') + query
         : (filter === 'ALL'
-            ? (language === 'en' ? '📋 Full Extraction Rates' : '📋 完整提取機率清單')
-            : (language === 'en' ? TIER_LABELS_EN[filter] + ' Rate List' : TIER_LABELS[filter] + ' 機率清單'));
+            ? (en ? '📋 Full Extraction Rates' : '📋 完整提取機率清單')
+            : (en ? TIER_LABELS_EN[filter] + ' Rate List' : TIER_LABELS[filter] + ' 機率清單'));
 
     const embed = new EmbedBuilder()
         .setTitle(title)
@@ -201,11 +212,12 @@ async function getReplyMessage(message, payload) {
 }
 
 async function handleList(client, message) {
+    const language = getLanguage(message.author.id);
+    const en = language === 'en';
     try {
         const entries = buildEntries();
-        if (!entries.length) return message.reply('❌ 目前提取池沒有可顯示的資料。');
+        if (!entries.length) return message.reply(en ? '❌ There are no pull rates to display.' : '❌ 目前提取池沒有可顯示的資料。');
 
-        const language = getLanguage(message.author.id);
         let filter = 'ALL';
         let query = '';
         let timerUsed = false;
@@ -231,11 +243,11 @@ async function handleList(client, message) {
 
         collector.on('collect', async interaction => {
             if (interaction.user.id !== message.author.id) {
-                return interaction.reply({ content: '❌ 這不是你的機率清單。', ephemeral: true });
+                return interaction.reply({ content: en ? '❌ This rate list belongs to another user.' : '❌ 這不是你的機率清單。', ephemeral: true });
             }
 
             if (interaction.customId === 'list:extend') {
-                if (timerUsed) return interaction.reply({ content: '⏱️ 這個清單的延長按鈕只能使用一次。', ephemeral: true });
+                if (timerUsed) return interaction.reply({ content: en ? '⏱️ You can extend this list only once.' : '⏱️ 這個清單的延長按鈕只能使用一次。', ephemeral: true });
                 timerUsed = true;
                 expiresAt = startedAt + 120000;
                 const remaining = Math.max(1000, expiresAt - Date.now());
@@ -248,15 +260,15 @@ async function handleList(client, message) {
             if (interaction.customId === 'list:search') {
                 const modal = new ModalBuilder()
                     .setCustomId('list:search-modal')
-                    .setTitle('查詢人格 / E.G.O 名稱')
+                    .setTitle(en ? 'Search Identity / E.G.O.' : '查詢人格 / E.G.O 名稱')
                     .addComponents(new ActionRowBuilder().addComponents(
                         new TextInputBuilder()
                             .setCustomId('list:query')
-                            .setLabel('輸入名稱或關鍵字')
+                            .setLabel(en ? 'Name or keyword' : '輸入名稱或關鍵字')
                             .setStyle(TextInputStyle.Short)
                             .setRequired(false)
                             .setMaxLength(80)
-                            .setPlaceholder('例如：Don、E.G.O、ALEPH')
+                            .setPlaceholder(en ? 'For example: Don, E.G.O., ALEPH' : '例如：Don、E.G.O、ALEPH')
                     ));
                 await interaction.showModal(modal);
                 try {
@@ -296,7 +308,7 @@ async function handleList(client, message) {
         });
     } catch (err) {
         console.error('[ListSystem] handleList error:', err);
-        return message.reply('❌ An error occurred while reading the list, please try again later.');
+        return message.reply(en ? '❌ Could not load the rate list. Please try again later.' : '❌ 讀取機率清單時發生錯誤，請稍後再試。');
     }
 }
 

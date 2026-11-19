@@ -2,6 +2,13 @@
 
 const { EmbedBuilder } = require('discord.js');
 const identitiesData = require('./identitiesData.js');
+const { getLanguage } = require('../LanguageSystem.js');
+const ENGLISH_IDENTITY_NAMES = new Map(
+    Object.values(identitiesData.registry || {})
+        .flat()
+        .filter(identity => identity?.name && identity?.nameEn)
+        .map(identity => [identity.name, identity.nameEn])
+);
 
 // ─────────────────────────────────────────────
 // 玩家資料系統
@@ -478,20 +485,53 @@ function drawOnce(
 // 顯示抽卡結果
 // ─────────────────────────────────────────────
 
-function formatItemDisplay(draw) {
+const TIER_LABELS_EN = {
+    COLOR_FIXER: 'Color Fixer',
+    ABN_ANGELA: 'Abnormality ANGELA',
+    ABN_ALEPH: 'Abnormality ALEPH',
+    ABN_WAW: 'Abnormality WAW',
+    ABN_HE: 'Abnormality HE',
+    ABN_TETH: 'Abnormality TETH',
+    ABN_ZAYIN: 'Abnormality ZAYIN',
+    SPECIAL: 'Special',
+    S4: '★★★★',
+    EGOS: 'E.G.O',
+    S3: '★★★',
+    S2: '★★',
+    S1: '★',
+};
+
+function displayIdentityName(name, language) {
+    if (language === 'en' && ENGLISH_IDENTITY_NAMES.has(name)) {
+        return ENGLISH_IDENTITY_NAMES.get(name);
+    }
+    const parts = String(name || '').split(' / ');
+    if (parts.length < 2) return String(name || '');
+    return language === 'en' ? parts.slice(1).join(' / ').trim() : parts[0].trim();
+}
+
+function formatItemDisplay(draw, language = 'zh') {
+    const label = language === 'en'
+        ? (TIER_LABELS_EN[draw.tier] || draw.label)
+        : draw.label;
+    const name = displayIdentityName(draw.name, language);
+    const duplicateReward = language === 'en'
+        ? `Self Shards ×${draw.shardValue}`
+        : `自我碎片 ×${draw.shardValue}`;
+
     if (draw.isDuplicate) {
         return (
             `~~${draw.emoji} ` +
-            `[${draw.label}] ` +
-            `${draw.name}~~ ` +
-            `➡️ **自我碎片 ×${draw.shardValue}**`
+            `[${label}] ` +
+            `${name}~~ ` +
+            `➡️ **${duplicateReward}**`
         );
     }
 
     return (
         `${draw.emoji} ` +
-        `[${draw.label}] ` +
-        `${draw.name}`
+        `[${label}] ` +
+        `${name}`
     );
 }
 
@@ -521,6 +561,9 @@ async function executePull(
             '無法取得玩家 ID。'
         );
     }
+
+    const language = getLanguage(user.id);
+    const en = language === 'en';
 
     if (
         ![1, 10].includes(
@@ -614,11 +657,9 @@ async function executePull(
     if (
         lightSeedsCount < cost
     ) {
-        const errorMessage =
-            `❌ **LightSeeds 不足！**\n\n` +
-            `本次提取需要：**${cost} LightSeeds**\n` +
-            `目前持有：**${lightSeedsCount} LightSeeds**\n` +
-            `還需要：**${cost - lightSeedsCount} LightSeeds**`;
+        const errorMessage = en
+            ? `❌ **Not enough LightSeeds.**\n\nCost: **${cost} LightSeeds**\nBalance: **${lightSeedsCount} LightSeeds**\nShort by: **${cost - lightSeedsCount} LightSeeds**`
+            : `❌ **LightSeeds 不足！**\n\n本次提取需要：**${cost} LightSeeds**\n目前持有：**${lightSeedsCount} LightSeeds**\n還需要：**${cost - lightSeedsCount} LightSeeds**`;
 
         if (
             interaction?.deferred ||
@@ -743,7 +784,7 @@ async function executePull(
             (draw, index) =>
                 `${draw.emoji} ` +
                 `\`${index + 1}.\` ` +
-                formatItemDisplay(draw)
+                formatItemDisplay(draw, language)
         );
 
     // ─────────────────────────────────
@@ -819,7 +860,7 @@ async function executePull(
 
     if (abnCount) {
         summaryParts.push(
-            `⚠️ 異想體 ×${abnCount}`
+            en ? `⚠️ Abnormalities ×${abnCount}` : `⚠️ 異想體 ×${abnCount}`
         );
     }
 
@@ -837,7 +878,7 @@ async function executePull(
 
     if (duplicateCount) {
         summaryParts.push(
-            `♻️ 重複 ×${duplicateCount}`
+            en ? `♻️ Duplicates ×${duplicateCount}` : `♻️ 重複 ×${duplicateCount}`
         );
     }
 
@@ -856,12 +897,13 @@ async function executePull(
             })
             .setTitle(
                 `🚂 ${
-                    banner.name ||
-                    'LightSeeds 提取'
+                    en
+                        ? (banner.nameEn || displayIdentityName(banner.name, language) || 'LightSeeds Pulls')
+                        : (banner.name || 'LightSeeds 提取')
                 } — ${
                     pullCount === 1
-                        ? '單抽'
-                        : '十連'
+                        ? (en ? 'Single Pull' : '單抽')
+                        : (en ? '10 Pulls' : '十連')
                 }`
             )
             .setColor(
@@ -873,8 +915,12 @@ async function executePull(
             .setFooter({
                 text:
                     summaryParts.length
-                        ? `收穫：${summaryParts.join('、')} | 消耗 ${cost} LightSeeds`
-                        : `消耗 ${cost} LightSeeds | 「每一次提取，都是向平行世界借調可能性。」`,
+                        ? (en
+                            ? `Obtained: ${summaryParts.join(', ')} | Spent ${cost} LightSeeds`
+                            : `收穫：${summaryParts.join('、')} | 消耗 ${cost} LightSeeds`)
+                        : (en
+                            ? `Spent ${cost} LightSeeds | “Every pull borrows a possibility from a parallel world.”`
+                            : `消耗 ${cost} LightSeeds | 「每一次提取，都是向平行世界借調可能性。」`),
             })
             .setTimestamp();
 
@@ -909,6 +955,8 @@ async function executePull(
 
 module.exports = {
     executePull,
+    formatItemDisplay,
+    displayIdentityName,
     BASE_WEIGHTS,
     ABN_WEIGHTS,
     TIER_CONFIGS,
