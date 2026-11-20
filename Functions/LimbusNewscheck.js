@@ -12,6 +12,7 @@
 //   8. Steam 抓 10 則（靠 recentIds 去重），降低漏新聞機率
 //   9. 移除已停用的 X 直抓解析程式碼
 //  10. lastFetchedId 一律取最大 snowflake，避免排序不一致造成漏抓
+//  11. 縮短延遲：Steam/YouTube 60s、Twitter 180s，快取與節點冷卻同步調短
 //
 // 可直接覆蓋 Functions/LimbusNewscheck.js
 
@@ -35,10 +36,11 @@ const PING_ROLE = process.env.PING_ROLE_MENTION || '<@&1406984068725211177>';
 const STEAM_APP_ID = '1973530';
 
 // 各來源獨立節奏
-const CHECK_INTERVAL = Number(process.env.CHECK_INTERVAL_MS || 2 * 60 * 1000);
-const TWITTER_CHECK_INTERVAL = Number(process.env.TWITTER_CHECK_INTERVAL_MS || 5 * 60 * 1000);
-const TWITTER_MIN_FETCH_GAP_MS = Number(process.env.TWITTER_MIN_FETCH_GAP_MS || 4 * 60 * 1000);
-const TWITTER_CACHE_TTL_MS = Number(process.env.TWITTER_CACHE_TTL_MS || 10 * 60 * 1000);
+const CHECK_INTERVAL = Number(process.env.CHECK_INTERVAL_MS || 60 * 1000);
+const TWITTER_CHECK_INTERVAL = Number(process.env.TWITTER_CHECK_INTERVAL_MS || 3 * 60 * 1000);
+// 必須小於輪詢間隔，否則每兩輪會被跳過一次，實際延遲直接翻倍
+const TWITTER_MIN_FETCH_GAP_MS = Number(process.env.TWITTER_MIN_FETCH_GAP_MS || 2 * 60 * 1000);
+const TWITTER_CACHE_TTL_MS = Number(process.env.TWITTER_CACHE_TTL_MS || 4 * 60 * 1000);
 
 const STEAM_NEWS_COUNT_AUTO = Number(process.env.STEAM_NEWS_COUNT_AUTO || 10);
 const STEAM_NEWS_COUNT_MANUAL = Number(process.env.STEAM_NEWS_COUNT_MANUAL || 5);
@@ -54,7 +56,7 @@ const YOUTUBE_HANDLE = (process.env.YOUTUBE_HANDLE || 'ProjectMoonOfficial').rep
 const YOUTUBE_PAGE_URL = process.env.YOUTUBE_PAGE_URL || `https://www.youtube.com/@${YOUTUBE_HANDLE}`;
 
 const TIMELINE_ENDPOINTS = (process.env.X_TIMELINE_ENDPOINTS ||
-    'https://nitter.meowing.monster/{user}/rss,https://shitter.thepixora.com/{user}/rss,https://nitter.netbub.com/{user}/rss')
+    'https://nitter.meowing.monster/{user}/rss,https://shitter.thepixora.com/{user}/rss,https://nitter.netbub.com/{user}/rss,https://xcancel.com/{user}/rss,https://nitter.poast.org/{user}/rss')
     .split(',')
     .map(s => s.trim().replace(/\/$/, ''))
     .filter(Boolean);
@@ -64,8 +66,8 @@ const DATA_DIR = process.env.PLAYER_DATA_DIR || path.join(process.cwd(), 'data')
 const STATE_FILE = path.join(DATA_DIR, 'newscheck-state.json');
 const RECENT_TTL_MS = 30 * 60 * 1000;
 
-const TWITTER_NODE_MIN_COOLDOWN_MS = Number(process.env.TWITTER_NODE_MIN_COOLDOWN_MS || 2 * 60 * 1000);
-const TWITTER_NODE_MAX_COOLDOWN_MS = Number(process.env.TWITTER_NODE_MAX_COOLDOWN_MS || 30 * 60 * 1000);
+const TWITTER_NODE_MIN_COOLDOWN_MS = Number(process.env.TWITTER_NODE_MIN_COOLDOWN_MS || 30 * 1000);
+const TWITTER_NODE_MAX_COOLDOWN_MS = Number(process.env.TWITTER_NODE_MAX_COOLDOWN_MS || 5 * 60 * 1000);
 
 let loopTimer = null;
 let twitterTimer = null;
