@@ -238,7 +238,7 @@ async function handleSlashCommands(client, interaction) {
             return interaction.reply({ content: `✅ 已加入語音頻道：**${voiceChannel.name}**` });
         }
 
-        if (commandName === 'play') return MusicSystem.handlePlay(client, interaction);
+        if (commandName === 'play') return MusicSystem.handlePlay(interaction);
 
         if (commandName === 'leave') {
             const connection = getVoiceConnection(interaction.guild.id);
