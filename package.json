@@ -14,9 +14,9 @@
     "@discordjs/opus": "^0.10.0",
     "ffmpeg-static": "^5.2.0",
     "libsodium-wrappers": "^0.7.13",
-    "play-dl": "^1.9.7"
+    "play-dl": "^1.9.7",
     "@distube/ytdl-core": "^5.2.1",
-    "youtube-sr": "^4.3.12",
+    "youtube-sr": "^4.3.12"
   },
   "overrides": {
     "tar": "^7.5.22"
